@@ -1,31 +1,82 @@
-Ecco una panoramica dell’albero della cartella **“RCC_WSIs”** su Google Drive e dei formati presenti, con particolare attenzione ai file Excel.
+# RCC_WSIs Dataset — Structure & Mapping Guide
 
-### Struttura della cartella principale
+## 1. Overview
 
-| Sottocartella/file     | Tipo di elemento | Contenuto/Osservazioni                                                                                                                                                                                                                                             |
-| ---------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Annotations_chromo** | Cartella         | Contiene immagini delle sezioni (estensione **.svs** e **.tif**) numerate da 1.svs a 13.tif.  L’unico file non‑immagine è l’Excel **CHROMO_patients_correspondence.xlsx** che, presumibilmente, mappa i codici delle diapositive ai pazienti del gruppo “CHROMO”.  |
-| **Annotations_onco**   | Cartella         | Contiene serie di immagini (molti file .svs e .tif).  Dalla pagina sorgente emerge la presenza di **ONCO_patients_correspondence.xlsx** (formato *application/vnd.openxmlformats‑officedocument.spreadsheetml.sheet*), l’analogo per i pazienti del gruppo “ONCO”. |
-| **ccRCC**              | Cartella         | Raccolta di immagini di istologia; il sorgente non riporta file .xlsx ma molti file **.svs** o **.tif**, quindi è una collezione di diapositive digitali.                                                                                                          |
-| **CHROMO**             | Cartella         | Contiene numerose diapositive **.svs** (es. *HP20.2506_1338.svs* e analoghi).  Non sono presenti file Excel.                                                                                                                                                       |
-| **ONCOCYTOMA**         | Cartella         | Non accessibile tramite il browser testuale; in base alla struttura del dataset è presumibilmente simile a ccRCC/CHROMO (immagini .svs).                                                                                                                           |
-| **pRCC**               | Cartella         | Comprende una sottocartella **pRCC_xml** e numerosi file **.scn** (diapositive digitali, es. *HP17.7980.A2.pRCC.scn*, *HP18.11474.A6.pRCC.scn* ecc.).  È presente anche l’Excel **pRCC.xlsx** che probabilmente contiene la corrispondenza tra slide e pazienti.   |
-| **pre**                | Cartella         | Contiene due cartelle denominate **ccRCC** e **pRCC**; sembra raccogliere versioni pre‑elaborate delle diapositive (non sono emersi file Excel).                                                                                                                   |
-| **README**             | Cartella         | Comprende vari tipi di file: un archivio Python pickled (**H19‑754‑IHC‑ccRCC_crop_obj.pickle**), un’immagine **.tif**, un file **Readme.html**, un notebook **Readme.ipynb** e uno script **wsi_manager.py**.  Serve da materiale di supporto al dataset.          |
-| **AAA‑README**         | Google Docs      | È un documento Google (file **.gdoc**) utilizzabile come introduzione generale; il sorgente indica il tipo *application/vnd.google‑apps.document* ma non ne permette l’esportazione diretta.                                                                       |
+Il dataset **RCC_WSIs** è una collezione di **Whole-Slide Images (WSI)** digitali provenienti da campioni istologici di tumori renali, con le rispettive **annotazioni XML** e tabelle Excel di corrispondenza tra *slide* e *pazienti*.
+Serve per sviluppare sistemi di segmentazione, classificazione o correlazione tra regioni istologiche e diagnosi.
 
-### Approfondimento sui file Excel
+---
 
-1. **CHROMO_patients_correspondence.xlsx** – localizzato in **Annotations_chromo**; è un file Excel (tipo *Microsoft Excel*) e dovrebbe contenere la tabella di corrispondenza tra le diapositive “CHROMO” e i rispettivi pazienti/campioni.
-2. **ONCO_patients_correspondence.xlsx** – presente in **Annotations_onco**; analogo del precedente per il gruppo “ONCO”.
-3. **pRCC.xlsx** – trovato nella cartella **pRCC**; presumibilmente contiene informazioni tabellari (paziente, codici slide, eventuali annotazioni) relative alle diapositive pRCC.
+## 2. Directory Structure
 
-### Altri formati degni di nota
+| Folder               | Content Type                        | Description                                                           |
+| -------------------- | ----------------------------------- | --------------------------------------------------------------------- |
+| `Annotations_chromo e CHROMO` | `.svs`, `.tif`, `.xlsx`             | WSI cromofobi + file `CHROMO_patients_correspondence.xlsx`            |
+| `Annotations_onco e ONCHO`   | `.svs`, `.tif`, `.xlsx`             | WSI oncocitoma + file `ONCO_patients_correspondence.xlsx`             |
+| `ccRCC e pre/ccRCC`  | `.svs`, `.tif`                      | WSI del carcinoma a cellule chiare                                    |
+| `pRCC e pre/pRCC`    | `.scn`, `.xml`, `.xlsx`             | WSI del carcinoma papillare (pRCC)                                    |
+| `pRCC/pRCC_xml e pre/pRCC/pRCC_xml`| `.xml`                | Annotazioni strutturate per le slide pRCC                             |
+| `ccRCC/ccRCC_xml e pre/ccRCC/ccRCC_xml`          | `.xml`  | Annotazioni strutturate per le slide ccRCC                            |
 
-* **.svs**, **.tif**, **.scn** – file di immagini di microscopia a tutta vetrata (Whole Slide Images) in diversi formati.  Sono la parte predominante del drive.
-* **.xml** – nella sottocartella **pRCC_xml**, il codice sorgente mostra file come *HP17.7980.A2.pRCC.xml* e *HP17.7980.B.pRCC.xml*; probabilmente sono annotazioni in formato XML per ciascuna diapositiva.
-* **.pickle**, **.html**, **.ipynb**, **.py** – file presenti nella cartella **README** per documentazione e codice di supporto.
+Quindi abbiamo 4 classi tumorali: **CHROMO**, **ONCO**, **ccRCC** e **pRCC**.
+Solo negli xml abbiamo le annotazioni di aree non tumorali.
 
-### Conclusione
 
-Il drive *RCC_WSIs* è una raccolta di Whole‑Slide Images di vari tumori renali (ccRCC, pRCC, oncocitoma, cromofobo).  I file Excel (tre in totale) sono collocati nelle cartelle **Annotations_chromo**, **Annotations_onco** e **pRCC** e servono come tabelle di riferimento tra i pazienti e i nomi delle diapositive.  Non è possibile scaricarli direttamente dal browser testuale, ma la loro presenza e tipo sono confermati dal sorgente HTML.
+---
+
+## 3. Excel Correspondence Tables
+
+### Common Structure
+
+Tutti gli Excel hanno lo stesso schema:
+
+| ID (slide range) | Patient_ID |
+| ---------------- | ---------- |
+| 1-3              | HPXXXXXXX  |
+
+#### CHROMO_patients_correspondence.xlsx
+
+| ID    | Patient_ID |
+| ----- | ---------- |
+| 1-2   | HP17008718 |
+| 3-7   | HP20002300 |
+| 8     | HP18014084 |
+| 9-11  | HP19012316 |
+| 12-13 | HP20.2506  |
+
+#### ONCO_patients_correspondence.xlsx
+
+| ID    | Patient_ID |
+| ----- | ---------- |
+| 1-3   | HP20002450 |
+| 4-7   | HP20001530 |
+| 8-13  | HP18005453 |
+| 14-21 | HP20.5602  |
+| 22-25 | HP18090209 |
+
+
+## 4. Annotation Files (`*.xml`)
+
+Le annotazioni XML, prodotte con software come Aperio o QuPath, descrivono **regioni d’interesse (ROI)** su ciascuna slide.
+Struttura tipica:
+
+```xml
+<Annotations>
+  <Annotation Id="1" Name="tumor" ReadOnly="0">
+    <Regions>
+      <Region Id="1" Type="0" Text="Tumor region" GeoShape="Points">
+        <Vertices>
+          <Vertex X="37279.31" Y="4662.18"/>
+          <Vertex X="37319.55" Y="4588.89"/>
+          ...
+        </Vertices>
+      </Region>
+    </Regions>
+  </Annotation>
+  <Annotation Id="2" Name="non_tumor">
+    <Regions>...</Regions>
+  </Annotation>
+</Annotations>
+```
+
+---
