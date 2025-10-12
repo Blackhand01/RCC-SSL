@@ -1,0 +1,184 @@
+# ---------------------------
+# Python / packaging
+# ---------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.build/
+build/
+dist/
+.eggs/
+*.egg-info/
+*.egg
+*.so
+
+# Env locali
+.venv/
+venv/
+env/
+ENV/
+.python-version
+pip-wheel-metadata/
+
+# Notebook
+.ipynb_checkpoints/
+profile_default/
+# (facoltativo) output temporanei di notebook
+*.nbconvert.ipynb
+
+# ---------------------------
+# IDE / OS
+# ---------------------------
+.vscode/
+*.code-workspace
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# ---------------------------
+# Logging / runtime
+# ---------------------------
+*.log
+logs/
+# SLURM
+slurm-*.out
+slurm-*.err
+# Snakemake runtime
+.snakemake/
+.snakemake_timestamp
+# Torch/Lightning
+lightning_logs/
+# Generic runs/outputs
+runs/
+outputs/
+
+# ---------------------------
+# Dati pesanti / artefatti
+# ---------------------------
+# ATTENZIONE: manteniamo versionati solo manifest e config,
+# non i dati o gli artefatti voluminosi.
+data/
+datasets/
+raw/
+external/
+interim/
+processed/
+# BeeGFS scratch mount (se symlink local)
+beegfs-scratch/
+scratch/
+.tmp/
+tmp/
+
+# WebDataset shards
+wds/
+*.tar
+*.tar.gz
+*.tar.zst
+
+# Checkpoint / pesi / embedding
+ckpt/
+checkpoints/
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.npz
+*.npy
+*.safetensors
+
+# MLflow / Optuna
+mlruns/
+mlartifacts/
+optuna.db
+optuna_studies/
+study_*/
+
+# Report generati
+reports/**/*.png
+reports/**/*.pdf
+reports/**/*.html
+reports/**/*.csv
+reports/**/*.json
+# ma tieni README/template
+!reports/
+!reports/**/README.md
+!reports/**/TEMPLATE*.md
+
+# Manifests: TIENI versionati!
+# (prima ignoriamo tutto sotto manifests, poi togliamo l'ignore)
+manifests/**
+!manifests/
+!manifests/*.csv
+!manifests/**/*.csv
+!manifests/*.yaml
+!manifests/**/*.yaml
+!manifests/*.yml
+!manifests/**/*.yml
+!manifests/README.md
+
+# Config (tienile)
+conf/**
+!conf/
+!conf/**/*
+
+# Source code (tienilo)
+src/**
+!src/
+!src/**/*
+
+# ---------------------------
+# Container / cache
+# ---------------------------
+# Apptainer/Singularity immagini
+*.sif
+*.simg
+*.img
+# cache locali
+.singularity/
+.apptainer/
+
+# Docker (se usato localmente)
+docker/*.tar
+docker/*.img
+
+# ---------------------------
+# Sicurezza / segreti
+# ---------------------------
+.env
+*.env
+*.pem
+*.crt
+*.key
+*.secret
+*.token
+
+# ---------------------------
+# Varie utili
+# ---------------------------
+# File di lock che non vuoi versionare
+poetry.lock
+Pipfile.lock
+# (se vuoi invece versionarli, rimuovi le due righe sopra)
+
+# Evita file “keep” generici, ma consenti i nostri .gitkeep
+*.keep
+!.gitkeep
+.cache/
+.dotnet/
+.local/
+.ssh/
+.venvs/
+.vscode-server/
+.bash_history/
+.bash_logout
+.bash_profile
+.bashrc
+.
+.lesshst
+.wget-hsts
+.bash_history
+.bashrc.bak.2025-10-09-171249
+sync_gdrive_836083.err
+.config/rclone/rclone.conf
+.config/rclone/rclone.conf.bak
