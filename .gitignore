@@ -40,7 +40,6 @@ Thumbs.db
 # Logging / runtime
 # ---------------------------
 *.log
-logs/
 # SLURM
 slurm-*.out
 slurm-*.err
@@ -182,3 +181,12 @@ Pipfile.lock
 sync_gdrive_836083.err
 .config/rclone/rclone.conf
 .config/rclone/rclone.conf.bak
+.gitconfig
+.micromamba
+.mamba
+.codex
+.conda
+.condarc
+rcc-ssrl/scripts
+rcc-ssrl/logs/
+rcc-ssrl/src/training/logs/
