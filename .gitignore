@@ -15,11 +15,10 @@ dist/
 # Env locali
 .venv/
 venv/
-env/
 ENV/
 .python-version
 pip-wheel-metadata/
-
+docs/
 # Notebook
 .ipynb_checkpoints/
 profile_default/
@@ -189,4 +188,3 @@ sync_gdrive_836083.err
 .condarc
 rcc-ssrl/scripts
 rcc-ssrl/logs/
-rcc-ssrl/src/training/logs/

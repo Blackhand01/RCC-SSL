@@ -1,0 +1,96 @@
+GPU 0: NVIDIA A40 (UUID: GPU-f0f10b2a-243e-fab6-d243-62c49f5286e0)
+Torch 2.5.1 CUDA True NGPU 1
+[paths] project_root=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project outputs_root=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns
+[paths] webdataset.rcc_v2: train=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/train val=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/val test=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/test
+[paths] dataset_key=rcc_v2 -> train=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/train val=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/val test=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/test
+[RUN][moco_v3] device=cuda
+[moco_v3][step 2/5] ETA=00:05 dt/step=4.00s loss_info_nce=4.2384 loss_total=4.2384
+[moco_v3][step 4/5] ETA=00:01 dt/step=0.15s loss_info_nce=4.2110 loss_total=4.2110
+[RUN][moco_v3→PROBE] device=cuda
+[paths] dataset_key=rcc_v2 -> train=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/train val=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/val test=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/test
+[RUN][ibot] device=cuda
+[ibot][step 2/5] ETA=00:01 dt/step=1.31s loss_cls=3210.5346 loss_tok=7144.1980 loss_total=10354.7324
+[ibot][step 4/5] ETA=00:00 dt/step=1.36s loss_cls=3016.9927 loss_tok=7140.3871 loss_total=10157.3796
+[RUN][ibot→PROBE] device=cuda
+[paths] dataset_key=rcc_v2 -> train=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/train val=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/val test=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/test
+[RUN][i_jepa] device=cuda
+[i_jepa][step 2/5] ETA=00:01 dt/step=0.90s loss_ijepa=1.3332 loss_total=1.3332
+[i_jepa][step 4/5] ETA=00:00 dt/step=0.08s loss_ijepa=1.1740 loss_total=1.1740
+[RUN][i_jepa→PROBE] device=cuda
+[paths] dataset_key=rcc_v2 -> train=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/train val=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/val test=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/test
+[RUN][dino_v3] device=cuda
+[dino_v3][step 2/5] ETA=00:01 dt/step=1.08s loss_global=25.9127 loss_gram=0.0084 loss_total=25.9211
+[dino_v3][step 4/5] ETA=00:00 dt/step=2.03s loss_global=24.8738 loss_gram=0.0092 loss_total=24.8830
+[RUN][dino_v3→PROBE] device=cuda
+[paths] dataset_key=rcc_v2 -> train=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/train val=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/val test=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/test
+[RUN][resnet50_scratch] device=cuda
+[resnet50_scratch][train] [1/32] ETA=00:00:51 loss=1.7988 acc=0.2500 dt/step=1.44s
+[resnet50_scratch][train] [2/32] ETA=00:00:25 loss=1.5464 acc=0.3750 dt/step=0.01s
+[resnet50_scratch][train] [4/32] ETA=00:00:11 loss=1.5613 acc=0.2500 dt/step=0.01s
+[resnet50_scratch][train] [6/32] ETA=00:00:10 loss=1.8441 acc=0.0000 dt/step=0.02s
+[resnet50_scratch][train] [8/32] ETA=00:00:10 loss=2.8374 acc=0.3750 dt/step=0.02s
+[resnet50_scratch][train] [10/32] ETA=00:00:09 loss=2.2074 acc=0.2500 dt/step=0.01s
+[resnet50_scratch][train] [12/32] ETA=00:00:09 loss=1.9687 acc=0.2500 dt/step=0.02s
+[resnet50_scratch][train] [14/32] ETA=00:00:09 loss=1.5579 acc=0.6250 dt/step=0.02s
+[resnet50_scratch][train] [16/32] ETA=00:00:09 loss=1.6453 acc=0.3750 dt/step=0.02s
+[resnet50_scratch][train] [18/32] ETA=00:00:08 loss=1.7311 acc=0.1250 dt/step=0.02s
+[resnet50_scratch][train] [20/32] ETA=00:00:08 loss=1.9913 acc=0.3750 dt/step=0.02s
+[resnet50_scratch][train] [22/32] ETA=00:00:07 loss=1.2103 acc=0.5000 dt/step=0.02s
+[resnet50_scratch][train] [24/32] ETA=00:00:06 loss=1.2118 acc=0.6250 dt/step=0.02s
+[resnet50_scratch][train] [26/32] ETA=00:00:04 loss=1.7780 acc=0.3750 dt/step=0.02s
+[resnet50_scratch][train] [28/32] ETA=00:00:03 loss=1.0382 acc=0.6250 dt/step=0.02s
+[resnet50_scratch][train] [30/32] ETA=00:00:01 loss=1.1573 acc=0.2500 dt/step=0.02s
+[resnet50_scratch][train] [32/32] ETA=00:00:00 loss=2.0120 acc=0.3750 dt/step=0.02s
+[resnet50_scratch][val] [1/32] ETA=00:00:07 loss=10.1289 acc=0.0000 dt/step=0.01s
+[resnet50_scratch][val] [2/32] ETA=00:00:05 loss=0.0112 acc=1.0000 dt/step=0.00s
+[resnet50_scratch][val] [4/32] ETA=00:00:06 loss=0.0093 acc=1.0000 dt/step=0.00s
+[resnet50_scratch][val] [6/32] ETA=00:00:07 loss=0.0131 acc=1.0000 dt/step=0.00s
+[resnet50_scratch][val] [8/32] ETA=00:00:07 loss=2.4510 acc=0.7500 dt/step=0.00s
+[resnet50_scratch][val] [10/32] ETA=00:00:08 loss=1.2661 acc=0.8750 dt/step=0.00s
+[resnet50_scratch][val] [12/32] ETA=00:00:08 loss=6.1098 acc=0.3750 dt/step=0.00s
+[resnet50_scratch][val] [14/32] ETA=00:00:08 loss=3.5907 acc=0.6250 dt/step=0.00s
+[resnet50_scratch][val] [16/32] ETA=00:00:08 loss=2.4338 acc=0.7500 dt/step=0.00s
+[resnet50_scratch][val] [18/32] ETA=00:00:08 loss=6.1630 acc=0.3750 dt/step=0.00s
+[resnet50_scratch][val] [20/32] ETA=00:00:07 loss=6.0506 acc=0.3750 dt/step=0.00s
+[resnet50_scratch][val] [22/32] ETA=00:00:07 loss=6.0608 acc=0.3750 dt/step=0.00s
+[resnet50_scratch][val] [24/32] ETA=00:00:06 loss=7.2597 acc=0.2500 dt/step=0.00s
+[resnet50_scratch][val] [26/32] ETA=00:00:04 loss=5.1221 acc=0.5000 dt/step=0.00s
+[resnet50_scratch][val] [28/32] ETA=00:00:03 loss=10.0391 acc=0.0000 dt/step=0.00s
+[resnet50_scratch][val] [30/32] ETA=00:00:01 loss=8.3486 acc=0.1250 dt/step=0.00s
+[resnet50_scratch][val] [32/32] ETA=00:00:00 loss=8.7191 acc=0.1250 dt/step=0.00s
+[paths] dataset_key=rcc_v2 -> train=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/train val=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/val test=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/test
+[RUN][resnet50_transfer] device=cuda
+[resnet50_transfer][train] [1/32] ETA=00:00:07 loss=1.5977 acc=0.2500 dt/step=0.01s
+[resnet50_transfer][train] [2/32] ETA=00:00:05 loss=1.5977 acc=0.2500 dt/step=0.01s
+[resnet50_transfer][train] [4/32] ETA=00:00:06 loss=1.6290 acc=0.2500 dt/step=0.01s
+[resnet50_transfer][train] [6/32] ETA=00:00:07 loss=1.6136 acc=0.1250 dt/step=0.01s
+[resnet50_transfer][train] [8/32] ETA=00:00:08 loss=1.5732 acc=0.0000 dt/step=0.01s
+[resnet50_transfer][train] [10/32] ETA=00:00:09 loss=1.5483 acc=0.3750 dt/step=0.01s
+[resnet50_transfer][train] [12/32] ETA=00:00:09 loss=1.4326 acc=0.5000 dt/step=0.01s
+[resnet50_transfer][train] [14/32] ETA=00:00:09 loss=1.4255 acc=0.6250 dt/step=0.01s
+[resnet50_transfer][train] [16/32] ETA=00:00:09 loss=1.3767 acc=0.5000 dt/step=0.01s
+[resnet50_transfer][train] [18/32] ETA=00:00:09 loss=1.5354 acc=0.3750 dt/step=0.01s
+[resnet50_transfer][train] [20/32] ETA=00:00:08 loss=1.4064 acc=0.3750 dt/step=0.01s
+[resnet50_transfer][train] [22/32] ETA=00:00:08 loss=1.3925 acc=0.5000 dt/step=0.01s
+[resnet50_transfer][train] [24/32] ETA=00:00:06 loss=1.3582 acc=0.3750 dt/step=0.01s
+[resnet50_transfer][train] [26/32] ETA=00:00:05 loss=1.3467 acc=0.6250 dt/step=0.01s
+[resnet50_transfer][train] [28/32] ETA=00:00:03 loss=1.1461 acc=0.8750 dt/step=0.01s
+[resnet50_transfer][train] [30/32] ETA=00:00:02 loss=1.1447 acc=0.7500 dt/step=0.01s
+[resnet50_transfer][train] [32/32] ETA=00:00:00 loss=1.3396 acc=0.5000 dt/step=0.01s
+[resnet50_transfer][val] [1/32] ETA=00:00:08 loss=1.3292 acc=1.0000 dt/step=0.00s
+[resnet50_transfer][val] [2/32] ETA=00:00:06 loss=1.4769 acc=0.0000 dt/step=0.00s
+[resnet50_transfer][val] [4/32] ETA=00:00:06 loss=1.4368 acc=0.2500 dt/step=0.00s
+[resnet50_transfer][val] [6/32] ETA=00:00:08 loss=1.4547 acc=0.2500 dt/step=0.00s
+[resnet50_transfer][val] [8/32] ETA=00:00:08 loss=1.3890 acc=0.2500 dt/step=0.00s
+[resnet50_transfer][val] [10/32] ETA=00:00:09 loss=1.4612 acc=0.2500 dt/step=0.00s
+[resnet50_transfer][val] [12/32] ETA=00:00:10 loss=1.4227 acc=0.2500 dt/step=0.00s
+[resnet50_transfer][val] [14/32] ETA=00:00:10 loss=1.3490 acc=0.6250 dt/step=0.00s
+[resnet50_transfer][val] [16/32] ETA=00:00:10 loss=1.4146 acc=0.5000 dt/step=0.00s
+[resnet50_transfer][val] [18/32] ETA=00:00:09 loss=1.3779 acc=0.5000 dt/step=0.00s
+[resnet50_transfer][val] [20/32] ETA=00:00:09 loss=1.3227 acc=0.7500 dt/step=0.00s
+[resnet50_transfer][val] [22/32] ETA=00:00:08 loss=1.2977 acc=0.7500 dt/step=0.00s
+[resnet50_transfer][val] [24/32] ETA=00:00:07 loss=1.2856 acc=0.7500 dt/step=0.00s
+[resnet50_transfer][val] [26/32] ETA=00:00:05 loss=1.2961 acc=0.5000 dt/step=0.00s
+[resnet50_transfer][val] [28/32] ETA=00:00:04 loss=1.2272 acc=0.7500 dt/step=0.00s
+[resnet50_transfer][val] [30/32] ETA=00:00:02 loss=1.2245 acc=0.8750 dt/step=0.00s
+[resnet50_transfer][val] [32/32] ETA=00:00:00 loss=1.2278 acc=1.0000 dt/step=0.00s
