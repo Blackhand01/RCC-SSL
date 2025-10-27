@@ -2,15 +2,9 @@
 from __future__ import annotations
 from typing import Dict, Any
 import torch, torch.nn as nn, torch.nn.functional as F
-from src.training.utils.trainers import (
-    SSLBaseModel,
-    ResNetBackbone,
-    copy_weights_and_freeze,
-    cosine_logits,
-    ema_update,
-    mlp_head,
-    predictor_head,
-)
+from src.training.trainer.backbones import ResNetBackbone, mlp_head, predictor_head
+from src.training.utils.torch_ops import copy_weights_and_freeze, cosine_logits, ema_update
+from src.training.trainer.loops import SSLBaseModel
 
 class MoCoV3(SSLBaseModel):
     def __init__(self, backbone_q: ResNetBackbone, backbone_k: ResNetBackbone,

@@ -1,0 +1,143 @@
+# configs/exp_01.yaml — Deployment config for RCC classification reports
+experiment:
+  name: "exp01_rcc_cls_full"
+  date: "2025-10-26"
+  seed: 1337
+  paper_tags: ["deployment","moco_v3","dino","ibot","ijepa","sl_resnet"]
+  mlflow_experiment: "RCC_EXP01"
+  validate: { paths: true, steps_per_epoch: true, batch_sizes: true }
+  allow_cpu: false
+
+data:
+  img_size: 224
+  webdataset:
+    dataset_key: "rcc_v2"     # risolto da src/training/utils/paths.py
+    shuffle_shards: 100
+    shuffle_samples: 2000
+    samples_per_epoch: 16384
+    prefetch_factor: 4
+    batch_size_ssl: 64
+    batch_size_sl: 64
+    num_workers: 8
+    class_to_id:
+      ccRCC: 0
+      pRCC: 1
+      CHROMO: 2
+      ONCO: 3
+      NOT_TUMOR: 4
+
+dino_v3:
+  global_size: 224
+  local_size: 96
+  n_local: 6
+
+train:
+  optim: { name: "adamw", lr: 0.0005, weight_decay: 0.05, betas: [0.9, 0.999] }
+  scheduler: { name: "cosine", T_max: 100 }
+
+  ssl:
+    epochs: 100              # pretraining “full” (deployment)
+    # steps_per_epoch: null   # lasciare vuoto per usare len(loader)
+    ema_momentum: 0.996
+    # Linear probe (torch) con curve train/val + cm e ckpt
+    probe:
+      enabled: true
+      type: "torch"
+      epochs: 20
+      lr: 0.1
+      weight_decay: 0.0
+      batch_size: 512
+      split_for_fit: "train"
+      split_for_report: "val"
+
+  sl:
+    epochs: 50
+    early_stop_patience: 10
+    amp: true
+    do_val: true
+    do_test: false
+
+logging:
+  log_every_steps: 0
+  metrics_csv_name: "timeseries_metrics.csv"
+
+xai:
+  methods: []
+
+artifacts:
+  save_best_model: true
+  save_ckpt_every: 1
+  export_csv: ["metrics"]
+  report_md: true
+
+runs:
+  # ---------------- SSL ----------------
+  - name: "moco_v3_full"
+    mode: "ssl"
+    override:
+      model:
+        ssl: { name: "moco_v3", temperature: 0.2, proj_dim: 256 }
+      train:
+        ssl: { epochs: 100 }
+
+  - name: "ibot_full"
+    mode: "ssl"
+    override:
+      model:
+        ssl:
+          name: "ibot"
+          mask_ratio: 0.4
+          prototypes: 4096
+          temp_teacher: 0.1
+          temp_student: 0.2
+      train:
+        ssl: { epochs: 100 }
+
+  - name: "i_jepa_full"
+    mode: "ssl"
+    override:
+      model:
+        ssl:
+          name: "i_jepa"
+          context_scale: 0.6
+          targets_per_image: 4
+          target_scales: [0.1, 0.4]
+      train:
+        ssl: { epochs: 100 }
+
+  - name: "dinov3_full"
+    mode: "ssl"
+    override:
+      model:
+        ssl:
+          name: "dino_v3"
+          temp_teacher: 0.04
+          temp_student: 0.1
+          gram_lambda: 1.0
+      data:
+        dino_v3: { global_size: 224, local_size: 96, n_local: 6 }
+      train:
+        ssl: { epochs: 100 }
+
+  # ---------------- SL -----------------
+  - name: "r50_scratch_full"
+    mode: "sl"
+    override:
+      model:
+        sl:  { name: "resnet50_scratch",  num_classes: 5, dropout_p: 0.0 }
+      train:
+        optim:     { name: "adamw", lr: 0.001,  weight_decay: 0.05 }
+        scheduler: { name: "cosine", T_max: 50 }
+        sl:        { epochs: 50, early_stop_patience: 10, amp: true }
+
+  - name: "r50_transfer_full"
+    mode: "sl"
+    override:
+      model:
+        sl:  { name: "resnet50_transfer", num_classes: 5,
+               imagenet_weights: "DEFAULT", freeze_backbone: false,
+               bn_eval_freeze: false, dropout_p: 0.0 }
+      train:
+        optim:     { name: "adamw", lr: 0.0003, weight_decay: 0.05 }
+        scheduler: { name: "cosine", T_max: 50 }
+        sl:        { epochs: 50, early_stop_patience: 10, amp: true }

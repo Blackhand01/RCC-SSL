@@ -6,8 +6,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
 #SBATCH --time=04:00:00
-#SBATCH -o /home/mla_group_01/rcc-ssrl/src/training/logs/%x.%j.out
-#SBATCH -e /home/mla_group_01/rcc-ssrl/src/training/logs/%x.%j.err
+#SBATCH -o /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.out
+#SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.err
 
 
 set -euo pipefail
@@ -49,7 +49,7 @@ DEFAULT_PROJECT_ROOT="/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ss
 export PROJECT_ROOT="${PROJECT_ROOT:-$DEFAULT_PROJECT_ROOT}"
 export OUTPUTS_ROOT="${OUTPUTS_ROOT:-${PROJECT_ROOT}/outputs/mlruns}"
 export WEB_DATASET_ROOT="${WEB_DATASET_ROOT:-$PROJECT_ROOT}"
-export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/configs/experiment_debug.yaml}"
+export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/configs/exp_01.yaml}"
 export RUN_INDEX="${RUN_INDEX:--1}"
 
 # 6) Avvio dal path corretto

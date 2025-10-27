@@ -18,6 +18,7 @@ __all__ = [
     "plot_confusion",
     "render_all_ssl",
     "render_all_sl",
+    "render_ssl_classifier",
 ]
 
 
@@ -131,7 +132,7 @@ def plot_lr(derived_csv: Path | str, out_png: Path | str, model_key: str) -> Pat
 
 def plot_sl_losses(derived_csv: Path | str, out_png: Path | str, model_key: str) -> Path:
     df = _load_df(derived_csv)
-    return _lineplot(df, "epoch", ["train_loss", "val_loss"], f"{model_key} · SL train/val loss", Path(out_png))
+    return _lineplot(df, "epoch", ["train_loss", "val_loss"], f"{model_key} · Train/val loss", Path(out_png))
 
 
 def plot_acc(derived_csv: Path | str, out_png: Path | str, model_key: str) -> Path:
@@ -153,15 +154,49 @@ def plot_confusion(cm, labels, out_png: Path | str) -> Path:
     return _save_figure(fig, out_png, plt)
 
 
-def render_all_ssl(derived_csv: Path | str, figures_dir: Path | str, model_key: str) -> Dict[str, Path]:
+def render_all_ssl(csv_path: Path | str, plots_dir: Path | str, model_key: str) -> Dict[str, Path]:
+    plots_root = Path(plots_dir)
     figures: Dict[str, Path] = {}
-    figures["ssl_losses"] = plot_ssl_losses(derived_csv, prefixed(figures_dir, model_key, "ssl_losses", "png"), model_key)
-    figures["ssl_lr"] = plot_lr(derived_csv, prefixed(figures_dir, model_key, "ssl_lr", "png"), model_key)
+    figures["ssl_losses"] = plot_ssl_losses(
+        csv_path,
+        prefixed(plots_root, model_key, "ssl_losses", "png"),
+        model_key,
+    )
     return figures
 
 
-def render_all_sl(derived_csv: Path | str, figures_dir: Path | str, model_key: str) -> Dict[str, Path]:
+def render_all_sl(csv_path: Path | str, plots_dir: Path | str, model_key: str) -> Dict[str, Path]:
+    plots_root = Path(plots_dir)
     figures: Dict[str, Path] = {}
-    figures["sl_losses"] = plot_sl_losses(derived_csv, prefixed(figures_dir, model_key, "sl_losses", "png"), model_key)
-    figures["sl_acc"] = plot_acc(derived_csv, prefixed(figures_dir, model_key, "sl_acc", "png"), model_key)
+    figures["sl_losses"] = plot_sl_losses(
+        csv_path,
+        prefixed(plots_root, model_key, "sl_losses", "png"),
+        model_key,
+    )
+    figures["sl_acc"] = plot_acc(
+        csv_path,
+        prefixed(plots_root, model_key, "sl_acc", "png"),
+        model_key,
+    )
+    return figures
+
+
+def render_ssl_classifier(csv_path: Path | str, plots_dir: Path | str, model_key: str) -> Dict[str, Path]:
+    plots_root = Path(plots_dir)
+    figures: Dict[str, Path] = {}
+    df = _load_df(csv_path)
+    figures["ssl_clf_losses"] = _lineplot(
+        df,
+        "epoch",
+        ["train_loss", "val_loss"],
+        f"{model_key} · SSL linear head loss",
+        prefixed(plots_root, model_key, "ssl_linear_loss", "png"),
+    )
+    figures["ssl_clf_acc"] = _lineplot(
+        df,
+        "epoch",
+        ["val_acc"],
+        f"{model_key} · SSL linear head acc",
+        prefixed(plots_root, model_key, "ssl_linear_acc", "png"),
+    )
     return figures

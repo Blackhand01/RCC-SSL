@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Optional
 
+import numpy as np
+
 import torch
 
 try:  # pragma: no cover - optional dependency
@@ -17,21 +19,27 @@ except ImportError:  # pragma: no cover
     def confusion_matrix(y_true, y_pred):
         return [[0]]
 
-from .utils.probe import fit_probe_and_log
-from .utils.data import build_sl_loaders, build_ssl_loader, device_from_env, class_labels_from_cfg
-from .utils.io import (
-    append_row_csv,
-    copy_yaml_config,
-    dump_json,
-    make_exp_id,
-    make_run_dirs,
-    prefixed,
-    save_env_info,
-    save_state_dict,
-    write_run_readme,
-)
-from .utils.trainers import SSLTrainer, SLTrainer, safe_state_dict
-from .utils.viz import plot_confusion, render_all_sl, render_all_ssl, write_derived_csv
+from .datasets import build_sl_loaders, build_ssl_loader, class_labels_from_cfg, device_from_env
+from .trainer.features import save_features, train_linear_probe_torch, visualize_features_umap_pca
+from .utils.io import append_row_csv, copy_yaml_config, dump_json, make_exp_id, make_run_dirs, prefixed
+try:
+    from .utils.torch_ops import safe_state_dict
+except ModuleNotFoundError:  # pragma: no cover - fallback when namespace packages misbehave
+    import importlib.util
+    import sys
+    from pathlib import Path as _Path
+
+    _torch_ops_path = _Path(__file__).resolve().parent / "utils" / "torch_ops.py"
+    spec = importlib.util.spec_from_file_location("src.training.utils.torch_ops", _torch_ops_path)
+    module = importlib.util.module_from_spec(spec) if spec and spec.loader else None
+    if module and spec and spec.loader:
+        spec.loader.exec_module(module)
+        sys.modules.setdefault("src.training.utils.torch_ops", module)
+        safe_state_dict = module.safe_state_dict  # type: ignore[attr-defined]
+    else:  # pragma: no cover
+        raise
+from .trainer.loops import SLTrainer, SSLTrainer
+from .utils.viz import plot_confusion, render_all_sl, render_all_ssl, render_ssl_classifier
 
 # ---- modelli (riuso tuoi) ----
 try:
@@ -119,15 +127,21 @@ class Orchestrator:
         self.device = device_from_env(allow_cpu=allow_cpu)
         self.mode = self.cfg.get("_runtime", {}).get("mode") or self.cfg.get("model", {}).get("type", "ssl")
         self.model_key = self.cfg["model"]["ssl"]["name"] if self.mode == "ssl" else self.cfg["model"]["sl"]["name"]
-        self.exp_id = make_exp_id(cfg["experiment"]["outputs_root"])
-        self.run_dirs = make_run_dirs(cfg["experiment"]["outputs_root"], self.exp_id, cfg["experiment"]["name"], self.model_key)
+        runtime = self.cfg.setdefault("_runtime", {})
+        provided_exp_id = runtime.get("exp_id") or self.cfg.get("experiment", {}).get("id")
+        outputs_root = self.cfg["experiment"]["outputs_root"]
+        if provided_exp_id:
+            self.exp_id = provided_exp_id
+        else:
+            self.exp_id = make_exp_id(outputs_root)
+        runtime["exp_id"] = self.exp_id
+        self.cfg.setdefault("experiment", {})["id"] = self.exp_id
+        self.run_dirs = make_run_dirs(outputs_root, self.exp_id, self.cfg["experiment"]["name"], self.model_key)
         config_path = self.cfg.get("_runtime", {}).get("config_path") or os.environ.get("EXPERIMENT_CONFIG_PATH")
         copy_yaml_config(config_path, self.run_dirs["configuration"])
-        save_env_info(self.run_dirs["configuration"], self.cfg["experiment"].get("seed", 1337))
-        dump_json(self.run_dirs["configuration"] / "resolved_config.json", self.cfg)
         self.override_transforms: Optional[Any] = None
 
-    def fit(self) -> Dict[str, float]:
+    def fit(self) -> Dict[str, Any]:
         if self.mode == "ssl":
             metrics = self._fit_ssl()
         elif self.mode == "sl":
@@ -137,8 +151,19 @@ class Orchestrator:
         self._finalize_run(metrics)
         return metrics
 
-    def _finalize_run(self, metrics: Dict[str, float]) -> None:
-        write_run_readme(self.run_dirs, self.model_key, self.mode, self.cfg, metrics, self.exp_id)
+    def _finalize_run(self, metrics: Dict[str, Any]) -> None:
+        serializable: Dict[str, Any] = {}
+        for key, value in metrics.items():
+            if isinstance(value, Path):
+                serializable[key] = str(value)
+            elif isinstance(value, (int, float, str, bool)) or value is None:
+                serializable[key] = value
+            else:
+                try:
+                    serializable[key] = float(value)  # type: ignore[arg-type]
+                except (TypeError, ValueError):
+                    serializable[key] = str(value)
+        dump_json(self.run_dirs["metrics"] / "final_metrics.json", serializable)
 
     # ------------------------------------------------------------------ helpers
     def _build_optimizer(self, params: Iterable[torch.nn.Parameter]) -> torch.optim.Optimizer:
@@ -148,7 +173,13 @@ class Orchestrator:
         weight_decay = conf.get("weight_decay", 5e-2)
         if name == "adamw":
             betas = tuple(conf.get("betas", (0.9, 0.999)))
-            return torch.optim.AdamW(params, lr=lr, betas=betas, weight_decay=weight_decay)
+            extra: Dict[str, Any] = {}
+            try:
+                if torch.cuda.is_available():
+                    extra["fused"] = True
+            except TypeError:
+                pass
+            return torch.optim.AdamW(params, lr=lr, betas=betas, weight_decay=weight_decay, **extra)
         if name == "sgd":
             momentum = conf.get("momentum", 0.9)
             return torch.optim.SGD(params, lr=lr, momentum=momentum, weight_decay=weight_decay)
@@ -192,7 +223,7 @@ class Orchestrator:
         best_loss = float("inf")
         best_epoch = -1
         best_state = None
-        best_path = prefixed(self.run_dirs["artifacts"], self.model_key, "ssl_best", "pt")
+        backbone_ckpt = prefixed(self.run_dirs["checkpoints"], self.model_key, "ssl_best", "pt")
         global_step_offset = 0
 
         def _epoch_mode() -> Callable:
@@ -212,6 +243,17 @@ class Orchestrator:
                 row = {"epoch": epoch_idx, "step": global_step, "lr": optimizer.param_groups[0].get("lr", 0.0)}
                 row.update(stats)
                 append_row_csv(csv_path, row)
+                # Log each step so the SLURM stdout shows the live training progress.
+                step_in_epoch = ((global_step - epoch_idx * steps_per_epoch - 1) % steps_per_epoch) + 1
+                metrics_msg = " ".join(
+                    f"{key}={float(value):.4f}" if isinstance(value, (int, float)) else f"{key}={value}"
+                    for key, value in sorted(stats.items())
+                )
+                print(
+                    f"[{self.model_key}][epoch {epoch_idx + 1}/{epochs}] "
+                    f"step {step_in_epoch}/{steps_per_epoch} (global {global_step}) {metrics_msg}",
+                    flush=True,
+                )
 
             epoch_stats = run_epoch(loader, steps_per_epoch, start_step=global_step_offset, step_callback=_log_step)
             global_step_offset += steps_per_epoch
@@ -220,7 +262,6 @@ class Orchestrator:
                 best_loss = loss_epoch
                 best_epoch = epoch
                 best_state = safe_state_dict(model)
-                best_path = save_state_dict(best_state, self.run_dirs["artifacts"], self.model_key, "ssl_best")
 
             if hasattr(model, "on_epoch_end"):
                 model.on_epoch_end(epoch)
@@ -228,49 +269,101 @@ class Orchestrator:
         if best_state is not None:
             model.load_state_dict(best_state, strict=False)
             model.to(self.device)
+            torch.save(best_state, backbone_ckpt)
 
-        derived_csv = prefixed(self.run_dirs["plots"], self.model_key, "ssl_timeseries_derived", "csv")
-        write_derived_csv(csv_path, derived_csv)
-        render_all_ssl(derived_csv, self.run_dirs["figures"], self.model_key)
+        render_all_ssl(csv_path, self.run_dirs["plots"], self.model_key)
 
-        metrics_path = prefixed(self.run_dirs["metrics"], self.model_key, "ssl_final_metrics", "json")
-        dump_json(metrics_path, {"best_epoch": int(best_epoch), "ssl_loss": float(best_loss)})
+        backbone_rel = str(backbone_ckpt.relative_to(self.run_dirs["root"])) if backbone_ckpt.exists() else ""
+        metrics_path = prefixed(self.run_dirs["metrics"], self.model_key, "ssl_summary", "json")
+        dump_json(
+            metrics_path,
+            {
+                "best_epoch": int(best_epoch),
+                "ssl_loss": float(best_loss),
+                "ssl_backbone_path": backbone_rel,
+            },
+        )
 
-        ssl_summary = {
-            "best_epoch": int(best_epoch),
+        ssl_summary: Dict[str, float | str] = {
+            "ssl_best_epoch": int(best_epoch),
             "ssl_loss": float(best_loss),
-            "ssl_best_ckpt_path": str(best_path),
-            "ssl_metrics_path": str(metrics_path),
+            "ssl_backbone_path": backbone_rel,
         }
 
-        probe_cfg = (self.cfg.get("train", {}).get("ssl", {}) or {}).get("probe", {}) or {}
-        run_probe = probe_cfg.get("enabled", True)
-        if run_probe:
-            run_probe = probe_cfg.get("do_linear_probe", True) or probe_cfg.get("do_knn", False)
+        # ------------------------------------------------------------------ feature extraction + linear probe
+        train_loader, val_loader = _with_context(
+            "build_sl_loaders",
+            build_sl_loaders,
+            self.cfg,
+            override_transforms=self.override_transforms,
+        )
+        loaders = {"train": train_loader, "val": val_loader}
+        backbone_module = model.stu if hasattr(model, "stu") else model
 
-        if run_probe:
-            train_loader, val_loader = _with_context(
-                "build_sl_loaders",
-                build_sl_loaders,
-                self.cfg,
-                override_transforms=self.override_transforms,
-            )
-            loaders = {"train": train_loader, "val": val_loader}
-            print(f"[RUN][{self.model_key}→PROBE] device={self.device.type}")
-            backbone = model.stu if hasattr(model, "stu") else model
-            probe_metrics = _with_context(
-                "ssl_probe",
-                fit_probe_and_log,
-                backbone,
-                loaders,
-                self.run_dirs,
-                self.model_key,
-                self.cfg,
-                self.device,
-            )
-            return {**ssl_summary, **probe_metrics}
+        feature_paths = save_features(backbone_module, loaders, self.device, self.run_dirs["checkpoints"], self.model_key)
 
-        return ssl_summary
+        clf_summary: Dict[str, object] = {"ssl_linear_status": "skipped"}
+        required_keys = {"train_X", "train_y", "val_X", "val_y"}
+        if required_keys.issubset(feature_paths.keys()):
+            Xtr = np.load(feature_paths["train_X"], allow_pickle=False)
+            ytr = np.load(feature_paths["train_y"], allow_pickle=False)
+            Xva = np.load(feature_paths["val_X"], allow_pickle=False)
+            yva = np.load(feature_paths["val_y"], allow_pickle=False)
+
+            if Xtr.size and Xva.size:
+                visualize_features_umap_pca(
+                    np.vstack([Xtr, Xva]),
+                    np.hstack([ytr, yva]),
+                    prefixed(self.run_dirs["plots"], self.model_key, "ssl_features_umap", "png"),
+                )
+
+                probe_cfg = (self.cfg.get("train", {}).get("ssl", {}).get("probe", {}) or {})
+                lin_metrics, lin_ckpt = train_linear_probe_torch(
+                    Xtr,
+                    ytr,
+                    Xva,
+                    yva,
+                    n_epochs=int(probe_cfg.get("epochs", 5)),
+                    lr=float(probe_cfg.get("lr", 0.01)),
+                    wd=float(probe_cfg.get("weight_decay", 0.0)),
+                    batch_size=int(probe_cfg.get("batch_size", 128)),
+                    out_dirs=self.run_dirs,
+                    model_key=self.model_key,
+                )
+
+                lin_csv = prefixed(self.run_dirs["metrics"], self.model_key, "ssl_linear_timeseries", "csv")
+                if lin_csv.exists():
+                    render_ssl_classifier(lin_csv, self.run_dirs["plots"], self.model_key)
+
+                lin_ckpt_rel = str(Path(lin_ckpt).relative_to(self.run_dirs["root"])) if lin_ckpt else ""
+                feature_paths_rel: Dict[str, str] = {}
+                for key, path in feature_paths.items():
+                    candidate = Path(path)
+                    try:
+                        feature_paths_rel[key] = str(candidate.relative_to(self.run_dirs["root"]))
+                    except ValueError:
+                        feature_paths_rel[key] = str(candidate)
+                dump_json(
+                    prefixed(self.run_dirs["metrics"], self.model_key, "ssl_linear_summary", "json"),
+                    {
+                        "val_acc": float(lin_metrics.get("val_acc", float("nan"))),
+                        "checkpoint": lin_ckpt_rel,
+                        "features": feature_paths_rel,
+                    },
+                )
+
+                try:
+                    lin_csv_rel = str(lin_csv.relative_to(self.run_dirs["root"]))
+                except ValueError:
+                    lin_csv_rel = str(lin_csv)
+                clf_summary = {
+                    "probe_linear_val_acc": float(lin_metrics.get("val_acc", float("nan"))),
+                    "ssl_linear_ckpt_path": lin_ckpt_rel,
+                    "ssl_linear_features": feature_paths_rel,
+                    "ssl_linear_timeseries": lin_csv_rel if lin_csv.exists() else "",
+                }
+
+        return {**ssl_summary, **clf_summary}
 
     # ------------------------------------------------------------------ SL path
     def _fit_sl(self) -> Dict[str, float]:
@@ -300,7 +393,7 @@ class Orchestrator:
         best_epoch = -1
         best_acc = -1.0
         best_loss = float("inf")
-        best_path = prefixed(self.run_dirs["artifacts"], self.model_key, "sl_best_classifier", "pt")
+        classifier_ckpt = prefixed(self.run_dirs["checkpoints"], self.model_key, "sl_best_classifier", "pt")
         epochs = int(self.cfg["train"]["sl"]["epochs"])
 
         for epoch in range(epochs):
@@ -323,18 +416,16 @@ class Orchestrator:
                 best_loss = val_metrics["loss"]
                 best_epoch = epoch
                 best_state = safe_state_dict(model)
-                best_path = save_state_dict(best_state, self.run_dirs["artifacts"], self.model_key, "sl_best_classifier")
 
         if best_state is not None:
             model.load_state_dict(best_state, strict=False)
             model.to(self.device)
+            torch.save(best_state, classifier_ckpt)
 
-        dcsv = prefixed(self.run_dirs["plots"], self.model_key, "sl_timeseries_derived", "csv")
-        write_derived_csv(csv_path, dcsv)
-        render_all_sl(dcsv, self.run_dirs["figures"], self.model_key)
+        render_all_sl(csv_path, self.run_dirs["plots"], self.model_key)
 
         final_metrics = self._evaluate_sl(model, loaders["val"], criterion)
-        metrics_path = prefixed(self.run_dirs["metrics"], self.model_key, "sl_final_metrics", "json")
+        metrics_path = prefixed(self.run_dirs["metrics"], self.model_key, "sl_summary", "json")
         dump_json(
             metrics_path,
             {
@@ -342,15 +433,16 @@ class Orchestrator:
                 "val_acc": float(final_metrics["val_acc"]),
                 "val_f1_macro": float(final_metrics["val_f1_macro"]),
                 "val_loss": float(final_metrics["val_loss"]),
+                "sl_classifier_path": str(classifier_ckpt.relative_to(self.run_dirs["root"])) if classifier_ckpt.exists() else "",
             },
         )
 
         return {
-            "best_epoch": int(best_epoch),
-            "val_acc": float(final_metrics["val_acc"]),
-            "val_loss": float(final_metrics["val_loss"]),
-            "sl_best_ckpt_path": str(best_path),
-            "sl_metrics_path": str(metrics_path),
+            "sl_best_epoch": int(best_epoch),
+            "sl_val_acc": float(final_metrics["val_acc"]),
+            "sl_val_f1_macro": float(final_metrics["val_f1_macro"]),
+            "sl_val_loss": float(final_metrics["val_loss"]),
+            "sl_classifier_path": str(classifier_ckpt.relative_to(self.run_dirs["root"])) if classifier_ckpt.exists() else "",
         }
 
     def _evaluate_sl(self, model: torch.nn.Module, loader, criterion: torch.nn.Module) -> Dict[str, float]:
@@ -379,7 +471,7 @@ class Orchestrator:
         labels = class_labels_from_cfg(self.cfg)
         if not labels:
             labels = [str(i) for i in range(len(cm))]
-        plot_confusion(cm, labels, prefixed(self.run_dirs["figures"], self.model_key, "sl_confusion_val", "png"))
+        plot_confusion(cm, labels, prefixed(self.run_dirs["plots"], self.model_key, "sl_confusion_val", "png"))
         return {
             "val_loss": avg_loss,
             "val_acc": avg_acc,

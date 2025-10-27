@@ -7,6 +7,26 @@ from typing import Any, Dict
 
 from .io import ensure_dir
 
+# Config constants
+MODULE_ROOT = Path(__file__).resolve().parents[1]
+
+ENV_CFG = "EXPERIMENT_CONFIG_PATH"
+ENV_RUN = "RUN_INDEX"
+
+
+def _as_abs(path_like: str | Path) -> Path:
+    candidate = Path(path_like)
+    if candidate.is_absolute():
+        return candidate
+    return (MODULE_ROOT / candidate).resolve()
+
+
+DEFAULT_CONFIG_PATH = _as_abs("configs/exp_01.yaml")
+DEFAULT_RUN_INDEX = -1
+
+CONFIG_PATH = _as_abs(os.environ.get(ENV_CFG, str(DEFAULT_CONFIG_PATH)))
+RUN_INDEX = int(os.environ.get(ENV_RUN, str(DEFAULT_RUN_INDEX)))
+
 
 def _resolve(path_like: str | Path, base: Path | None = None) -> Path:
     """Resolve a path, optionally relative to the provided base directory."""

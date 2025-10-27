@@ -49,21 +49,14 @@ slurm-*.err
 lightning_logs/
 # Generic runs/outputs
 runs/
-outputs/
 
 # ---------------------------
 # Dati pesanti / artefatti
 # ---------------------------
 # ATTENZIONE: manteniamo versionati solo manifest e config,
 # non i dati o gli artefatti voluminosi.
-data/
-datasets/
-raw/
-external/
-interim/
-processed/
 # BeeGFS scratch mount (se symlink local)
-beegfs-scratch/
+# beegfs-scratch/
 scratch/
 .tmp/
 tmp/

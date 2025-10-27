@@ -6,15 +6,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.training.utils.trainers import (
-    SSLBaseModel,
-    ResNetBackbone,
-    copy_weights_and_freeze,
-    ema_update,
-    l2n,
-    mlp_head,
-    predictor_head,
-)
+from src.training.trainer.backbones import ResNetBackbone, mlp_head
+from src.training.utils.torch_ops import copy_weights_and_freeze, ema_update, l2n
+from src.training.trainer.loops import SSLBaseModel
 
 @torch.no_grad()
 def sinkhorn(logits: torch.Tensor, iters: int=3, eps: float=1e-6) -> torch.Tensor:

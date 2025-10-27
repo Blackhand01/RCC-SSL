@@ -2,7 +2,9 @@
 from __future__ import annotations
 from typing import Dict, Any, List, Tuple
 import torch, torch.nn as nn, torch.nn.functional as F
-from src.training.utils.trainers import SSLBaseModel, ResNetBackbone, copy_weights_and_freeze, ema_update
+from src.training.trainer.backbones import ResNetBackbone
+from src.training.utils.torch_ops import copy_weights_and_freeze, ema_update
+from src.training.trainer.loops import SSLBaseModel
 
 def _sample_ctx(img: torch.Tensor, scale: float=0.6) -> Tuple[int,int,int,int]:
     B,C,H,W = img.shape; h = max(16, int(H*scale)); w = max(16, int(W*scale))

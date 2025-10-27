@@ -137,9 +137,11 @@ dependencies:
   - seaborn
   - pip:
       - braceexpand==0.1.7
+      - pyarrow==15.0.2
       - pandas==2.3.3
       - python-dateutil==2.9.0.post0
       - pytz==2025.2
+      - scikit-learn==1.4.2
       - six==1.17.0
       - tzdata==2025.2
       - webdataset==1.0.2

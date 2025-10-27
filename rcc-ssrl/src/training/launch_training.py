@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -22,28 +23,13 @@ for p in (REPO_ROOT, SRC_ROOT):
         sys.path.insert(0, sp)
 
 from src.training.orchestrator import Orchestrator
-from src.training.utils.io import append_row_csv
+from src.training.utils.io import append_row_csv, make_exp_id
 from src.training.utils.reproducibility import set_global_seed
 
 # ---------------------------------------------------------------------
 # Config: file esperimento + file paths
 # ---------------------------------------------------------------------
-ENV_CFG = "EXPERIMENT_CONFIG_PATH"
-ENV_RUN = "RUN_INDEX"
-
-
-def _as_abs(path_like: str | Path) -> Path:
-    candidate = Path(path_like)
-    if candidate.is_absolute():
-        return candidate
-    return (MODULE_ROOT / candidate).resolve()
-
-
-DEFAULT_CONFIG_PATH = _as_abs("configs/experiment_debug.yaml")
-DEFAULT_RUN_INDEX = -1
-
-CONFIG_PATH = _as_abs(os.environ.get(ENV_CFG, str(DEFAULT_CONFIG_PATH)))
-RUN_INDEX = int(os.environ.get(ENV_RUN, str(DEFAULT_RUN_INDEX)))
+from src.training.utils.paths import CONFIG_PATH, RUN_INDEX, _as_abs
 
 
 def read_yaml(path: Path | str) -> Dict[str, Any]:
@@ -105,10 +91,12 @@ def deep_update(base: Dict, override: Optional[Dict]) -> Dict:
 
 def compose_run_config(base_cfg: Dict[str, Any], run_block: Dict[str, Any], cfg_path: Path) -> Dict[str, Any]:
     cfg = deep_update(base_cfg, run_block.get("override", {}))
-    cfg.setdefault("experiment", {})["name"] = f"{base_cfg['experiment']['name']}__{run_block['name']}"
+    experiment = cfg.setdefault("experiment", {})
+    experiment["name"] = base_cfg["experiment"]["name"]
     runtime = cfg.setdefault("_runtime", {})
     runtime["mode"] = run_block.get("mode", base_cfg.get("model", {}).get("type", "ssl"))
     runtime["config_path"] = str(cfg_path)
+    runtime["run_name"] = run_block["name"]
     cfg.pop("runs", None)
     return cfg
 
@@ -124,6 +112,7 @@ def expand_runs(base_cfg: Dict[str, Any], cfg_path: Path) -> List[Dict[str, Any]
     runtime = single.setdefault("_runtime", {})
     runtime["mode"] = runtime.get("mode", single.get("model", {}).get("type", "ssl"))
     runtime["config_path"] = str(cfg_path)
+    runtime["run_name"] = single.get("experiment", {}).get("name", "default")
     single.pop("runs", None)
     return [single]
 
@@ -166,15 +155,37 @@ def _summary_csv_path(run_root: Path) -> Path:
 
 
 def _record_summary(orch: Orchestrator, metrics: Dict[str, Any], elapsed_s: float) -> Path:
+    run_label = orch.cfg.get("_runtime", {}).get("run_name", orch.cfg["experiment"]["name"])
     row = {
         "exp_id": orch.exp_id,
-        "run_name": orch.cfg["experiment"]["name"],
+        "run_name": run_label,
         "mode": orch.mode,
         "model": orch.model_key,
         "elapsed_s": round(elapsed_s, 2),
         **metrics,
     }
     return append_row_csv(_summary_csv_path(orch.run_dirs["root"]), row)
+
+
+def _is_rank_zero() -> bool:
+    return os.environ.get("RANK", "0") == "0"
+
+
+def _run_validation(outputs_root: str, exp_id: str, exp_name: str) -> None:
+    script_path = MODULE_ROOT / "scripts" / "validate_outputs.py"
+    if not script_path.exists():
+        print(f"[validate] Skipping: script not found at {script_path}")
+        return
+    env = os.environ.copy()
+    env["EXP_ID"] = exp_id
+    env["EXP_NAME"] = exp_name
+    env["OUTPUTS_ROOT"] = outputs_root
+    env.setdefault("EXPERIMENTS_ROOT", str(Path(outputs_root) / "experiments"))
+    cmd = [sys.executable, str(script_path)]
+    print(f"[validate] Running validate_outputs.py for {exp_id}/{exp_name}")
+    result = subprocess.run(cmd, env=env, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(f"validate_outputs.py failed (exit code {result.returncode})")
 
 
 # ---------------------------------------------------------------------
@@ -184,14 +195,26 @@ def main() -> int:
     base_cfg = read_yaml(CONFIG_PATH)
     resolved_paths = paths()
     all_runs = expand_runs(base_cfg, CONFIG_PATH)
+    shared_exp_id: Optional[str] = None
 
     for cfg_run in all_runs:
         cfg_run = inject_paths_into_cfg(cfg_run, resolved_paths)
+        runtime = cfg_run.setdefault("_runtime", {})
+        if shared_exp_id is None:
+            shared_exp_id = runtime.get("exp_id") or make_exp_id(cfg_run["experiment"]["outputs_root"])
+        runtime["exp_id"] = shared_exp_id
+        cfg_run.setdefault("experiment", {})["id"] = shared_exp_id
         set_global_seed(cfg_run["experiment"].get("seed", 1337))
         orchestrator = Orchestrator(cfg_run)
         start_time = time.time()
         metrics = orchestrator.fit()
         _record_summary(orchestrator, metrics, time.time() - start_time)
+        if _is_rank_zero():
+            _run_validation(
+                cfg_run["experiment"]["outputs_root"],
+                orchestrator.exp_id,
+                orchestrator.cfg["experiment"]["name"],
+            )
     return 0
 
 

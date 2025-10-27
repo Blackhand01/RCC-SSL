@@ -25,8 +25,21 @@ def set_global_seed(seed: int = 1337) -> None:
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    torch.use_deterministic_algorithms(False)  # True se vuoi piena determinism (più lenta)
-    torch.backends.cudnn.benchmark = False
+    torch.use_deterministic_algorithms(False)  # True => più lento
+    # ---- PERFORMANCE (FP32) ------------------------------------------------
+    # Abilita autotuning dei kernel conv per forme fisse (più veloce).
+    torch.backends.cudnn.benchmark = True
+    # TF32 accelera matmul/conv mantenendo un percorso FP32 pragmaticamente accurato.
+    # Puoi disabilitarlo esportando ALLOW_TF32=0.
+    allow_tf32 = os.environ.get("ALLOW_TF32", "1") != "0"
+    try:
+        torch.backends.cuda.matmul.allow_tf32 = allow_tf32
+    except Exception:
+        pass
+    try:
+        torch.set_float32_matmul_precision("high" if allow_tf32 else "medium")
+    except Exception:
+        pass
 
 def _hash_dict(d: Dict[str, Any]) -> str:
     b = json.dumps(d, sort_keys=True).encode("utf-8")

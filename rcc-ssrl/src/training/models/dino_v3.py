@@ -6,14 +6,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.training.utils.trainers import (
-    SSLBaseModel,
-    ResNetBackbone,
-    copy_weights_and_freeze,
-    ema_update,
-    l2n,
-    mlp_head,
-)
+from src.training.trainer.backbones import ResNetBackbone, mlp_head
+from src.training.utils.torch_ops import copy_weights_and_freeze, ema_update, l2n
+from src.training.trainer.loops import SSLBaseModel
 
 def dino_distill_loss(s: torch.Tensor, t: torch.Tensor, t_temp: float=0.04, s_temp: float=0.1, center: Optional[torch.Tensor]=None) -> torch.Tensor:
     if center is None: center = t.mean(0, keepdim=True)

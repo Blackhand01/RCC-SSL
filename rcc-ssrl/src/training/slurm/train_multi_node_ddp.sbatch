@@ -7,8 +7,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=24:00:00
-#SBATCH -o /home/mla_group_01/rcc-ssrl/src/training/logs/%x.%j.out
-#SBATCH -e /home/mla_group_01/rcc-ssrl/src/training/logs/%x.%j.err
+#SBATCH -o /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.out
+#SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.err
 
 set -euo pipefail
 
@@ -41,7 +41,7 @@ echo "[SLURM] NODES=$SLURM_NNODES GPUS/Node=$SLURM_GPUS_PER_NODE"
 MASTER_ADDR=$(scontrol show hostnames "$SLURM_NODELIST" | head -n1)
 MASTER_PORT=${MASTER_PORT:-29500}
 
-export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/configs/experiment_debug.yaml}"
+export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/configs/exp_01.yaml}"
 export RUN_INDEX="${RUN_INDEX:--1}"
 DEFAULT_PROJECT_ROOT="/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project"
 export PROJECT_ROOT="${PROJECT_ROOT:-$DEFAULT_PROJECT_ROOT}"
@@ -56,5 +56,5 @@ srun bash -lc '
     --nproc_per_node='"$SLURM_GPUS_PER_NODE"' \
     --rdzv_backend=c10d \
     --rdzv_endpoint='"$MASTER_ADDR:$MASTER_PORT"' \
-    '"$WORKDIR"'/launch_training.py
+    '"$WORKDIR"'/src/training/launch_training.py
 '

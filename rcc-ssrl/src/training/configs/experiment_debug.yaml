@@ -17,6 +17,7 @@ data:
     shuffle_shards: 50
     shuffle_samples: 500
     samples_per_epoch: 256
+    prefetch_factor: 2
     batch_size_ssl: 8
     batch_size_sl: 8
     num_workers: 2
@@ -38,15 +39,9 @@ train:
   ssl:
     epochs: 1
     steps_per_epoch: 5
-    ckpt_every: 1
     ema_momentum: 0.996
-    probe:
-      enabled: true
-      type: "sklearn"
-      C: 1.0
-      n_jobs: 4
-      split_for_fit: "train"
-      split_for_report: "val"
+    probe_epochs: 5
+    probe_lr: 0.01
   sl:
     epochs: 1
     early_stop_patience: 1
