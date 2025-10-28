@@ -182,17 +182,7 @@ class SSLTrainer:
             if step_callback:
                 step_callback(gstep, stats)
 
-            if self.log_every and (s + 1) % self.log_every == 0:
-                now = time.time()
-                dt = now - last
-                last = now
-                eta = _eta_secs(t0, s + 1, steps)
-                ema_msg = " ".join(f"{k}={metrics.ema[k]:.4f}" for k in sorted(metrics.ema))
-                print(
-                    f"[{self.log_tag}][step {s+1}/{steps}] ETA={int(eta//60):02d}:{int(eta%60):02d} "
-                    f"dt/step={dt:.2f}s {ema_msg}",
-                    flush=True,
-                )
+
 
         avg = metrics.averaged(steps)
         avg["steps"] = steps
@@ -285,16 +275,11 @@ class SLTrainer:
     def _unpack_batch(self, batch: Dict[str, Any], device: torch.device) -> Tuple[torch.Tensor, torch.Tensor]:
         """Supporta sia dict SL canonico sia un fallback compat."""
         if "inputs" in batch and "targets" in batch:
-            inputs = batch["inputs"].to(device, non_blocking=True)
-            if inputs.dim() == 4:
-                inputs = inputs.to(memory_format=torch.channels_last)
-            targets = batch["targets"].to(device, non_blocking=True)
-            return inputs, targets
+            x = batch["inputs"].to(memory_format=torch.channels_last)
+            return x.to(device, non_blocking=True), batch["targets"].to(device, non_blocking=True)
         # compat: alcuni loader forniscono "images"/"label"
-        images = batch["images"][0].to(device, non_blocking=True)
-        if images.dim() == 4:
-            images = images.to(memory_format=torch.channels_last)
-        return images, batch["label"].to(device, non_blocking=True)
+        x = batch["images"][0].to(memory_format=torch.channels_last)
+        return x.to(device, non_blocking=True), batch["label"].to(device, non_blocking=True)
 
     def _update_optim(self, loss: torch.Tensor) -> None:
         """Applica step con/without GradScaler a seconda di AMP."""

@@ -57,7 +57,8 @@ def paths() -> Dict[str, Any]:
     resolved = pathmod.get_all()
     project_root = resolved["project_root"]
     outputs_root = resolved["outputs_root"]
-    print(f"[paths] project_root={project_root} outputs_root={outputs_root}")
+    if _is_rank_zero():
+        print(f"[paths] project_root={project_root} outputs_root={outputs_root}")
 
     webdataset = resolved.get("webdataset", {})
     if not webdataset:
@@ -70,8 +71,9 @@ def paths() -> Dict[str, Any]:
                 raise KeyError(f"[paths] webdataset.{key}.{field} mancante")
             if not Path(candidate).exists():
                 raise FileNotFoundError(f"[paths] missing {key}.{field}: {candidate}")
-        print(f"[paths] webdataset.{key}: train={section['train_dir']} "
-              f"val={section['val_dir']} test={section['test_dir']}")
+        if _is_rank_zero():
+            print(f"[paths] webdataset.{key}: train={section['train_dir']} "
+                  f"val={section['val_dir']} test={section['test_dir']}")
 
     return resolved
 
@@ -148,11 +150,10 @@ def inject_paths_into_cfg(cfg: Dict[str, Any], resolved_paths: Dict[str, Any]) -
 # ---------------------------------------------------------------------
 # Riepilogo CSV per tutti i run
 # ---------------------------------------------------------------------
-def _summary_csv_path(run_root: Path) -> Path:
+def _summary_csv_path(run_root: Path, mode: str) -> Path:
     exp_folder = run_root.parents[1]
     exp_folder.mkdir(parents=True, exist_ok=True)
-    return exp_folder / "runs_summary.csv"
-
+    return exp_folder / f"runs_summary_{mode}.csv"
 
 def _record_summary(orch: Orchestrator, metrics: Dict[str, Any], elapsed_s: float) -> Path:
     run_label = orch.cfg.get("_runtime", {}).get("run_name", orch.cfg["experiment"]["name"])
@@ -164,7 +165,7 @@ def _record_summary(orch: Orchestrator, metrics: Dict[str, Any], elapsed_s: floa
         "elapsed_s": round(elapsed_s, 2),
         **metrics,
     }
-    return append_row_csv(_summary_csv_path(orch.run_dirs["root"]), row)
+    return append_row_csv(_summary_csv_path(orch.run_dirs["root"], orch.mode), row)
 
 
 def _is_rank_zero() -> bool:
@@ -192,6 +193,27 @@ def _run_validation(outputs_root: str, exp_id: str, exp_name: str) -> None:
 # Entrypoint
 # ---------------------------------------------------------------------
 def main() -> int:
+    # -------- Global perf flags (FP32 veloce su Ampere + conv autotune) --------
+    try:
+        # TF32 accelera matmul/conv su GPU Ampere (A40)
+        import torch
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+    except Exception:
+        pass
+    try:
+        # Per input shape abbastanza stabili (ResNet/augment standard)
+        import torch.backends.cudnn as cudnn
+        cudnn.benchmark = True
+    except Exception:
+        pass
+    # Consenti precisione FP32 "alta" in matmul (PyTorch ≥ 2.0)
+    try:
+        import torch
+        torch.set_float32_matmul_precision("high")
+    except Exception:
+        pass
+
     base_cfg = read_yaml(CONFIG_PATH)
     resolved_paths = paths()
     all_runs = expand_runs(base_cfg, CONFIG_PATH)

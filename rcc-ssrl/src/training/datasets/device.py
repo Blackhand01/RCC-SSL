@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import time
+from typing import List
 
 import torch
 
@@ -23,13 +24,37 @@ def device_from_env(allow_cpu: bool = False) -> torch.device:
                 break
 
     if torch.cuda.is_available():
-        # torchrun/SLURM passano il rank locale: rispettiamolo quando presente.
-        lr = os.environ.get("LOCAL_RANK") or os.environ.get("SLURM_LOCALID")
-        if lr is not None:
+        cvd = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
+        lr_str = os.environ.get("LOCAL_RANK") or os.environ.get("SLURM_LOCALID")
+
+        # Preferisci sempre LOCAL_RANK (impostato da torchrun)
+        if lr_str is not None:
             try:
-                return torch.device("cuda", int(lr))
+                lr = int(lr_str)
+                tokens: List[str] = [t.strip() for t in cvd.split(",") if t.strip()] if cvd else []
+                if tokens:
+                    # Mappa per posizione dentro CUDA_VISIBLE_DEVICES
+                    try:
+                        mapped = int(tokens[lr])
+                        return torch.device("cuda", mapped)
+                    except (ValueError, IndexError):
+                        # token non numerici (es. MIG) o lista corta -> usa indice logico
+                        return torch.device("cuda", lr % max(1, torch.cuda.device_count()))
+                # niente CVD: usa indice logico
+                return torch.device("cuda", lr % max(1, torch.cuda.device_count()))
             except (TypeError, ValueError):
                 pass
+
+        # Nessun LOCAL_RANK: prendi il primo token numerico da CVD, altrimenti 0
+        if cvd:
+            for tok in cvd.split(","):
+                tok = tok.strip()
+                if not tok:
+                    continue
+                try:
+                    return torch.device("cuda", int(tok))
+                except ValueError:
+                    continue
         return torch.device("cuda", 0)
     if allow_cpu or os.environ.get("ALLOW_CPU", "0") == "1":
         return torch.device("cpu")

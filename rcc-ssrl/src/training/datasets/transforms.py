@@ -121,24 +121,27 @@ def sl_eval_transforms(size: int) -> transforms.Compose:
 
 
 def collate_two_views(batch):
-    x1 = torch.stack([sample[0][0] for sample in batch], 0)
-    x2 = torch.stack([sample[0][1] for sample in batch], 0)
+    x1 = torch.stack([sample[0][0] for sample in batch], 0).contiguous(memory_format=torch.channels_last)
+    x2 = torch.stack([sample[0][1] for sample in batch], 0).contiguous(memory_format=torch.channels_last)
     meta = [sample[1] for sample in batch]
     return {"images": [x1, x2], "meta": meta}
 
 
 def collate_multicrop(batch):
-    global_crops = [g for sample in batch for g in sample[0][0]]
-    local_crops = [l for sample in batch for l in sample[0][1]]
+    # NOTE: 'g' e 'l' sono tensori 3D (C,H,W). 'channels_last' richiede 4D.
+    # Primo: stack -> 4D (N,C,H,W). Poi: applica channels_last in modo sicuro.
+    g_list = [g for sample in batch for g in sample[0][0]]
+    l_list = [l for sample in batch for l in sample[0][1]]
+
+    G = torch.stack(g_list, 0).contiguous(memory_format=torch.channels_last)
+    L = torch.stack(l_list, 0).contiguous(memory_format=torch.channels_last)
+
     meta = [sample[1] for sample in batch]
-    return {
-        "images": [torch.stack(global_crops, 0), torch.stack(local_crops, 0)],
-        "meta": meta,
-    }
+    return {"images": [G, L], "meta": meta}
 
 
 def collate_single_image(batch):
-    images = torch.stack([sample[0] for sample in batch], 0)
+    images = torch.stack([sample[0] for sample in batch], 0).contiguous(memory_format=torch.channels_last)
     meta = [sample[1] for sample in batch]
     return {"images": [images], "meta": meta}
 
@@ -166,7 +169,7 @@ def collate_supervised(batch, class_to_id: Dict[str, int]):
         )
 
     return {
-        "inputs": torch.stack(images, 0),
+        "inputs": torch.stack(images, 0).contiguous(memory_format=torch.channels_last),
         "targets": torch.tensor(labels, dtype=torch.long),
         "meta": meta,
     }

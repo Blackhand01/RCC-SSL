@@ -1,0 +1,136 @@
+# configs/exp_01_one_hour_v2.yaml — 6 modelli in ~1h su 8×A40 (2 nodi × 4 GPU)
+experiment:
+  name: "exp01_rcc_cls_1h_smoke_v2"
+  date: "2025-10-28"
+  seed: 1337
+  default_run_index: -1
+  paper_tags: ["1h-smoke","moco_v3","dino","ibot","ijepa","sl_resnet"]
+  mlflow_experiment: "RCC_EXP01_1H"
+  outputs_layout: "v2"
+  validate: { paths: true, steps_per_epoch: true, batch_sizes: true }
+  allow_cpu: false
+
+data:
+  img_size: 224
+  webdataset:
+    dataset_key: "rcc_v2"        # risolto da utils/paths.py
+    shuffle_shards: 64
+    shuffle_samples: 2000
+    prefetch_factor: 4
+    batch_size_ssl: 64            # world_size=8 → global_batch_ssl=512
+    batch_size_sl: 64             # world_size=8 → global_batch_sl=512
+    num_workers: 4
+    class_to_id: { ccRCC: 0, pRCC: 1, CHROMO: 2, ONCO: 3, NOT_TUMOR: 4 }
+
+dino_v3:
+  global_size: 224
+  local_size: 96
+  n_local: 2
+
+train:
+  optim: { name: "adamw", lr: 0.0005, weight_decay: 0.05, betas: [0.9, 0.999] }
+  scheduler: { name: "cosine", T_max: 1 }  # default (usato dagli SSL)
+  ssl:
+    epochs: 3
+    steps_per_epoch: 500
+    ema_momentum: 0.996
+    probe: { enabled: true }
+  sl:
+    epochs: 10                 # multi-epoch per gli SL
+    amp: true                  # velocizza molto su A40
+    do_val: true
+    do_test: false
+
+logging:
+  log_every_steps: 1
+  metrics_csv_name: "timeseries_metrics.csv"
+
+xai: { methods: [] }
+
+artifacts:
+  save_best_model: true
+  save_ckpt_every: 1
+  export_csv: ["metrics"]
+  report_md: true
+
+runs:
+ 
+  # -------- SL (< 1h ciascuno, multi-epoch) --------
+  # Nota: con world_size=8 e batch_size_sl=64 → global_batch=512.
+  # Impostiamo samples_per_epoch per ottenere ~120 step/epoca:
+  # 120 step * 512 = 61_440 campioni/epoca → ~4 min/epoca a ~2 s/step ⇒ ~40 min/10 epoche.
+  - name: "r50_scratch_1h"
+    mode: "sl"
+    override:
+      model:
+        sl: { name: "resnet50_scratch", num_classes: 5, dropout_p: 0.0 }
+      data:
+        webdataset: { samples_per_epoch: 614 }   # ≈120 step/epoca
+      train:
+        sl: { epochs: 10, amp: true, do_val: true, do_test: false }
+        scheduler: { name: "cosine", T_max: 10 }   # allineato alle 10 epoche
+
+  - name: "r50_transfer_1h"
+    mode: "sl"
+    override:
+      model:
+        sl:
+          name: "resnet50_transfer"
+          num_classes: 5
+          imagenet_weights: "DEFAULT"
+          freeze_backbone: false
+          bn_eval_freeze: false
+          dropout_p: 0.0
+      data:
+        webdataset: { samples_per_epoch: 614 }   # ≈120 step/epoca
+      train:
+        sl: { epochs: 10, amp: true, do_val: true, do_test: false }
+        scheduler: { name: "cosine", T_max: 10 }
+
+ # -------- SSL (~40 min totali) --------
+  - name: "moco_v3_1h"
+    mode: "ssl"
+    override:
+      model:
+        ssl: { name: "moco_v3", temperature: 0.2, proj_dim: 256 }
+      train:
+        ssl: { steps_per_epoch: 500 }
+
+  - name: "ibot_1h"
+    mode: "ssl"
+    override:
+      model:
+        ssl:
+          name: "ibot"
+          mask_ratio: 0.4
+          prototypes: 1024
+          temp_teacher: 0.1
+          temp_student: 0.2
+      train:
+        ssl: { steps_per_epoch: 500 }
+
+  - name: "i_jepa_1h"
+    mode: "ssl"
+    override:
+      model:
+        ssl:
+          name: "i_jepa"
+          context_scale: 0.6
+          targets_per_image: 2
+          target_scales: [0.1, 0.4]
+      train:
+        ssl: { steps_per_epoch: 500 }
+
+  - name: "dino_v3_1h"
+    mode: "ssl"
+    override:
+      model:
+        ssl:
+          name: "dino_v3"
+          temp_teacher: 0.04
+          temp_student: 0.1
+          gram_lambda: 1.0
+      data:
+        dino_v3: { global_size: 224, local_size: 96, n_local: 2 }
+      train:
+        ssl: { steps_per_epoch: 500 }

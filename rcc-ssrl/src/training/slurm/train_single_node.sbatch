@@ -26,6 +26,7 @@ conda activate train || { echo "[ERR] conda env 'train' mancante"; exit 2; }
 export MPLBACKEND=Agg
 export PYTHONUNBUFFERED=1
 export SKIP_VENV=1
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 
 # Fondamentale per far vedere "src/" come package
 if [[ -n "${PYTHONPATH:-}" ]]; then
@@ -48,8 +49,14 @@ PY
 DEFAULT_PROJECT_ROOT="/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project"
 export PROJECT_ROOT="${PROJECT_ROOT:-$DEFAULT_PROJECT_ROOT}"
 export OUTPUTS_ROOT="${OUTPUTS_ROOT:-${PROJECT_ROOT}/outputs/mlruns}"
-export WEB_DATASET_ROOT="${WEB_DATASET_ROOT:-$PROJECT_ROOT}"
-export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/configs/exp_01.yaml}"
+# ---- Staging su disco locale di nodo ($SLURM_TMPDIR) ----
+DATA_ROOT_ON_NET="${WEB_DATASET_ROOT:-$PROJECT_ROOT}/data/processed/rcc_webdataset_v2"
+DATA_ROOT_ON_LOCAL="${SLURM_TMPDIR:-/tmp}/data/processed/rcc_webdataset_v2"
+mkdir -p "$(dirname "$DATA_ROOT_ON_LOCAL")"
+rsync -a --info=progress2 "$DATA_ROOT_ON_NET"/ "$DATA_ROOT_ON_LOCAL"/
+# Punta la pipeline allo scratch locale (stesso layout relativi)
+export WEB_DATASET_ROOT="${SLURM_TMPDIR:-/tmp}"
+export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/configs/exp_1h.yaml}"
 export RUN_INDEX="${RUN_INDEX:--1}"
 
 # 6) Avvio dal path corretto

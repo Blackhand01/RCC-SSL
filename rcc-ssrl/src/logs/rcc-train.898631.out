@@ -1,8 +1,0 @@
-GPU 0: NVIDIA A40 (UUID: GPU-b2099fb7-7e1d-65b6-6d1c-9581bfc4c2b9)
-Torch 2.5.1 CUDA True NGPU 1
-[paths] project_root=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project outputs_root=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns
-[paths] webdataset.rcc_v2: train=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/train val=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/val test=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/test
-[paths] dataset_key=rcc_v2 -> train=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/train val=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/val test=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_v2/test
-[RUN][moco_v3] device=cuda
-[moco_v3][epoch 1/100] step 1/256 (global 1) loss_info_nce=8.3822 loss_total=8.3822
-[moco_v3][epoch 1/100] step 2/256 (global 2) loss_info_nce=8.5969 loss_total=8.5969

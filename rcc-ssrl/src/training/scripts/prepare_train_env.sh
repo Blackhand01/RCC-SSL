@@ -10,3 +10,4 @@ pip install --upgrade pip
 pip install torch==2.5.1+cu121 torchvision==0.20.1+cu121 --index-url https://download.pytorch.org/whl/cu121
 pip install webdataset pandas Pillow matplotlib seaborn pyyaml
 # opzionale: mlflow, scikit-learn, ecc.
+pip install scikit-learn==1.5.2

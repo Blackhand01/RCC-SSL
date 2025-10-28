@@ -65,7 +65,8 @@ class IBOT(SSLBaseModel):
         with torch.no_grad():
             t = self.hc_t(self.tea.forward_global(xg)).detach() / self.t_t
             y = sinkhorn(t)  # soft assignments
-        return -(y * F.log_softmax(s, dim=-1)).sum(dim=-1).mean()
+        ce = -(y * F.log_softmax(s, dim=-1)).sum(dim=-1)
+        return (ce / y.size(-1)).mean()  # <-- divide per K
 
     def _loss_tok(self, xl: torch.Tensor) -> torch.Tensor:
         ts = self.stu.forward_tokens(xl)         # [B,T,C]
@@ -82,7 +83,8 @@ class IBOT(SSLBaseModel):
         s = torch.clamp(s, -50.0, 50.0)
         t = torch.clamp(t, -50.0, 50.0)
         y = sinkhorn(t)
-        return -(y * F.log_softmax(s, dim=-1)).sum(dim=-1).mean()
+        ce = -(y * F.log_softmax(s, dim=-1)).sum(dim=-1)
+        return (ce / y.size(-1)).mean()  # <-- divide per K
 
     def training_step(self, batch: Dict[str,Any], global_step: int) -> Dict[str,Any]:
         images = batch["images"]

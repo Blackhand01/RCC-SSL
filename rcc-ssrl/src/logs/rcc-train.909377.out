@@ -1,0 +1,148 @@
+GPU 0: NVIDIA A40 (UUID: GPU-b38312a8-2f3c-be59-bf76-0cf7adfe1349)
+Torch 2.5.1 CUDA True NGPU 1
+              0   0%    0.00kB/s    0:00:00 (xfr#0, to-chk=33/37)              0   0%    0.00kB/s    0:00:00 (xfr#0, to-chk=27/37)              0   0%    0.00kB/s    0:00:00 (xfr#0, to-chk=8/37)               0   0%    0.00kB/s    0:00:00 (xfr#0, to-chk=0/37)
+[paths] project_root=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project outputs_root=/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns
+[paths] webdataset.rcc_v2: train=/tmp/data/processed/rcc_webdataset_v2/train val=/tmp/data/processed/rcc_webdataset_v2/val test=/tmp/data/processed/rcc_webdataset_v2/test
+[paths] dataset_key=rcc_v2 -> train=/tmp/data/processed/rcc_webdataset_v2/train val=/tmp/data/processed/rcc_webdataset_v2/val test=/tmp/data/processed/rcc_webdataset_v2/test
+[RUN][moco_v3] device=cuda
+[moco_v3][epoch 1/1] step 1/5 (global 1/5) loss_info_nce=4.2781 loss_total=4.2781 | ETA=00:00:05
+[moco_v3][epoch 1/1] step 2/5 (global 2/5) loss_info_nce=4.3605 loss_total=4.3605 | ETA=00:00:02
+[moco_v3][step 2/5] ETA=00:01 dt/step=1.33s loss_info_nce=4.2863 loss_total=4.2863
+[moco_v3][epoch 1/1] step 3/5 (global 3/5) loss_info_nce=4.2556 loss_total=4.2556 | ETA=00:00:01
+[moco_v3][epoch 1/1] step 4/5 (global 4/5) loss_info_nce=4.3294 loss_total=4.3294 | ETA=00:00:00
+[moco_v3][step 4/5] ETA=00:00 dt/step=1.39s loss_info_nce=4.2879 loss_total=4.2879
+[moco_v3][epoch 1/1] step 5/5 (global 5/5) loss_info_nce=4.4324 loss_total=4.4324 | ETA=00:00:00
+[validate] Running validate_outputs.py for exp_20251028-125648/rcc_debug_sanity_all_models
+[INFO] Validating: /beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/exp_20251028-125648/rcc_debug_sanity_all_models
+[OK] moco_v3 — issues:0 warnings:8
+[paths] dataset_key=rcc_v2 -> train=/tmp/data/processed/rcc_webdataset_v2/train val=/tmp/data/processed/rcc_webdataset_v2/val test=/tmp/data/processed/rcc_webdataset_v2/test
+[RUN][ibot] device=cuda
+[ibot][epoch 1/1] step 1/5 (global 1/5) loss_cls=12.2936 loss_tok=6.9793 loss_total=19.2729 | ETA=00:00:02
+[ibot][epoch 1/1] step 2/5 (global 2/5) loss_cls=10.4745 loss_tok=6.9649 loss_total=17.4393 | ETA=00:00:01
+[ibot][step 2/5] ETA=00:01 dt/step=1.01s loss_cls=12.1116 loss_tok=6.9779 loss_total=19.0895
+[ibot][epoch 1/1] step 3/5 (global 3/5) loss_cls=8.7040 loss_tok=6.9591 loss_total=15.6631 | ETA=00:00:01
+[ibot][epoch 1/1] step 4/5 (global 4/5) loss_cls=7.9129 loss_tok=6.9532 loss_total=14.8661 | ETA=00:00:00
+[ibot][step 4/5] ETA=00:00 dt/step=1.70s loss_cls=11.3851 loss_tok=6.9737 loss_total=18.3588
+[ibot][epoch 1/1] step 5/5 (global 5/5) loss_cls=8.0286 loss_tok=6.9524 loss_total=14.9810 | ETA=00:00:00
+[validate] Running validate_outputs.py for exp_20251028-125648/rcc_debug_sanity_all_models
+[INFO] Validating: /beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/exp_20251028-125648/rcc_debug_sanity_all_models
+[OK] moco_v3 — issues:0 warnings:8
+[OK] ibot — issues:0 warnings:8
+[paths] dataset_key=rcc_v2 -> train=/tmp/data/processed/rcc_webdataset_v2/train val=/tmp/data/processed/rcc_webdataset_v2/val test=/tmp/data/processed/rcc_webdataset_v2/test
+[RUN][i_jepa] device=cuda
+[i_jepa][epoch 1/1] step 1/5 (global 1/5) loss_ijepa=1.4079 loss_total=1.4079 | ETA=00:00:03
+[i_jepa][epoch 1/1] step 2/5 (global 2/5) loss_ijepa=0.6572 loss_total=0.6572 | ETA=00:00:01
+[i_jepa][step 2/5] ETA=00:01 dt/step=0.88s loss_ijepa=1.3329 loss_total=1.3329
+[i_jepa][epoch 1/1] step 3/5 (global 3/5) loss_ijepa=0.6065 loss_total=0.6065 | ETA=00:00:00
+[i_jepa][epoch 1/1] step 4/5 (global 4/5) loss_ijepa=0.5251 loss_total=0.5251 | ETA=00:00:00
+[i_jepa][step 4/5] ETA=00:00 dt/step=0.11s loss_ijepa=1.1867 loss_total=1.1867
+[i_jepa][epoch 1/1] step 5/5 (global 5/5) loss_ijepa=0.2628 loss_total=0.2628 | ETA=00:00:00
+[validate] Running validate_outputs.py for exp_20251028-125648/rcc_debug_sanity_all_models
+[INFO] Validating: /beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/exp_20251028-125648/rcc_debug_sanity_all_models
+[OK] moco_v3 — issues:0 warnings:8
+[OK] ibot — issues:0 warnings:8
+[OK] i_jepa — issues:0 warnings:8
+[paths] dataset_key=rcc_v2 -> train=/tmp/data/processed/rcc_webdataset_v2/train val=/tmp/data/processed/rcc_webdataset_v2/val test=/tmp/data/processed/rcc_webdataset_v2/test
+[RUN][dino_v3] device=cuda
+[dino_v3][epoch 1/1] step 1/5 (global 1/5) loss_global=28.6412 loss_gram=0.0074 loss_total=28.6427 | ETA=00:00:05
+[dino_v3][epoch 1/1] step 2/5 (global 2/5) loss_global=24.0553 loss_gram=0.0203 loss_total=24.0594 | ETA=00:00:02
+[dino_v3][step 2/5] ETA=00:02 dt/step=1.51s loss_global=28.1826 loss_gram=0.0087 loss_total=28.1843
+[dino_v3][epoch 1/1] step 3/5 (global 3/5) loss_global=24.1041 loss_gram=0.0132 loss_total=24.1067 | ETA=00:00:01
+[dino_v3][epoch 1/1] step 4/5 (global 4/5) loss_global=17.7549 loss_gram=0.0121 loss_total=17.7573 | ETA=00:00:00
+[dino_v3][step 4/5] ETA=00:00 dt/step=1.69s loss_global=26.7728 loss_gram=0.0095 loss_total=26.7746
+[dino_v3][epoch 1/1] step 5/5 (global 5/5) loss_global=17.5152 loss_gram=0.0158 loss_total=17.5183 | ETA=00:00:00
+[validate] Running validate_outputs.py for exp_20251028-125648/rcc_debug_sanity_all_models
+[INFO] Validating: /beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/exp_20251028-125648/rcc_debug_sanity_all_models
+[OK] moco_v3 — issues:0 warnings:8
+[OK] ibot — issues:0 warnings:8
+[OK] i_jepa — issues:0 warnings:8
+[OK] dino_v3 — issues:0 warnings:8
+[paths] dataset_key=rcc_v2 -> train=/tmp/data/processed/rcc_webdataset_v2/train val=/tmp/data/processed/rcc_webdataset_v2/val test=/tmp/data/processed/rcc_webdataset_v2/test
+[RUN][resnet50_scratch] device=cuda
+[resnet50_scratch][train] [1/32] ETA=00:00:40 loss=1.6151 acc=0.3750 dt/step=1.08s
+[resnet50_scratch][train] [2/32] ETA=00:00:19 loss=1.8429 acc=0.0000 dt/step=0.02s
+[resnet50_scratch][train] [4/32] ETA=00:00:09 loss=1.6588 acc=0.1250 dt/step=0.01s
+[resnet50_scratch][train] [6/32] ETA=00:00:08 loss=1.5029 acc=0.3750 dt/step=0.02s
+[resnet50_scratch][train] [8/32] ETA=00:00:08 loss=2.3280 acc=0.0000 dt/step=0.02s
+[resnet50_scratch][train] [10/32] ETA=00:00:09 loss=1.4496 acc=0.5000 dt/step=0.02s
+[resnet50_scratch][train] [12/32] ETA=00:00:09 loss=1.7809 acc=0.3750 dt/step=0.02s
+[resnet50_scratch][train] [14/32] ETA=00:00:09 loss=1.5813 acc=0.2500 dt/step=0.02s
+[resnet50_scratch][train] [16/32] ETA=00:00:08 loss=1.2269 acc=0.5000 dt/step=0.02s
+[resnet50_scratch][train] [18/32] ETA=00:00:08 loss=1.3909 acc=0.5000 dt/step=0.02s
+[resnet50_scratch][train] [20/32] ETA=00:00:07 loss=3.1062 acc=0.3750 dt/step=0.02s
+[resnet50_scratch][train] [22/32] ETA=00:00:07 loss=2.7001 acc=0.2500 dt/step=0.02s
+[resnet50_scratch][train] [24/32] ETA=00:00:06 loss=1.6195 acc=0.2500 dt/step=0.02s
+[resnet50_scratch][train] [26/32] ETA=00:00:04 loss=1.0129 acc=0.5000 dt/step=0.02s
+[resnet50_scratch][train] [28/32] ETA=00:00:03 loss=0.8126 acc=0.6250 dt/step=0.02s
+[resnet50_scratch][train] [30/32] ETA=00:00:01 loss=1.2067 acc=0.5000 dt/step=0.02s
+[resnet50_scratch][train] [32/32] ETA=00:00:00 loss=1.6573 acc=0.2500 dt/step=0.02s
+[resnet50_scratch][val] [1/32] ETA=00:00:07 loss=5.8110 acc=0.0000 dt/step=0.01s
+[resnet50_scratch][val] [2/32] ETA=00:00:05 loss=4.5261 acc=0.0000 dt/step=0.01s
+[resnet50_scratch][val] [4/32] ETA=00:00:05 loss=4.9880 acc=0.0000 dt/step=0.01s
+[resnet50_scratch][val] [6/32] ETA=00:00:06 loss=3.7478 acc=0.0000 dt/step=0.01s
+[resnet50_scratch][val] [8/32] ETA=00:00:07 loss=4.3308 acc=0.0000 dt/step=0.01s
+[resnet50_scratch][val] [10/32] ETA=00:00:08 loss=4.1926 acc=0.0000 dt/step=0.01s
+[resnet50_scratch][val] [12/32] ETA=00:00:08 loss=4.5527 acc=0.0000 dt/step=0.01s
+[resnet50_scratch][val] [14/32] ETA=00:00:08 loss=3.4841 acc=0.0000 dt/step=0.01s
+[resnet50_scratch][val] [16/32] ETA=00:00:08 loss=4.9170 acc=0.0000 dt/step=0.01s
+[resnet50_scratch][val] [18/32] ETA=00:00:08 loss=5.0227 acc=0.0000 dt/step=0.01s
+[resnet50_scratch][val] [20/32] ETA=00:00:07 loss=3.9614 acc=0.0000 dt/step=0.01s
+[resnet50_scratch][val] [22/32] ETA=00:00:07 loss=4.1755 acc=0.0000 dt/step=0.01s
+[resnet50_scratch][val] [24/32] ETA=00:00:06 loss=5.0403 acc=0.0000 dt/step=0.00s
+[resnet50_scratch][val] [26/32] ETA=00:00:04 loss=4.3907 acc=0.0000 dt/step=0.00s
+[resnet50_scratch][val] [28/32] ETA=00:00:03 loss=3.5635 acc=0.0000 dt/step=0.00s
+[resnet50_scratch][val] [30/32] ETA=00:00:01 loss=4.1641 acc=0.0000 dt/step=0.00s
+[resnet50_scratch][val] [32/32] ETA=00:00:00 loss=4.1990 acc=0.0000 dt/step=0.00s
+[resnet50_scratch][epoch 1/1] val_acc=0.0000 val_loss=5.0077 | ETA=00:00:00
+[validate] Running validate_outputs.py for exp_20251028-125648/rcc_debug_sanity_all_models
+[INFO] Validating: /beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/exp_20251028-125648/rcc_debug_sanity_all_models
+[OK] moco_v3 — issues:0 warnings:8
+[OK] ibot — issues:0 warnings:8
+[OK] i_jepa — issues:0 warnings:8
+[OK] dino_v3 — issues:0 warnings:8
+[OK] resnet50_scratch — issues:0 warnings:2
+[paths] dataset_key=rcc_v2 -> train=/tmp/data/processed/rcc_webdataset_v2/train val=/tmp/data/processed/rcc_webdataset_v2/val test=/tmp/data/processed/rcc_webdataset_v2/test
+[RUN][resnet50_transfer] device=cuda
+[resnet50_transfer][train] [1/32] ETA=00:00:12 loss=1.5798 acc=0.2500 dt/step=0.01s
+[resnet50_transfer][train] [2/32] ETA=00:00:07 loss=1.6010 acc=0.1250 dt/step=0.00s
+[resnet50_transfer][train] [4/32] ETA=00:00:07 loss=1.6514 acc=0.2500 dt/step=0.00s
+[resnet50_transfer][train] [6/32] ETA=00:00:08 loss=1.4430 acc=0.7500 dt/step=0.00s
+[resnet50_transfer][train] [8/32] ETA=00:00:08 loss=1.5270 acc=0.3750 dt/step=0.01s
+[resnet50_transfer][train] [10/32] ETA=00:00:09 loss=1.4491 acc=0.6250 dt/step=0.01s
+[resnet50_transfer][train] [12/32] ETA=00:00:09 loss=1.2592 acc=0.8750 dt/step=0.01s
+[resnet50_transfer][train] [14/32] ETA=00:00:10 loss=1.6279 acc=0.1250 dt/step=0.00s
+[resnet50_transfer][train] [16/32] ETA=00:00:09 loss=1.3937 acc=0.3750 dt/step=0.01s
+[resnet50_transfer][train] [18/32] ETA=00:00:09 loss=1.5034 acc=0.5000 dt/step=0.00s
+[resnet50_transfer][train] [20/32] ETA=00:00:08 loss=1.1832 acc=0.6250 dt/step=0.01s
+[resnet50_transfer][train] [22/32] ETA=00:00:08 loss=1.2120 acc=0.7500 dt/step=0.01s
+[resnet50_transfer][train] [24/32] ETA=00:00:06 loss=1.4490 acc=0.3750 dt/step=0.01s
+[resnet50_transfer][train] [26/32] ETA=00:00:05 loss=1.4152 acc=0.5000 dt/step=0.00s
+[resnet50_transfer][train] [28/32] ETA=00:00:03 loss=1.2181 acc=0.6250 dt/step=0.01s
+[resnet50_transfer][train] [30/32] ETA=00:00:02 loss=1.1422 acc=0.7500 dt/step=0.00s
+[resnet50_transfer][train] [32/32] ETA=00:00:00 loss=1.4751 acc=0.2500 dt/step=0.01s
+[resnet50_transfer][val] [1/32] ETA=00:00:07 loss=1.1417 acc=1.0000 dt/step=0.01s
+[resnet50_transfer][val] [2/32] ETA=00:00:05 loss=1.4747 acc=0.0000 dt/step=0.00s
+[resnet50_transfer][val] [4/32] ETA=00:00:06 loss=1.6011 acc=0.0000 dt/step=0.00s
+[resnet50_transfer][val] [6/32] ETA=00:00:07 loss=1.5416 acc=0.0000 dt/step=0.00s
+[resnet50_transfer][val] [8/32] ETA=00:00:08 loss=1.3804 acc=0.2500 dt/step=0.00s
+[resnet50_transfer][val] [10/32] ETA=00:00:09 loss=1.4419 acc=0.1250 dt/step=0.00s
+[resnet50_transfer][val] [12/32] ETA=00:00:09 loss=1.3137 acc=0.5000 dt/step=0.00s
+[resnet50_transfer][val] [14/32] ETA=00:00:10 loss=1.1302 acc=0.8750 dt/step=0.00s
+[resnet50_transfer][val] [16/32] ETA=00:00:10 loss=1.3384 acc=0.5000 dt/step=0.00s
+[resnet50_transfer][val] [18/32] ETA=00:00:09 loss=1.2373 acc=0.7500 dt/step=0.00s
+[resnet50_transfer][val] [20/32] ETA=00:00:09 loss=1.2746 acc=0.6250 dt/step=0.00s
+[resnet50_transfer][val] [22/32] ETA=00:00:08 loss=1.3549 acc=0.5000 dt/step=0.00s
+[resnet50_transfer][val] [24/32] ETA=00:00:07 loss=1.0616 acc=0.8750 dt/step=0.00s
+[resnet50_transfer][val] [26/32] ETA=00:00:05 loss=1.3138 acc=0.5000 dt/step=0.00s
+[resnet50_transfer][val] [28/32] ETA=00:00:04 loss=1.2488 acc=0.6250 dt/step=0.01s
+[resnet50_transfer][val] [30/32] ETA=00:00:02 loss=1.1488 acc=0.7500 dt/step=0.01s
+[resnet50_transfer][val] [32/32] ETA=00:00:00 loss=1.1772 acc=0.7500 dt/step=0.00s
+[resnet50_transfer][epoch 1/1] val_acc=0.5625 val_loss=1.2744 | ETA=00:00:00
+[validate] Running validate_outputs.py for exp_20251028-125648/rcc_debug_sanity_all_models
+[INFO] Validating: /beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/exp_20251028-125648/rcc_debug_sanity_all_models
+[OK] moco_v3 — issues:0 warnings:8
+[OK] ibot — issues:0 warnings:8
+[OK] i_jepa — issues:0 warnings:8
+[OK] dino_v3 — issues:0 warnings:8
+[OK] resnet50_scratch — issues:0 warnings:2
+[OK] resnet50_transfer — issues:0 warnings:2

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import os
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Optional
 
@@ -11,13 +12,27 @@ import numpy as np
 import torch
 
 try:  # pragma: no cover - optional dependency
-    from sklearn.metrics import confusion_matrix, f1_score
+    from sklearn.metrics import confusion_matrix
 except ImportError:  # pragma: no cover
-    def f1_score(y_true, y_pred, average="macro"):
-        return 0.0
-
     def confusion_matrix(y_true, y_pred):
         return [[0]]
+
+def _f1_macro_np(y_true, y_pred) -> float:
+    yt = np.asarray(y_true, dtype=np.int64)
+    yp = np.asarray(y_pred, dtype=np.int64)
+    if yt.size == 0 or yp.size == 0:
+        return 0.0
+    classes = np.unique(np.concatenate([yt, yp]))
+    f1s = []
+    for c in classes:
+        tp = ((yp == c) & (yt == c)).sum()
+        fp = ((yp == c) & (yt != c)).sum()
+        fn = ((yp != c) & (yt == c)).sum()
+        prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        rec  = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1 = 2*prec*rec/(prec+rec) if (prec+rec) > 0 else 0.0
+        f1s.append(f1)
+    return float(np.mean(f1s)) if f1s else 0.0
 
 from .datasets import build_sl_loaders, build_ssl_loader, class_labels_from_cfg, device_from_env
 from .trainer.features import save_features, train_linear_probe_torch, visualize_features_umap_pca
@@ -185,11 +200,12 @@ class Orchestrator:
             return torch.optim.SGD(params, lr=lr, momentum=momentum, weight_decay=weight_decay)
         raise ValueError(f"Unsupported optimizer '{name}'.")
 
-    def _build_scheduler(self, optimizer: torch.optim.Optimizer, epochs: int) -> Optional[torch.optim.lr_scheduler._LRScheduler]:
+    def _build_scheduler(self, optimizer: torch.optim.Optimizer, total_units: int) -> Optional[torch.optim.lr_scheduler._LRScheduler]:
         sched_cfg = (self.cfg["train"].get("scheduler") or {})
         name = sched_cfg.get("name", "").lower()
         if name == "cosine":
-            return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+            # Nota: in SSL usiamo 'steps' come unità; in SL 'epochs'
+            return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_units)
         return None
 
     # ------------------------------------------------------------------ SSL path
@@ -200,7 +216,23 @@ class Orchestrator:
 
         ssl_cfg = self.cfg["train"]["ssl"]
         optimizer = self._build_optimizer(model.parameters())
-        scheduler = self._build_scheduler(optimizer, int(ssl_cfg["epochs"] * ssl_cfg.get("steps_per_epoch", len(loader))))
+
+        # --- Determine steps_per_epoch once (never call len(loader) if IterableDataset) ---
+        steps_per_epoch = ssl_cfg.get("steps_per_epoch")
+        if steps_per_epoch is None:
+            try:
+                steps_per_epoch = len(loader)
+            except TypeError as e:
+                raise ValueError(
+                    "train.ssl.steps_per_epoch must be set for IterableDataset/WebDataset "
+                    "or wrap the dataset with webdataset.with_epoch(<approx_num_samples>)."
+                ) from e
+        steps_per_epoch = max(1, int(steps_per_epoch))
+        epochs = int(ssl_cfg["epochs"])
+        total_steps = steps_per_epoch * epochs
+
+        # Cosine su 'unità' del programma (per SSL=steps, per SL=epochs)
+        scheduler = self._build_scheduler(optimizer, total_steps)
         trainer = SSLTrainer(
             model,
             optimizer,
@@ -210,14 +242,7 @@ class Orchestrator:
             log_tag=self.model_key,
         )
 
-        steps_per_epoch = ssl_cfg.get("steps_per_epoch")
-        if steps_per_epoch is None:
-            try:
-                steps_per_epoch = len(loader)
-            except TypeError:
-                raise ValueError("train.ssl.steps_per_epoch must be set when the loader has no __len__.")
-        steps_per_epoch = max(1, int(steps_per_epoch))
-        epochs = int(ssl_cfg["epochs"])
+        t0_run = time.time()
 
         csv_path = prefixed(self.run_dirs["metrics"], self.model_key, "ssl_timeseries", "csv")
         best_loss = float("inf")
@@ -225,6 +250,7 @@ class Orchestrator:
         best_state = None
         backbone_ckpt = prefixed(self.run_dirs["checkpoints"], self.model_key, "ssl_best", "pt")
         global_step_offset = 0
+        log_every = max(1, _log_every_steps(self.cfg))
 
         def _epoch_mode() -> Callable:
             name = self.cfg["model"]["ssl"]["name"].lower()
@@ -241,17 +267,32 @@ class Orchestrator:
         for epoch in range(epochs):
             def _log_step(global_step: int, stats: Dict[str, float], epoch_idx: int = epoch) -> None:
                 row = {"epoch": epoch_idx, "step": global_step, "lr": optimizer.param_groups[0].get("lr", 0.0)}
+                # ETA globale (fino a fine run)
+                done = min(global_step, total_steps)
+                elapsed = time.time() - t0_run
+                frac = max(1e-9, float(done) / float(total_steps))
+                eta_s = max(0.0, elapsed * (1.0 - frac) / frac)
+                row.update({"elapsed_s": round(elapsed, 2), "eta_s": round(eta_s, 2)})
                 row.update(stats)
                 append_row_csv(csv_path, row)
-                # Log each step so the SLURM stdout shows the live training progress.
+                # Log solo da rank 0 per evitare rumore
+                if os.environ.get("RANK", "0") != "0":
+                    return
+                # Log only every log_every steps or at the last step to avoid double logging
+                if (global_step - 1) % log_every != 0 and global_step != total_steps:
+                    return
+                # Log leggibile sullo stdout SLURM
                 step_in_epoch = ((global_step - epoch_idx * steps_per_epoch - 1) % steps_per_epoch) + 1
                 metrics_msg = " ".join(
                     f"{key}={float(value):.4f}" if isinstance(value, (int, float)) else f"{key}={value}"
                     for key, value in sorted(stats.items())
                 )
+                # Stima oraria di fine
+                eta_h = int(eta_s // 3600); eta_m = int((eta_s % 3600) // 60); eta_sec = int(eta_s % 60)
                 print(
                     f"[{self.model_key}][epoch {epoch_idx + 1}/{epochs}] "
-                    f"step {step_in_epoch}/{steps_per_epoch} (global {global_step}) {metrics_msg}",
+                    f"step {step_in_epoch}/{steps_per_epoch} (global {global_step}/{total_steps}) "
+                    f"{metrics_msg} | ETA={eta_h:02d}:{eta_m:02d}:{eta_sec:02d}",
                     flush=True,
                 )
 
@@ -395,6 +436,7 @@ class Orchestrator:
         best_loss = float("inf")
         classifier_ckpt = prefixed(self.run_dirs["checkpoints"], self.model_key, "sl_best_classifier", "pt")
         epochs = int(self.cfg["train"]["sl"]["epochs"])
+        t0_run = time.time()
 
         for epoch in range(epochs):
             train_metrics = trainer.run_epoch(loaders["train"], self.device, train=True)
@@ -408,8 +450,22 @@ class Orchestrator:
                     "val_loss": val_metrics["loss"],
                     "val_acc": val_metrics["acc"],
                     "lr": lr,
+                    "elapsed_s": round(time.time() - t0_run, 2),
                 },
             )
+            # Stima ETA fine training (lineare sui tempi per epoca)
+            if os.environ.get("RANK", "0") == "0":
+                done_epochs = epoch + 1
+                elapsed = time.time() - t0_run
+                frac = max(1e-9, done_epochs / float(epochs))
+                eta_s = max(0.0, elapsed * (1.0 - frac) / frac)
+                eta_h = int(eta_s // 3600); eta_m = int((eta_s % 3600) // 60); eta_sec = int(eta_s % 60)
+                print(
+                    f"[{self.model_key}][epoch {done_epochs}/{epochs}] "
+                    f"val_acc={val_metrics['acc']:.4f} val_loss={val_metrics['loss']:.4f} "
+                    f"| ETA={eta_h:02d}:{eta_m:02d}:{eta_sec:02d}",
+                    flush=True,
+                )
 
             if val_metrics["acc"] > best_acc:
                 best_acc = val_metrics["acc"]
@@ -475,5 +531,5 @@ class Orchestrator:
         return {
             "val_loss": avg_loss,
             "val_acc": avg_acc,
-            "val_f1_macro": float(f1_score(y_true, y_pred, average="macro")),
+            "val_f1_macro": float(_f1_macro_np(y_true, y_pred)),
         }
