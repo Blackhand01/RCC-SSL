@@ -5,7 +5,7 @@
 #SBATCH --gpus=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
-#SBATCH --time=04:00:00
+#SBATCH --time=24:00:00
 #SBATCH -o /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.out
 #SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.err
 
@@ -56,7 +56,7 @@ mkdir -p "$(dirname "$DATA_ROOT_ON_LOCAL")"
 rsync -a --info=progress2 "$DATA_ROOT_ON_NET"/ "$DATA_ROOT_ON_LOCAL"/
 # Punta la pipeline allo scratch locale (stesso layout relativi)
 export WEB_DATASET_ROOT="${SLURM_TMPDIR:-/tmp}"
-export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/configs/exp_1h.yaml}"
+export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/configs/exp_10h.yaml}"
 export RUN_INDEX="${RUN_INDEX:--1}"
 
 # 6) Avvio dal path corretto
