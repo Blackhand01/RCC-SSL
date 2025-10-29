@@ -10,7 +10,7 @@
 #SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.err
 
 # Set EXP_DATETIME for log renaming
-export EXP_DATETIME="$(date +%Y%m%d-%H%M%S)"
+export EXP_DATETIME="${EXP_DATETIME:-$(date +%Y%m%d-%H%M%S)}"
 
 
 set -euo pipefail
@@ -24,7 +24,7 @@ fi
 cd "$WORKDIR"
 
 # 2) Ambiente software
-source "${WORKDIR}/src/training/scripts/bootstrap_env.sh"
+source "${WORKDIR}/src/training/scripts/env/bootstrap_env.sh"
 
 # 3) Backend headless e logging locale alla repo
 export MPLBACKEND=Agg
@@ -60,7 +60,7 @@ mkdir -p "$(dirname "$DATA_ROOT_ON_LOCAL")"
 rsync -a --info=progress2 "$DATA_ROOT_ON_NET"/ "$DATA_ROOT_ON_LOCAL"/
 # Punta la pipeline allo scratch locale (stesso layout relativi)
 export WEB_DATASET_ROOT="${SLURM_TMPDIR:-/tmp}"
-export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/src/training/configs/exp_10h.yaml}"
+export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/src/training/configs/experiment_debug.yaml}"
 export RUN_INDEX="${RUN_INDEX:--1}"
 
 # 6) Avvio dal path corretto

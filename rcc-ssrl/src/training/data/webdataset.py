@@ -23,21 +23,12 @@ def limit_epoch(ds: Iterable, samples_per_epoch: Optional[int]):
     if not samples_per_epoch:
         return ds
     class _Limiter:
-        def __init__(self, base: Iterable, n: int):
-            self.base = base
-            self.n = int(n)
+        def __init__(self, base: Iterable, n: int): self.base, self.n = base, int(n)
         def __iter__(self):
             for i, s in enumerate(self.base):
                 if i >= self.n: break
                 yield s
         def __len__(self): return self.n
-        def __getitem__(self, idx: int):
-            if idx < 0 or idx >= self.n:
-                raise IndexError("Index out of range")
-            for i, sample in enumerate(self.base):
-                if i == idx:
-                    return sample
-            raise IndexError("Index out of range")
     return _Limiter(ds, samples_per_epoch)
 
 def dataloader_args(pin_cuda: bool, batch_size: int, num_workers: int, prefetch_factor: int, collate_fn):

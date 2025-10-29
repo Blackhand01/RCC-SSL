@@ -11,7 +11,7 @@
 #SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.err
 
 # Set EXP_DATETIME for log renaming
-export EXP_DATETIME="$(date +%Y%m%d-%H%M%S)"
+export EXP_DATETIME="${EXP_DATETIME:-$(date +%Y%m%d-%H%M%S)}"
 
 set -euo pipefail
 
@@ -25,7 +25,7 @@ cd "$WORKDIR"
 mkdir -p "${WORKDIR}/logs"
 
 # 2) Ambiente software
-source "${WORKDIR}/src/training/scripts/bootstrap_env.sh"
+source "${WORKDIR}/src/training/scripts/env/bootstrap_env.sh"
 
 # 3) Backend headless e variabili comuni
 export MPLBACKEND=Agg
