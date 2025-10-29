@@ -220,13 +220,20 @@ class Orchestrator:
         # --- Determine steps_per_epoch once (never call len(loader) if IterableDataset) ---
         steps_per_epoch = ssl_cfg.get("steps_per_epoch")
         if steps_per_epoch is None:
-            try:
-                steps_per_epoch = len(loader)
-            except TypeError as e:
-                raise ValueError(
-                    "train.ssl.steps_per_epoch must be set for IterableDataset/WebDataset "
-                    "or wrap the dataset with webdataset.with_epoch(<approx_num_samples>)."
-                ) from e
+            wds_cfg = self.cfg["data"]["webdataset"]
+            samples = wds_cfg.get("samples_per_epoch")
+            if samples:
+                import math
+                bs = int(wds_cfg["batch_size_ssl"])
+                steps_per_epoch = max(1, math.ceil(int(samples) / max(1, bs)))
+            else:
+                try:
+                    steps_per_epoch = len(loader)
+                except TypeError as e:
+                    raise ValueError(
+                        "Missing train.ssl.steps_per_epoch and data.webdataset.samples_per_epoch "
+                        "for an IterableDataset/WebDataset."
+                    ) from e
         steps_per_epoch = max(1, int(steps_per_epoch))
         epochs = int(ssl_cfg["epochs"])
         total_steps = steps_per_epoch * epochs
@@ -237,6 +244,7 @@ class Orchestrator:
             model,
             optimizer,
             scheduler=scheduler,
+            ema_m=float(ssl_cfg.get("ema_m", 0.0)),
             device=self.device,
             log_every_steps=_log_every_steps(self.cfg),
             log_tag=self.model_key,
@@ -244,7 +252,9 @@ class Orchestrator:
 
         t0_run = time.time()
 
-        csv_path = prefixed(self.run_dirs["metrics"], self.model_key, "ssl_timeseries", "csv")
+        from pathlib import Path as _P
+        csv_stem = _P((self.cfg.get("logging", {}) or {}).get("metrics_csv_name", "ssl_timeseries.csv")).stem
+        csv_path = prefixed(self.run_dirs["metrics"], self.model_key, csv_stem, "csv")
         best_loss = float("inf")
         best_epoch = -1
         best_state = None
@@ -311,6 +321,17 @@ class Orchestrator:
             model.load_state_dict(best_state, strict=False)
             model.to(self.device)
             torch.save(best_state, backbone_ckpt)
+
+        # --- After writing metrics CSV, emit derived CSV with smoothing ---
+        try:
+            from src.training.utils.viz import write_derived_csv
+            log_cfg = (self.cfg.get("logging", {}) or {})
+            window = int(log_cfg.get("smoothing_window", 50))
+            ema_m = float((self.cfg.get("train", {}).get("ssl", {}) or {}).get("ema_m", 0.0))
+            write_derived_csv(str(csv_path), target_col="ssl_loss", sma_window=window,
+                              ema_m=(ema_m if ema_m > 0 else None))
+        except Exception:
+            pass
 
         render_all_ssl(csv_path, self.run_dirs["plots"], self.model_key)
 

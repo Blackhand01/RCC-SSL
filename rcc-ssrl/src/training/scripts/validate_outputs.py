@@ -269,7 +269,6 @@ def _expect_ssl(model_dir: Path) -> Dict[str, List[Path]]:
             ck_dir / "features" / f"{model_key}_val_X.npy",
             ck_dir / "features" / f"{model_key}_val_y.npy",
             mt_dir / f"{model_key}__ssl_timeseries.csv",
-            mt_dir / f"{model_key}__ssl_linear_timeseries.csv",
             pl_dir / f"{model_key}__ssl_losses.png",
         ],
         "optional": [
@@ -280,6 +279,8 @@ def _expect_ssl(model_dir: Path) -> Dict[str, List[Path]]:
             ck_dir / "features" / "train_y.npy",
             ck_dir / "features" / "val_X.npy",
             ck_dir / "features" / "val_y.npy",
+            # linear probe metrics are optional
+            mt_dir / f"{model_key}__ssl_linear_timeseries.csv",
             pl_dir / f"{model_key}__ssl_linear_confusion_val.png",
             pl_dir / f"{model_key}__ssl_features_umap.png",
         ],

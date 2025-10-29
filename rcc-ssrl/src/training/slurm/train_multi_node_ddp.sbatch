@@ -10,18 +10,22 @@
 #SBATCH -o /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.out
 #SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.err
 
+# Set EXP_DATETIME for log renaming
+export EXP_DATETIME="$(date +%Y%m%d-%H%M%S)"
+
 set -euo pipefail
 
 # 1) Allinea la working dir allo submit
 WORKDIR="${SLURM_SUBMIT_DIR:-$PWD}"
+# Ensure WORKDIR is the repo root (handle submission from subdirs)
+if [[ "$WORKDIR" == *"/src/training" ]]; then
+  WORKDIR="$(dirname "$(dirname "$WORKDIR")")"
+fi
 cd "$WORKDIR"
 mkdir -p "${WORKDIR}/logs"
 
 # 2) Ambiente software
-module purge
-module load miniconda3/3.13.25
-eval "$(conda shell.bash hook)"
-conda activate train || { echo "[ERR] conda env 'train' mancante"; exit 2; }
+source "${WORKDIR}/src/training/scripts/bootstrap_env.sh"
 
 # 3) Backend headless e variabili comuni
 export MPLBACKEND=Agg
@@ -41,7 +45,7 @@ echo "[SLURM] NODES=$SLURM_NNODES GPUS/Node=$SLURM_GPUS_PER_NODE"
 MASTER_ADDR=$(scontrol show hostnames "$SLURM_NODELIST" | head -n1)
 MASTER_PORT=${MASTER_PORT:-29500}
 
-export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/configs/exp_01.yaml}"
+export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/src/training/configs/exp_10h.yaml}"
 export RUN_INDEX="${RUN_INDEX:--1}"
 DEFAULT_PROJECT_ROOT="/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project"
 export PROJECT_ROOT="${PROJECT_ROOT:-$DEFAULT_PROJECT_ROOT}"
@@ -56,5 +60,15 @@ srun bash -lc '
     --nproc_per_node='"$SLURM_GPUS_PER_NODE"' \
     --rdzv_backend=c10d \
     --rdzv_endpoint='"$MASTER_ADDR:$MASTER_PORT"' \
-    '"$WORKDIR"'/src/training/launch_training.py
+    python -u '"$WORKDIR"'/src/training/launch_training.py
 '
+
+# 7) Rename logs with experiment datetime
+if [[ -n "${EXP_DATETIME:-}" ]]; then
+  LOG_OUT_ORIG="/home/mla_group_01/rcc-ssrl/src/logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.out"
+  LOG_ERR_ORIG="/home/mla_group_01/rcc-ssrl/src/logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.err"
+  LOG_OUT_NEW="/home/mla_group_01/rcc-ssrl/src/logs/${SLURM_JOB_NAME}.${EXP_DATETIME}.out"
+  LOG_ERR_NEW="/home/mla_group_01/rcc-ssrl/src/logs/${SLURM_JOB_NAME}.${EXP_DATETIME}.err"
+  mv "$LOG_OUT_ORIG" "$LOG_OUT_NEW" 2>/dev/null || true
+  mv "$LOG_ERR_ORIG" "$LOG_ERR_NEW" 2>/dev/null || true
+fi

@@ -1,68 +1,51 @@
-# configs/exp_01.yaml — Deployment config for RCC classification reports
+# configs/exp_08h.yaml — 6 modelli in ~8h su 8×A40 (2 nodi × 4 GPU)
 experiment:
-  name: "exp01_rcc_cls_full"
-  date: "2025-10-26"
+  name: "exp01_rcc_cls_8h"
+  date: "2025-10-28"
   seed: 1337
-  paper_tags: ["deployment","moco_v3","dino","ibot","ijepa","sl_resnet"]
-  mlflow_experiment: "RCC_EXP01"
+  default_run_index: -1
+  paper_tags: ["8h","moco_v3","dino","ibot","ijepa","sl_resnet"]
+  mlflow_experiment: "RCC_EXP01_8H"
+  outputs_layout: "v2"
   validate: { paths: true, steps_per_epoch: true, batch_sizes: true }
   allow_cpu: false
 
 data:
   img_size: 224
   webdataset:
-    dataset_key: "rcc_v2"     # risolto da src/training/utils/paths.py
-    shuffle_shards: 100
+    dataset_key: "rcc_v2"
+    shuffle_shards: 64
     shuffle_samples: 2000
-    samples_per_epoch: 16384
     prefetch_factor: 4
-    batch_size_ssl: 64
-    batch_size_sl: 64
+    batch_size_ssl: 64            # world_size=8 → global_batch_ssl=512
+    batch_size_sl: 64             # world_size=8 → global_batch_sl=512
     num_workers: 8
-    class_to_id:
-      ccRCC: 0
-      pRCC: 1
-      CHROMO: 2
-      ONCO: 3
-      NOT_TUMOR: 4
+    class_to_id: { ccRCC: 0, pRCC: 1, CHROMO: 2, ONCO: 3, NOT_TUMOR: 4 }
 
 dino_v3:
   global_size: 224
   local_size: 96
-  n_local: 6
+  n_local: 2
 
 train:
   optim: { name: "adamw", lr: 0.0005, weight_decay: 0.05, betas: [0.9, 0.999] }
-  scheduler: { name: "cosine", T_max: 100 }
-
+  scheduler: { name: "cosine", T_max: 24 }     # allineato alle epoche SSL
   ssl:
-    epochs: 100              # pretraining “full” (deployment)
-    # steps_per_epoch: null   # lasciare vuoto per usare len(loader)
+    epochs: 24
+    steps_per_epoch: 500
     ema_momentum: 0.996
-    # Linear probe (torch) con curve train/val + cm e ckpt
-    probe:
-      enabled: true
-      type: "torch"
-      epochs: 20
-      lr: 0.1
-      weight_decay: 0.0
-      batch_size: 512
-      split_for_fit: "train"
-      split_for_report: "val"
-
+    probe: { enabled: true }                    # lascia attivo (aggiunge tempo utile)
   sl:
-    epochs: 50
-    early_stop_patience: 10
+    epochs: 18                                  # ~2.1h tot. per i 2 SL (dai tuoi tempi)
     amp: true
     do_val: true
     do_test: false
 
 logging:
-  log_every_steps: 0
+  log_every_steps: 20                            # riduce overhead I/O
   metrics_csv_name: "timeseries_metrics.csv"
 
-xai:
-  methods: []
+xai: { methods: [] }
 
 artifacts:
   save_best_model: true
@@ -71,41 +54,70 @@ artifacts:
   report_md: true
 
 runs:
-  # ---------------- SSL ----------------
-  - name: "moco_v3_full"
+  # -------- SL (~2.1h complessive, multi-epoch) --------
+  - name: "r50_scratch_8h"
+    mode: "sl"
+    override:
+      model:
+        sl: { name: "resnet50_scratch", num_classes: 5, dropout_p: 0.0 }
+      data:
+        webdataset: { samples_per_epoch: 3584 }   # stesso valore del run misurato
+      train:
+        sl: { epochs: 18, amp: true, do_val: true, do_test: false }
+        scheduler: { name: "cosine", T_max: 18 }
+
+  - name: "r50_transfer_8h"
+    mode: "sl"
+    override:
+      model:
+        sl:
+          name: "resnet50_transfer"
+          num_classes: 5
+          imagenet_weights: "DEFAULT"
+          freeze_backbone: false
+          bn_eval_freeze: false
+          dropout_p: 0.0
+      data:
+        webdataset: { samples_per_epoch: 3584 }   # idem per coerenza con tempi reali
+      train:
+        sl: { epochs: 18, amp: true, do_val: true, do_test: false }
+        scheduler: { name: "cosine", T_max: 18 }
+
+  # -------- SSL (~6h complessive) --------
+  - name: "moco_v3_8h"
     mode: "ssl"
     override:
       model:
         ssl: { name: "moco_v3", temperature: 0.2, proj_dim: 256 }
       train:
-        ssl: { epochs: 100 }
+        ssl: { epochs: 24, steps_per_epoch: 500 }
 
-  - name: "ibot_full"
+  - name: "ibot_8h"
     mode: "ssl"
     override:
       model:
         ssl:
           name: "ibot"
           mask_ratio: 0.4
-          prototypes: 4096
+          prototypes: 1024
           temp_teacher: 0.1
           temp_student: 0.2
       train:
-        ssl: { epochs: 100 }
+        ssl: { epochs: 24, steps_per_epoch: 500 }
 
-  - name: "i_jepa_full"
+  - name: "i_jepa_8h"
     mode: "ssl"
     override:
       model:
         ssl:
           name: "i_jepa"
           context_scale: 0.6
-          targets_per_image: 4
+          targets_per_image: 2
           target_scales: [0.1, 0.4]
       train:
-        ssl: { epochs: 100 }
+        ssl: { epochs: 24, steps_per_epoch: 500 }
 
-  - name: "dinov3_full"
+  - name: "dino_v3_8h"
     mode: "ssl"
     override:
       model:
@@ -115,29 +127,6 @@ runs:
           temp_student: 0.1
           gram_lambda: 1.0
       data:
-        dino_v3: { global_size: 224, local_size: 96, n_local: 6 }
+        dino_v3: { global_size: 224, local_size: 96, n_local: 2 }
       train:
-        ssl: { epochs: 100 }
-
-  # ---------------- SL -----------------
-  - name: "r50_scratch_full"
-    mode: "sl"
-    override:
-      model:
-        sl:  { name: "resnet50_scratch",  num_classes: 5, dropout_p: 0.0 }
-      train:
-        optim:     { name: "adamw", lr: 0.001,  weight_decay: 0.05 }
-        scheduler: { name: "cosine", T_max: 50 }
-        sl:        { epochs: 50, early_stop_patience: 10, amp: true }
-
-  - name: "r50_transfer_full"
-    mode: "sl"
-    override:
-      model:
-        sl:  { name: "resnet50_transfer", num_classes: 5,
-               imagenet_weights: "DEFAULT", freeze_backbone: false,
-               bn_eval_freeze: false, dropout_p: 0.0 }
-      train:
-        optim:     { name: "adamw", lr: 0.0003, weight_decay: 0.05 }
-        scheduler: { name: "cosine", T_max: 50 }
-        sl:        { epochs: 50, early_stop_patience: 10, amp: true }
+        ssl: { epochs: 24, steps_per_epoch: 500 }

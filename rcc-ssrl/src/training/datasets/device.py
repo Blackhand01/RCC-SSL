@@ -12,8 +12,8 @@ __all__ = ["device_from_env"]
 
 def device_from_env(allow_cpu: bool = False) -> torch.device:
     """
-    Resolve the preferred torch.device by respecting CUDA availability and the
-    configuration/env escape hatches for CPU-only dry runs.
+    Resolve the preferred torch.device respecting CUDA availability and config/env.
+    Config (allow_cpu) takes precedence over env ALLOW_CPU=1.
     """
     wait_secs = float(os.environ.get("DEVICE_WAIT_FOR_CUDA", 10))
     if not torch.cuda.is_available():

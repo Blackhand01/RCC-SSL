@@ -1,6 +1,7 @@
 # trainer/loops.py
 from __future__ import annotations
 
+import math
 import time
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
@@ -122,7 +123,9 @@ class SSLTrainer:
         self.model = model
         self.optimizer = optimizer
         self.scheduler = scheduler
-        self.ema_m = float(ema_m)
+        # EMA on log-loss for smooth logging; disabled if ema_m <= 0
+        self.ema_m = float(ema_m or 0.0)
+        self._logloss_ema: float | None = None
         self.device = device or (torch.device("cuda", 0) if torch.cuda.is_available() else torch.device("cpu"))
         self.log_every = int(log_every_steps)
         self.log_tag = log_tag or model.__class__.__name__
@@ -153,7 +156,21 @@ class SSLTrainer:
         if self.scheduler is not None:
             self.scheduler.step()
         comp = {k: float(v) for k, v in out.get("loss_components", {}).items()}
-        comp["loss_total"] = float(loss.detach())
+        val = float(loss.detach())
+        # Maintain EMA of log-loss for more stable charts
+        if self.ema_m > 0.0 and math.isfinite(val) and val > 0.0:
+            logv = math.log(max(val, 1e-12))
+            if self._logloss_ema is None:
+                self._logloss_ema = logv
+            else:
+                self._logloss_ema = self.ema_m * self._logloss_ema + (1.0 - self.ema_m) * logv
+            ema_linear = math.exp(self._logloss_ema)
+        else:
+            ema_linear = None
+        comp["ssl_loss"] = val
+        if ema_linear is not None:
+            comp["ssl_loss_ema"] = float(ema_linear)   # smoothed on linear scale
+            comp["ssl_logloss_ema"] = float(self._logloss_ema)  # optional: keep also the log-space value
         return comp
 
     def _train_steps(

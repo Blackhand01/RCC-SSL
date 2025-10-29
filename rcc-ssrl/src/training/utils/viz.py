@@ -46,23 +46,68 @@ def _load_seaborn():
         return None
 
 
-def write_derived_csv(in_csv: Path | str, out_csv: Path | str) -> Path:
-    src = Path(in_csv)
-    dst = Path(out_csv)
-    df = pd.read_csv(src) if src.exists() else pd.DataFrame()
-    if df.empty:
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        df.to_csv(dst, index=False)
-        return dst
+def write_derived_csv(csv_in: str, csv_out: str | None = None,
+                      target_col: str = "ssl_loss",
+                      sma_window: int = 50,
+                      ema_m: float | None = None) -> str:
+    """
+    Read a time-series CSV and write a derived CSV with smoothed metrics:
+    - SMA over `target_col` with window `sma_window`
+    - Optional EMA over `target_col` if `ema_m` is provided (0<ema_m<1)
+    Returns output path.
+    """
+    import csv, math, os
+    import numpy as np
+    if csv_out is None:
+        root, ext = os.path.splitext(csv_in)
+        csv_out = f"{root}__derived{ext}"
 
-    for col in [c for c in df.columns if c not in ("epoch", "step", "elapsed_s")]:
-        window = max(2, len(df) // 10)
-        df[f"{col}_smoothed"] = df[col].rolling(window, min_periods=1).mean()
-        df[f"{col}_d1"] = df[col].diff().fillna(0.0)
+    xs, ys, rows = [], [], []
+    with open(csv_in, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames or []
+        for r in reader:
+            rows.append(r)
+            xs.append(float(r.get("step", len(xs))))
+            try:
+                ys.append(float(r.get(target_col, "nan")))
+            except ValueError:
+                ys.append(float("nan"))
+    y = np.asarray(ys, dtype=np.float64)
+    # SMA (naive)
+    if sma_window > 1 and len(y) >= 1:
+        k = min(sma_window, max(1, len(y)))
+        cumsum = np.cumsum(np.nan_to_num(y, nan=0.0))
+        sma = (cumsum - np.concatenate(([0.0], cumsum[:-k]))) / k
+        # pad first k-1 with nan for alignment
+        sma[:k-1] = np.nan
+    else:
+        sma = np.full_like(y, np.nan)
+    # EMA
+    if ema_m is not None and 0.0 < float(ema_m) < 1.0:
+        ema = np.empty_like(y)
+        ema[:] = np.nan
+        alpha = 1.0 - float(ema_m)
+        acc = None
+        for i, v in enumerate(y):
+            if math.isfinite(v):
+                acc = (v if acc is None else float(ema_m) * acc + alpha * v)
+                ema[i] = acc
+    else:
+        ema = np.full_like(y, np.nan)
 
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(dst, index=False)
-    return dst
+    # write out
+    out_fields = list(rows[0].keys()) if rows else ["step", target_col]
+    if "sma" not in out_fields: out_fields += [f"{target_col}_sma_{sma_window}"]
+    if "ema" not in out_fields: out_fields += [f"{target_col}_ema"]
+    with open(csv_out, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=out_fields)
+        writer.writeheader()
+        for i, r in enumerate(rows):
+            r[f"{target_col}_sma_{sma_window}"] = ("" if math.isnan(sma[i]) else f"{sma[i]:.8g}")
+            r[f"{target_col}_ema"] = ("" if math.isnan(ema[i]) else f"{ema[i]:.8g}")
+            writer.writerow(r)
+    return csv_out
 
 
 def _skip_plot(out_png: Path | str, reason: str) -> Path:
@@ -200,3 +245,67 @@ def render_ssl_classifier(csv_path: Path | str, plots_dir: Path | str, model_key
         prefixed(plots_root, model_key, "ssl_linear_acc", "png"),
     )
     return figures
+
+
+def write_derived_csv(csv_in: str, csv_out: str | None = None,
+                      target_col: str = "ssl_loss",
+                      sma_window: int = 50,
+                      ema_m: float | None = None) -> str:
+    """
+    Read a time-series CSV and write a derived CSV with smoothed metrics:
+    - SMA over `target_col` with window `sma_window`
+    - Optional EMA over `target_col` if `ema_m` is provided (0<ema_m<1)
+    Returns output path.
+    """
+    import csv, math, os
+    import numpy as np
+    if csv_out is None:
+        root, ext = os.path.splitext(csv_in)
+        csv_out = f"{root}__derived{ext}"
+
+    xs, ys, rows = [], [], []
+    with open(csv_in, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames or []
+        for r in reader:
+            rows.append(r)
+            xs.append(float(r.get("step", len(xs))))
+            try:
+                ys.append(float(r.get(target_col, "nan")))
+            except ValueError:
+                ys.append(float("nan"))
+    y = np.asarray(ys, dtype=np.float64)
+    # SMA (naive)
+    if sma_window > 1 and len(y) >= 1:
+        k = min(sma_window, max(1, len(y)))
+        cumsum = np.cumsum(np.nan_to_num(y, nan=0.0))
+        sma = (cumsum - np.concatenate(([0.0], cumsum[:-k]))) / k
+        # pad first k-1 with nan for alignment
+        sma[:k-1] = np.nan
+    else:
+        sma = np.full_like(y, np.nan)
+    # EMA
+    if ema_m is not None and 0.0 < float(ema_m) < 1.0:
+        ema = np.empty_like(y)
+        ema[:] = np.nan
+        alpha = 1.0 - float(ema_m)
+        acc = None
+        for i, v in enumerate(y):
+            if math.isfinite(v):
+                acc = (v if acc is None else float(ema_m) * acc + alpha * v)
+                ema[i] = acc
+    else:
+        ema = np.full_like(y, np.nan)
+
+    # write out
+    out_fields = list(rows[0].keys()) if rows else ["step", target_col]
+    if "sma" not in out_fields: out_fields += [f"{target_col}_sma_{sma_window}"]
+    if "ema" not in out_fields: out_fields += [f"{target_col}_ema"]
+    with open(csv_out, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=out_fields)
+        writer.writeheader()
+        for i, r in enumerate(rows):
+            r[f"{target_col}_sma_{sma_window}"] = ("" if math.isnan(sma[i]) else f"{sma[i]:.8g}")
+            r[f"{target_col}_ema"] = ("" if math.isnan(ema[i]) else f"{ema[i]:.8g}")
+            writer.writerow(r)
+    return csv_out

@@ -26,11 +26,15 @@ def ensure_dir(path: Path | str) -> Path:
     return target
 
 
-def make_exp_id(outputs_root: str) -> str:
+def make_exp_id(outputs_root: str, ts: str | None = None) -> str:
+    """
+    Build a canonical experiment id. If `ts` (YYYYMMDD-HHMMSS) is provided,
+    use it verbatim to ensure cross-tool consistency (e.g., SLURM log naming).
+    """
     root = ensure_dir(outputs_root)
-    from datetime import datetime
-
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    if ts is None:
+        from datetime import datetime
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     return f"exp_{ts}"
 
 

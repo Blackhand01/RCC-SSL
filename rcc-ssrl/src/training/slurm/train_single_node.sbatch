@@ -9,18 +9,22 @@
 #SBATCH -o /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.out
 #SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.err
 
+# Set EXP_DATETIME for log renaming
+export EXP_DATETIME="$(date +%Y%m%d-%H%M%S)"
+
 
 set -euo pipefail
 
 # 1) Porta la working dir nel punto di submit (SLURM copia gli script nello spool)
 WORKDIR="${SLURM_SUBMIT_DIR:-$PWD}"
+# Ensure WORKDIR is the repo root (handle submission from subdirs)
+if [[ "$WORKDIR" == *"/src/training" ]]; then
+  WORKDIR="$(dirname "$(dirname "$WORKDIR")")"
+fi
 cd "$WORKDIR"
 
 # 2) Ambiente software
-module purge
-module load miniconda3/3.13.25
-eval "$(conda shell.bash hook)"
-conda activate train || { echo "[ERR] conda env 'train' mancante"; exit 2; }
+source "${WORKDIR}/src/training/scripts/bootstrap_env.sh"
 
 # 3) Backend headless e logging locale alla repo
 export MPLBACKEND=Agg
@@ -56,9 +60,19 @@ mkdir -p "$(dirname "$DATA_ROOT_ON_LOCAL")"
 rsync -a --info=progress2 "$DATA_ROOT_ON_NET"/ "$DATA_ROOT_ON_LOCAL"/
 # Punta la pipeline allo scratch locale (stesso layout relativi)
 export WEB_DATASET_ROOT="${SLURM_TMPDIR:-/tmp}"
-export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/configs/exp_10h.yaml}"
+export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/src/training/configs/exp_10h.yaml}"
 export RUN_INDEX="${RUN_INDEX:--1}"
 
 # 6) Avvio dal path corretto
 cd "${WORKDIR}"
-exec python -u launch_training.py
+exec python -u src/training/launch_training.py
+
+# 7) Rename logs with experiment datetime
+if [[ -n "${EXP_DATETIME:-}" ]]; then
+  LOG_OUT_ORIG="/home/mla_group_01/rcc-ssrl/src/logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.out"
+  LOG_ERR_ORIG="/home/mla_group_01/rcc-ssrl/src/logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.err"
+  LOG_OUT_NEW="/home/mla_group_01/rcc-ssrl/src/logs/${SLURM_JOB_NAME}.${EXP_DATETIME}.out"
+  LOG_ERR_NEW="/home/mla_group_01/rcc-ssrl/src/logs/${SLURM_JOB_NAME}.${EXP_DATETIME}.err"
+  mv "$LOG_OUT_ORIG" "$LOG_OUT_NEW" 2>/dev/null || true
+  mv "$LOG_ERR_ORIG" "$LOG_ERR_NEW" 2>/dev/null || true
+fi

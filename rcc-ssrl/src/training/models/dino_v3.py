@@ -50,7 +50,7 @@ class DINOv3(SSLBaseModel):
         copy_weights_and_freeze(self.tea, self.stu)
 
     def training_step(self, batch: Dict[str,Any], global_step: int) -> Dict[str,Any]:
-    # "images" = [G, L] (multi-crop) oppure [G] se non hai locali
+        # images = [G, L] (multi-crop) oppure [G] se non hai locali
         images = batch["images"]
         if len(images) == 2:
             G, L = images[0], images[1]      # G: concat global, L: concat local

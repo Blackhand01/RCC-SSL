@@ -43,12 +43,17 @@ Questa cartella contiene script per il lancio del training su cluster SLURM, sia
 
 - Modifica i path e i parametri SLURM secondo le risorse del tuo cluster.
 - Per il training distribuito, assicurati che il dataset sia accessibile da tutti i nodi.
+- Gli script utilizzano `src/training/scripts/env/bootstrap_env.sh` per la configurazione dell'ambiente Python e delle dipendenze.
 - Per Apptainer/Singularity, specifica il path corretto all’immagine `.sif` tramite la variabile `$SIF`.
 
 Batch:
-  sbatch src/training/slurm/train_single_node.sbatch
+  # opzionale: inietti un datetime stabile per traceabilità
+  EXP_DATETIME=$(date +%Y%m%d-%H%M%S) sbatch src/training/slurm/train_single_node.sbatch
 Monitor:
   squeue -u $USER
-  tail -f rcc-train.<JOBID>.out
+  # durante il run:
+  tail -f /home/mla_group_01/rcc-ssrl/src/logs/rcc-train.<JOBID>.out
+  # a fine job i log vengono rinominati:
+  # /home/mla_group_01/rcc-ssrl/src/logs/rcc-train.<DATETIME>.<JOBID>.{out,err}
 Interattivo:
   bash src/training/slurm/run_gpu_interactive.sh

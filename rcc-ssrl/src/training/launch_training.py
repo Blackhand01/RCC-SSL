@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import os
+import re
 import subprocess
 import sys
 import time
@@ -24,7 +25,7 @@ for p in (REPO_ROOT, SRC_ROOT):
 
 from src.training.orchestrator import Orchestrator
 from src.training.utils.io import append_row_csv, make_exp_id
-from src.training.utils.reproducibility import set_global_seed
+from src.training.utils.reproducibility import set_global_seed, copy_code_snapshot
 
 # ---------------------------------------------------------------------
 # Config: file esperimento + file paths
@@ -190,44 +191,40 @@ def _run_validation(outputs_root: str, exp_id: str, exp_name: str) -> None:
 
 
 # ---------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------
+def _env_exp_datetime() -> str | None:
+    """Return EXP_DATETIME if valid (YYYYMMDD-HHMMSS)."""
+    v = os.environ.get("EXP_DATETIME", "").strip()
+    return v if re.match(r"^\d{8}-\d{6}$", v) else None
+
+# ---------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------
 def main() -> int:
-    # -------- Global perf flags (FP32 veloce su Ampere + conv autotune) --------
-    try:
-        # TF32 accelera matmul/conv su GPU Ampere (A40)
-        import torch
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-    except Exception:
-        pass
-    try:
-        # Per input shape abbastanza stabili (ResNet/augment standard)
-        import torch.backends.cudnn as cudnn
-        cudnn.benchmark = True
-    except Exception:
-        pass
-    # Consenti precisione FP32 "alta" in matmul (PyTorch ≥ 2.0)
-    try:
-        import torch
-        torch.set_float32_matmul_precision("high")
-    except Exception:
-        pass
+    # global perf flags are configured in reproducibility.set_global_seed()
 
     base_cfg = read_yaml(CONFIG_PATH)
     resolved_paths = paths()
     all_runs = expand_runs(base_cfg, CONFIG_PATH)
     shared_exp_id: Optional[str] = None
+    exp_dt = _env_exp_datetime()
 
     for cfg_run in all_runs:
         cfg_run = inject_paths_into_cfg(cfg_run, resolved_paths)
         runtime = cfg_run.setdefault("_runtime", {})
         if shared_exp_id is None:
-            shared_exp_id = runtime.get("exp_id") or make_exp_id(cfg_run["experiment"]["outputs_root"])
+            shared_exp_id = (f"exp_{exp_dt}" if exp_dt
+                             else runtime.get("exp_id") or make_exp_id(cfg_run["experiment"]["outputs_root"], exp_dt))
         runtime["exp_id"] = shared_exp_id
         cfg_run.setdefault("experiment", {})["id"] = shared_exp_id
+        os.environ["EXP_ID"] = shared_exp_id
         set_global_seed(cfg_run["experiment"].get("seed", 1337))
         orchestrator = Orchestrator(cfg_run)
+        try:
+            copy_code_snapshot(str(SRC_ROOT / "training"), str(orchestrator.run_dirs["records"]))
+        except Exception:
+            pass
         start_time = time.time()
         metrics = orchestrator.fit()
         _record_summary(orchestrator, metrics, time.time() - start_time)
