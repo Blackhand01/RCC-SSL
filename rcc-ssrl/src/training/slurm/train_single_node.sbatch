@@ -24,7 +24,7 @@ fi
 cd "$WORKDIR"
 
 # 2) Ambiente software
-source "${WORKDIR}/src/training/scripts/env/bootstrap_env.sh"
+source "${WORKDIR}/src/training/scripts/bootstrap_env.sh"
 
 # 3) Backend headless e logging locale alla repo
 export MPLBACKEND=Agg

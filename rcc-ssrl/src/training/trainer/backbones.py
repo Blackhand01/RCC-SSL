@@ -8,7 +8,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
 
-__all__ = ["ResNetBackbone", "mlp_head", "predictor_head"]
+try:
+    import timm
+except Exception:
+    timm = None
+
+__all__ = ["ResNetBackbone", "ViTBackbone", "mlp_head", "predictor_head", "get_backbone"]
 
 
 def _get_resnet_factory(name: str):
@@ -69,6 +74,35 @@ class ResNetBackbone(nn.Module):
         feats = self._forward_stages(x)[self.tokens_source]
         b, c, h, w = feats.shape
         return feats.flatten(2).transpose(1, 2).contiguous().view(b, h * w, c)
+
+
+class ViTBackbone(nn.Module):
+    """Light wrapper for ViT-S/16 using timm (features only)."""
+    def __init__(self, name: str = "vit_small_patch16_224", pretrained: bool = False):
+        super().__init__()
+        if timm is None:
+            raise RuntimeError("timm not available: pip install timm")
+        self.vit = timm.create_model(name, pretrained=pretrained, num_classes=0)
+        self.out_dim = self.vit.num_features
+
+    def forward_global(self, x: torch.Tensor) -> torch.Tensor:
+        feats = self.vit.forward_features(x)  # [B,T,C] for ViT
+        return feats.mean(dim=1) if feats.dim() == 3 else torch.flatten(
+            torch.nn.functional.adaptive_avg_pool2d(feats, 1), 1
+        )
+
+    def forward_tokens(self, x: torch.Tensor) -> torch.Tensor:
+        feats = self.vit.forward_features(x)
+        return feats if feats.dim() == 3 else feats.flatten(2).transpose(1, 2)
+
+
+def get_backbone(name: str, pretrained: bool) -> nn.Module:
+    n = name.lower()
+    if n in ("resnet34","resnet50"):
+        return ResNetBackbone(n, pretrained)
+    if n in ("vit_s16", "vit_small_patch16_224"):
+        return ViTBackbone("vit_small_patch16_224", pretrained)
+    raise ValueError(f"Unsupported backbone: {name}")
 
 
 def _bn1d(dim: int, affine: bool = True) -> nn.BatchNorm1d:

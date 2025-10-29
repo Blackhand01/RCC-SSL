@@ -45,6 +45,12 @@ Questa cartella contiene script per il lancio del training su cluster SLURM, sia
 - Per il training distribuito, assicurati che il dataset sia accessibile da tutti i nodi.
 - Gli script utilizzano `src/training/scripts/env/bootstrap_env.sh` per la configurazione dell'ambiente Python e delle dipendenze.
 - Per Apptainer/Singularity, specifica il path corretto all’immagine `.sif` tramite la variabile `$SIF`.
+- The automatic outputs validation step has been removed from the training flow.
+- If you need to validate artifacts, run the legacy script manually:
+
+  ```bash
+  python -m src.training.scripts.validate_outputs --root <exp_dir> --run-name <run_name>
+  ```
 
 Batch:
   # opzionale: inietti un datetime stabile per traceabilità

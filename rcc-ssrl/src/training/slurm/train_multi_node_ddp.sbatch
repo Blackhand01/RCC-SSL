@@ -25,7 +25,7 @@ cd "$WORKDIR"
 mkdir -p "${WORKDIR}/logs"
 
 # 2) Ambiente software
-source "${WORKDIR}/src/training/scripts/env/bootstrap_env.sh"
+source "${WORKDIR}/src/training/scripts/bootstrap_env.sh"
 
 # 3) Backend headless e variabili comuni
 export MPLBACKEND=Agg

@@ -1,9 +1,10 @@
 # src/training/data/webdataset.py
 from __future__ import annotations
 from typing import Iterable, List, Optional, Any, Dict
-import os, glob
+import os, glob, itertools
 import torch
 import webdataset as wds
+from torch.utils.data import IterableDataset
 
 def list_shards(dir_or_glob: str) -> List[str]:
     if os.path.isdir(dir_or_glob):
@@ -22,12 +23,10 @@ def make_wds(shards: List[str], shuffle_shards: int, shuffle_samples: int) -> wd
 def limit_epoch(ds: Iterable, samples_per_epoch: Optional[int]):
     if not samples_per_epoch:
         return ds
-    class _Limiter:
+    class _Limiter(IterableDataset):
         def __init__(self, base: Iterable, n: int): self.base, self.n = base, int(n)
         def __iter__(self):
-            for i, s in enumerate(self.base):
-                if i >= self.n: break
-                yield s
+            yield from itertools.islice(iter(self.base), self.n)
         def __len__(self): return self.n
     return _Limiter(ds, samples_per_epoch)
 

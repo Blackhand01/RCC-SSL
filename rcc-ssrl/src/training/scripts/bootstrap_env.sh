@@ -2,6 +2,9 @@
 set -euo pipefail
 
 # --- Python env bootstrap (idempotent) ---
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+TRAINING_DIR="$(dirname "$SCRIPT_DIR")"
+REQUIREMENTS_FILE="${TRAINING_DIR}/requirements.txt"
 # 1) Respect SKIP_VENV if provided
 if [[ "${SKIP_VENV:-0}" != "1" ]]; then
   if [[ -z "${VIRTUAL_ENV:-}" ]]; then
@@ -16,7 +19,7 @@ fi
 
 # 2) Dependencies (pin only critical ones if needed)
 if [[ "${INSTALL_DEPS:-1}" == "1" ]]; then
-  pip install -r requirements.txt
+  pip install -r "$REQUIREMENTS_FILE"
 fi
 
 # 3) CUDA/cuDNN env hints (customize if your cluster needs it)
