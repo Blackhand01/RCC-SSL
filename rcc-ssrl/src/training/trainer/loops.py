@@ -204,6 +204,9 @@ class SSLTrainer:
         avg = metrics.averaged(steps)
         avg["steps"] = steps
         avg.update({f"{k}_ema": v for k, v in metrics.ema.items()})
+        # Ensure orchestrator can track best model:
+        # use averaged ssl_loss as epoch-level loss_total.
+        avg["loss_total"] = float(avg.get("ssl_loss", float("inf")))
         return avg
 
     # ---- public API (compat) ------------------------------------------------

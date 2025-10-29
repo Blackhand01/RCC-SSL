@@ -308,7 +308,13 @@ class Orchestrator:
 
             epoch_stats = run_epoch(loader, steps_per_epoch, start_step=global_step_offset, step_callback=_log_step)
             global_step_offset += steps_per_epoch
-            loss_epoch = float(epoch_stats.get("loss_total", float("inf")))
+            # Be tolerant to different metric keys from the trainer:
+            loss_epoch = float(
+                epoch_stats.get(
+                    "loss_total",
+                    epoch_stats.get("ssl_loss_ema", epoch_stats.get("ssl_loss", float("inf")))
+                )
+            )
             if loss_epoch < best_loss:
                 best_loss = loss_epoch
                 best_epoch = epoch
