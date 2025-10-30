@@ -60,7 +60,7 @@ mkdir -p "$(dirname "$DATA_ROOT_ON_LOCAL")"
 rsync -a --info=progress2 "$DATA_ROOT_ON_NET"/ "$DATA_ROOT_ON_LOCAL"/
 # Punta la pipeline allo scratch locale (stesso layout relativi)
 export WEB_DATASET_ROOT="${SLURM_TMPDIR:-/tmp}"
-export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/src/training/configs/experiment_debug.yaml}"
+export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/src/training/configs/exp_24h.yaml}"
 export RUN_INDEX="${RUN_INDEX:--1}"
 
 # 6) Avvio dal path corretto

@@ -383,6 +383,7 @@ class Orchestrator:
                     np.vstack([Xtr, Xva]),
                     np.hstack([ytr, yva]),
                     prefixed(self.run_dirs["plots"], self.model_key, "ssl_features_umap", "png"),
+                    labels=class_labels_from_cfg(self.cfg),
                 )
 
                 probe_cfg = (self.cfg.get("train", {}).get("ssl", {}).get("probe", {}) or {})

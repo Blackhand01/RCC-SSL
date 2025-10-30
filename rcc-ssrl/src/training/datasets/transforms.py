@@ -70,23 +70,43 @@ def multicrop_transform(
     local_size: int,
     n_local: int,
     jitter: float = 0.4,
+    *,
+    global_scale: Tuple[float, float] = (0.14, 1.0),
+    local_scale: Tuple[float, float] = (0.05, 0.14),
+    blur_prob: float = 0.5,
+    solarize_prob: float = 0.0,
 ) -> Callable[[Image.Image], Tuple[List[torch.Tensor], List[torch.Tensor]]]:
-    global_aug = transforms.Compose(
-        [
-            transforms.RandomResizedCrop(global_size, scale=(0.4, 1.0)),
+    """
+    Multi-crop alla DINO:
+      - 2 global crops (scale ampie)
+      - n_local local crops (field-of-view ridotto)
+      - augment: jitter, blur opzionale, solarization opzionale
+    """
+    def _blur(size: int):
+        k = int(max(3, (size // 20) * 2 + 1))  # kernel dispari ~ size/20
+        return transforms.GaussianBlur(kernel_size=k, sigma=(0.1, 2.0))
+
+    solarize_base = (
+        transforms.RandomSolarize(threshold=128)
+        if hasattr(transforms, "RandomSolarize")
+        else transforms.Lambda(lambda im: im)
+    )
+
+    def _build_aug(size: int, scale: Tuple[float, float], do_blur: bool, do_solar: bool):
+        ops: List[Any] = [
+            transforms.RandomResizedCrop(size, scale=scale),
             transforms.RandomHorizontalFlip(),
             transforms.ColorJitter(jitter, jitter, 0.2, 0.1),
-            transforms.Lambda(lambda im: pil_to_unit_tensor(coerce_to_pil_rgb(im))),
         ]
-    )
-    local_aug = transforms.Compose(
-        [
-            transforms.RandomResizedCrop(local_size, scale=(0.05, 0.4)),
-            transforms.RandomHorizontalFlip(),
-            transforms.ColorJitter(jitter, jitter, 0.2, 0.1),
-            transforms.Lambda(lambda im: pil_to_unit_tensor(coerce_to_pil_rgb(im))),
-        ]
-    )
+        if do_blur and blur_prob > 0:
+            ops.append(transforms.RandomApply([_blur(size)], p=float(blur_prob)))
+        if do_solar and solarize_prob > 0:
+            ops.append(transforms.RandomApply([solarize_base], p=float(solarize_prob)))
+        ops.append(transforms.Lambda(lambda im: pil_to_unit_tensor(coerce_to_pil_rgb(im))))
+        return transforms.Compose(ops)
+
+    global_aug = _build_aug(global_size, global_scale, do_blur=True, do_solar=True)
+    local_aug  = _build_aug(local_size,  local_scale,  do_blur=True, do_solar=False)
     return lambda img: ([global_aug(img), global_aug(img)], [local_aug(img) for _ in range(n_local)])
 
 

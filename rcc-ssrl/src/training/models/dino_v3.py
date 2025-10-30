@@ -10,10 +10,19 @@ from src.training.trainer.backbones import ResNetBackbone, mlp_head
 from src.training.utils.torch_ops import copy_weights_and_freeze, ema_update, l2n
 from src.training.trainer.loops import SSLBaseModel
 
-def dino_distill_loss(s: torch.Tensor, t: torch.Tensor, t_temp: float=0.04, s_temp: float=0.1, center: Optional[torch.Tensor]=None) -> torch.Tensor:
-    if center is None: center = t.mean(0, keepdim=True)
-    pt = ((t - center) / max(t_temp,1e-8)).softmax(dim=-1)
-    ls = (s / max(s_temp,1e-8)).log_softmax(dim=-1)
+def dino_distill_loss(
+    s: torch.Tensor,
+    t: torch.Tensor,
+    t_temp: float = 0.04,
+    s_temp: float = 0.1,
+    center: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    if center is None:
+        center = t.mean(0, keepdim=True)
+    t_norm = (t - center) / max(t_temp, 1e-8)
+    s_norm = s / max(s_temp, 1e-8)
+    pt = t_norm.softmax(dim=-1)
+    ls = s_norm.log_softmax(dim=-1)
     return -(pt * ls).sum(dim=-1).mean()
 
 def gram_loss(tokens_s: torch.Tensor, tokens_t: torch.Tensor) -> torch.Tensor:
@@ -25,12 +34,20 @@ class DINOv3(SSLBaseModel):
     def __init__(self, stu: ResNetBackbone, tea: ResNetBackbone,
                  head_s_g: nn.Module, head_t_g: nn.Module,
                  head_s_l: nn.Module, head_t_l: nn.Module,
-                 t_t: float=0.04, t_s: float=0.1, w_gram: float=1.0, ema_m: float=0.996):
+                 t_t: float=0.04, t_s: float=0.1, w_gram: float=1.0, ema_m: float=0.996,
+                 center_m: float = 0.9,
+                 t_warmup_min: Optional[float] = None,
+                 t_warmup_max: Optional[float] = None,
+                 t_warmup_steps: int = 0):
         super().__init__()
         self.stu, self.tea = stu, tea
         self.hs_g, self.ht_g = head_s_g, head_t_g
         self.hs_l, self.ht_l = head_s_l, head_t_l
         self.t_t, self.t_s, self.wg, self.m = t_t, t_s, w_gram, ema_m
+        self.center_m = float(center_m)
+        self.t_min = float(t_warmup_min) if t_warmup_min is not None else float(t_t)
+        self.t_max = float(t_warmup_max) if t_warmup_max is not None else float(t_t)
+        self.t_warmup_steps = int(max(0, t_warmup_steps))
         self.center = None
         self._bootstrap()
 
@@ -41,13 +58,28 @@ class DINOv3(SSLBaseModel):
         dim = stu.out_dim
         head_s_g = mlp_head(dim, 4096, 1024, bn_last_affine=True); head_t_g = mlp_head(dim, 4096, 1024, bn_last_affine=True)
         head_s_l = mlp_head(dim, 2048, 256, bn_last_affine=True); head_t_l = mlp_head(dim, 2048, 256, bn_last_affine=True)
-        return cls(stu, tea, head_s_g, head_t_g, head_s_l, head_t_l,
-                   t_t=m.get("temp_teacher",0.04), t_s=m.get("temp_student",0.1),
-                   w_gram=m.get("gram_lambda",1.0), ema_m=cfg["train"]["ssl"].get("ema_momentum",0.996))
+        sched = (m.get("teacher_temp_schedule") or {})
+        return cls(
+            stu, tea, head_s_g, head_t_g, head_s_l, head_t_l,
+            t_t=m.get("temp_teacher", 0.04),
+            t_s=m.get("temp_student", 0.1),
+            w_gram=m.get("gram_lambda", 1.0),
+            ema_m=cfg["train"]["ssl"].get("ema_momentum", 0.996),
+            center_m=m.get("center_momentum", 0.9),
+            t_warmup_min=sched.get("min"),
+            t_warmup_max=sched.get("max"),
+            t_warmup_steps=int(sched.get("warmup_steps", 0)),
+        )
 
     @torch.no_grad()
     def _bootstrap(self):
         copy_weights_and_freeze(self.tea, self.stu)
+
+    def _teacher_temp(self, global_step: int) -> float:
+        if self.t_warmup_steps <= 0 or abs(self.t_max - self.t_min) < 1e-8:
+            return self.t_max
+        alpha = min(1.0, max(0.0, float(global_step) / float(self.t_warmup_steps)))
+        return self.t_min + (self.t_max - self.t_min) * alpha
 
     def training_step(self, batch: Dict[str,Any], global_step: int) -> Dict[str,Any]:
         # images = [G, L] (multi-crop) oppure [G] se non hai locali
@@ -65,8 +97,10 @@ class DINOv3(SSLBaseModel):
             teacher_global = self.ht_g(self.tea.forward_global(G)).detach()
             teacher_tokens_raw = self.tea.forward_tokens(L)
 
-        self.center = teacher_global.mean(0, keepdim=True) if self.center is None else 0.9 * self.center + 0.1 * teacher_global.mean(0, keepdim=True)
-        loss_global = dino_distill_loss(student_global, teacher_global, self.t_t, self.t_s, self.center)
+        mean_t = teacher_global.mean(0, keepdim=True)
+        self.center = mean_t if self.center is None else self.center_m * self.center + (1.0 - self.center_m) * mean_t
+        t_temp = self._teacher_temp(global_step)
+        loss_global = dino_distill_loss(student_global, teacher_global, t_temp, self.t_s, self.center)
 
         b_tokens, t_tokens, c_tokens = student_tokens_raw.shape
         student_tokens = self.hs_l(student_tokens_raw.reshape(b_tokens * t_tokens, c_tokens)).view(b_tokens, t_tokens, -1)
@@ -79,5 +113,6 @@ class DINOv3(SSLBaseModel):
             "loss_components": {
                 "loss_global": float(loss_global.detach()),
                 "loss_gram": float(loss_gram.detach()),
+                "teacher_temp": float(t_temp),
             },
         }

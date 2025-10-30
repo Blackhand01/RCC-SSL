@@ -1,0 +1,163 @@
+# configs/experiment_24h.yaml
+experiment:
+  name: "exp24h_rcc_cls_full"
+  date: "2025-10-30"
+  seed: 1337
+  default_run_index: -1
+  paper_tags: ["24h","ssl_focus","moco_v3","dino_v3","ibot","ijepa","sl_resnet"]
+  mlflow_experiment: "RCC_EXP24H"
+  outputs_layout: "v2"
+  validate: { paths: true, steps_per_epoch: true, batch_sizes: true }
+  allow_cpu: false
+
+data:
+  img_size: 224
+  webdataset:
+    dataset_key: "rcc_v2"          # risolto da utils/paths.py
+    shuffle_shards: 128
+    shuffle_samples: 4000
+    prefetch_factor: 4
+    batch_size_ssl: 64              # se world_size=1 → batch effettivo = 64
+    batch_size_sl: 64
+    num_workers: 8
+    class_to_id: { ccRCC: 0, pRCC: 1, CHROMO: 2, ONCO: 3, NOT_TUMOR: 4 }
+
+# Augment multi-crop alla DINO (patch nuova)
+dino_v3:
+  global_size: 224
+  local_size: 96
+  n_local: 2
+  jitter: 0.4
+  global_scale: [0.14, 1.0]
+  local_scale: [0.05, 0.14]
+  blur_prob: 0.5
+  solarize_prob: 0.1
+
+train:
+  optim: { name: "adamw", lr: 0.0003, weight_decay: 0.05, betas: [0.9, 0.999] }
+  scheduler: { name: "cosine", T_max: 12 }
+
+  # >>> SSL: focus qualità/stabilità + durata mirata (~20–21h su base precedente 6h)
+  ssl:
+    epochs: 6
+    steps_per_epoch: 4405          # 9k → 48k step (~5.33× tempo precedente)
+    ema_momentum: 0.996
+    amp: true
+    grad_clip: 1.0
+    probe:
+      enabled: true
+      epochs: 20
+      lr: 0.01
+      weight_decay: 0.0
+      batch_size: 256
+
+  # >>> SL: allochiamo ~3–4h totali per completezza
+  sl:
+    epochs: 30                      # 20 → 30
+    early_stop_patience: 7
+    amp: true
+    do_val: true
+    do_test: false
+
+logging:
+  log_every_steps: 1
+  metrics_csv_name: "timeseries_metrics.csv"
+
+xai: { methods: [] }
+
+artifacts:
+  save_best_model: true
+  save_ckpt_every: 1
+  export_csv: ["metrics"]
+  report_md: true
+
+runs:
+
+  # ---------------- SL (supervised) ----------------
+  # Time target ~2h per modello (vs ~40min baseline): più campioni/epoca + più epoche
+  - name: "r50_scratch_24h"
+    mode: "sl"
+    override:
+      model:
+        sl: { name: "resnet50_scratch", num_classes: 5, dropout_p: 0.0 }
+      data:
+        webdataset: { samples_per_epoch: 61440  } 
+      train:
+        sl: { epochs: 25, amp: true, do_val: true, do_test: false }
+        scheduler: { name: "cosine", T_max: 30 }
+
+  - name: "r50_transfer_24h"
+    mode: "sl"
+    override:
+      model:
+        sl:
+          name: "resnet50_transfer"
+          num_classes: 5
+          imagenet_weights: "DEFAULT"
+          freeze_backbone: false
+          bn_eval_freeze: false
+          dropout_p: 0.0
+      data:
+        webdataset: { samples_per_epoch: 61440 }
+      train:
+        sl: { epochs: 25, amp: true, do_val: true, do_test: false }
+        scheduler: { name: "cosine", T_max: 30 }
+
+  # ---------------- SSL (self-supervised) ----------------
+  # Patch integrate: AMP, grad_clip, scheduler interni (iBOT/DINO), probe/feature export
+
+  - name: "moco_v3_24h"
+    mode: "ssl"
+    override:
+      model:
+        ssl: { name: "moco_v3", temperature: 0.2, proj_dim: 256 }
+      train:
+        ssl: { epochs: 12, steps_per_epoch: 4405 }
+
+  - name: "ibot_24h"
+    mode: "ssl"
+    override:
+      model:
+        ssl:
+          name: "ibot"
+          prototypes: 4096
+          temp_teacher: 0.04
+          temp_student: 0.10
+          mask_ratio: 0.30
+          w_cls: 1.0
+          w_tok: 1.0
+          schedules:
+            temp_teacher: { start: 0.04, end: 0.07, warmup_frac: 0.30 }
+            mask_ratio:   { start: 0.00, end: 0.30, warmup_frac: 0.20 }
+      train:
+        ssl: { epochs: 12, steps_per_epoch: 4405 }
+
+  - name: "i_jepa_24h"
+    mode: "ssl"
+    override:
+      model:
+        ssl:
+          name: "i_jepa"
+          context_scale: 0.6
+          targets_per_image: 4
+          target_scales: [0.12, 0.35]
+          min_iou_ctx: 0.05
+          use_cosine_loss: true
+      train:
+        ssl: { epochs: 12, steps_per_epoch: 4405 }
+
+  - name: "dino_v3_24h"
+    mode: "ssl"
+    override:
+      model:
+        ssl:
+          name: "dino_v3"
+          temp_teacher: 0.04
+          temp_student: 0.10
+          gram_lambda: 1.0
+          center_momentum: 0.9
+          teacher_temp_schedule: { min: 0.04, max: 0.07, warmup_steps: 10000 }
+      data:
+        dino_v3: { global_size: 224, local_size: 96, n_local: 2 }
+      train:
+        ssl: { epochs: 12, steps_per_epoch: 4405 }

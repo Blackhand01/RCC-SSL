@@ -98,29 +98,35 @@ def save_features(backbone, loaders, device: torch.device, out_dir: Path, tag: s
     return paths
 
 
-def visualize_features_umap_pca(X: np.ndarray, y: np.ndarray, out_png: Path) -> None:
+def visualize_features_umap_pca(X: np.ndarray, y: np.ndarray, out_png: Path, labels=None) -> None:
     if X.size == 0 or y.size == 0:
         return
     emb = None
     try:  # pragma: no cover - optional dependency
         import umap  # type: ignore
-
         emb = umap.UMAP(n_components=2, random_state=1337).fit_transform(X)
     except Exception:
-        if PCA is not None:
+        try:
+            from sklearn.decomposition import PCA
             emb = PCA(n_components=2, random_state=1337).fit_transform(X)
+        except Exception:
+            return
     if emb is None:
         return
-    plt = None
     try:  # pragma: no cover - optional dependency
         import matplotlib.pyplot as plt  # type: ignore
     except Exception:
         return
     fig = plt.figure()
-    plt.scatter(emb[:, 0], emb[:, 1], c=y, s=4, alpha=0.7)
+    scatter = plt.scatter(emb[:, 0], emb[:, 1], c=y, s=4, alpha=0.7, cmap="tab10")
+    if labels is not None and len(labels) > 0:
+        # crea una legenda con i nomi delle classi
+        import matplotlib.patches as mpatches
+        handles = [mpatches.Patch(color=scatter.cmap(scatter.norm(i)), label=labels[i]) for i in range(len(labels))]
+        plt.legend(handles=handles, title="Class", bbox_to_anchor=(1.05, 1), loc='upper left')
     out_png.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
-    fig.savefig(out_png, dpi=160)
+    fig.savefig(out_png, dpi=160, bbox_inches="tight")
     plt.close(fig)
 
 

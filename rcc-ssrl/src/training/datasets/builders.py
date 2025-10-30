@@ -54,6 +54,11 @@ def build_ssl_loader(data_cfg: Dict[str, Any], model_cfg: Dict[str, Any], split:
             int(dino_cfg.get("global_size", img_size)),
             int(dino_cfg.get("local_size", 96)),
             int(dino_cfg.get("n_local", 6)),
+            float(dino_cfg.get("jitter", 0.4)),
+            global_scale=tuple(dino_cfg.get("global_scale", (0.14, 1.0))),
+            local_scale=tuple(dino_cfg.get("local_scale", (0.05, 0.14))),
+            blur_prob=float(dino_cfg.get("blur_prob", 0.5)),
+            solarize_prob=float(dino_cfg.get("solarize_prob", 0.0)),
         )
         dataset = dataset.map_tuple(transform, lambda meta: meta)
         dataset = limit_epoch(dataset, wds_cfg.get("samples_per_epoch"))
