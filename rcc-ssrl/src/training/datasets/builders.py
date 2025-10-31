@@ -42,13 +42,15 @@ def build_ssl_loader(data_cfg: Dict[str, Any], model_cfg: Dict[str, Any], split:
 
     img_size = int(data_cfg.get("img_size", 224))
     mode = model_cfg["ssl"]["name"].lower()
+    use_mc_ibot = bool((model_cfg.get("ssl", {}) or {}).get("use_multicrop", False))
+    use_mc_moco = bool((model_cfg.get("ssl", {}) or {}).get("use_multicrop", False)) if mode == "moco_v3" else False
 
-    if mode in ("moco_v3", "ibot"):
+    if (mode in ("moco_v3",) and not use_mc_moco) or (mode == "ibot" and not use_mc_ibot):
         transform = two_view_transform(img_size)
         dataset = dataset.map_tuple(transform, lambda meta: meta)
         dataset = limit_epoch(dataset, wds_cfg.get("samples_per_epoch"))
         collate_fn = collate_two_views
-    elif mode == "dino_v3":
+    elif mode == "dino_v3" or (mode == "ibot" and use_mc_ibot) or (mode == "moco_v3" and use_mc_moco):
         dino_cfg = data_cfg.get("dino_v3", {})
         transform = multicrop_transform(
             int(dino_cfg.get("global_size", img_size)),

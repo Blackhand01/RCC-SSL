@@ -264,10 +264,14 @@ class Orchestrator:
 
         def _epoch_mode() -> Callable:
             name = self.cfg["model"]["ssl"]["name"].lower()
-            if name in ("moco_v3", "ibot"):
-                return trainer.train_epoch_two_views
+            if name == "moco_v3":
+                use_mc = bool((self.cfg.get("model",{}).get("ssl",{}) or {}).get("use_multicrop", False))
+                return trainer.train_epoch_multicrop if use_mc else trainer.train_epoch_two_views
             if name == "dino_v3":
                 return trainer.train_epoch_multicrop
+            if name == "ibot":
+                use_mc = bool((self.cfg.get("model",{}).get("ssl",{}) or {}).get("use_multicrop", False))
+                return trainer.train_epoch_multicrop if use_mc else trainer.train_epoch_two_views
             if name == "i_jepa":
                 return trainer.train_epoch_single_image
             raise ValueError(f"Unsupported SSL model '{name}'.")

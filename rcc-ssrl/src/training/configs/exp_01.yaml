@@ -1,132 +1,55 @@
-# configs/exp_08h.yaml — 6 modelli in ~8h su 8×A40 (2 nodi × 4 GPU)
 experiment:
-  name: "exp01_rcc_cls_8h"
-  date: "2025-10-28"
-  seed: 1337
-  default_run_index: -1
-  paper_tags: ["8h","moco_v3","dino","ibot","ijepa","sl_resnet"]
-  mlflow_experiment: "RCC_EXP01_8H"
-  outputs_layout: "v2"
-  validate: { paths: true, steps_per_epoch: true, batch_sizes: true }
-  allow_cpu: false
+  name: "moco_v3_test"
+  outputs_root: "/tmp/rcc-ssrl-outputs"
+  validate:
+    paths: false
+    steps_per_epoch: false
+    batch_sizes: false
 
 data:
   img_size: 224
   webdataset:
-    dataset_key: "rcc_v2"
-    shuffle_shards: 64
-    shuffle_samples: 2000
+    train_dir: "/path/to/train"
+    val_dir: "/path/to/val"
+    class_to_id: {"class0": 0, "class1": 1}
+    batch_size_ssl: 64
+    batch_size_sl: 32
+    num_workers: 4
+    shuffle_shards: true
+    shuffle_samples: true
+    samples_per_epoch: 1000
     prefetch_factor: 4
-    batch_size_ssl: 64            # world_size=8 → global_batch_ssl=512
-    batch_size_sl: 64             # world_size=8 → global_batch_sl=512
-    num_workers: 8
-    class_to_id: { ccRCC: 0, pRCC: 1, CHROMO: 2, ONCO: 3, NOT_TUMOR: 4 }
 
-dino_v3:
-  global_size: 224
-  local_size: 96
-  n_local: 2
+model:
+  type: "ssl"
+  backbone: "resnet50"
+  ssl:
+    name: "moco_v3"
+    temperature: 0.2
+    use_multicrop: false
+    wsi_debias:
+      enabled: false
+      mode: "filter"
+      downweight: 0.25
+    temp_teacher_schedule:
+      start: 0.2
+      end: 0.05
+      warmup_frac: 0.1
 
 train:
-  optim: { name: "adamw", lr: 0.0005, weight_decay: 0.05, betas: [0.9, 0.999] }
-  scheduler: { name: "cosine", T_max: 24 }     # allineato alle epoche SSL
   ssl:
-    epochs: 24
-    steps_per_epoch: 500
+    epochs: 10
+    steps_per_epoch: 100
     ema_momentum: 0.996
-    probe: { enabled: true }                    # lascia attivo (aggiunge tempo utile)
-  sl:
-    epochs: 18                                  # ~2.1h tot. per i 2 SL (dai tuoi tempi)
-    amp: true
-    do_val: true
-    do_test: false
+  optim:
+    name: "adamw"
+    lr: 0.001
+    weight_decay: 0.0001
+    betas: [0.9, 0.999]
+  scheduler:
+    name: "cosine"
 
 logging:
-  log_every_steps: 20                            # riduce overhead I/O
-  metrics_csv_name: "timeseries_metrics.csv"
-
-xai: { methods: [] }
-
-artifacts:
-  save_best_model: true
-  save_ckpt_every: 1
-  export_csv: ["metrics"]
-  report_md: true
-
-runs:
-  # -------- SL (~2.1h complessive, multi-epoch) --------
-  - name: "r50_scratch_8h"
-    mode: "sl"
-    override:
-      model:
-        sl: { name: "resnet50_scratch", num_classes: 5, dropout_p: 0.0 }
-      data:
-        webdataset: { samples_per_epoch: 3584 }   # stesso valore del run misurato
-      train:
-        sl: { epochs: 18, amp: true, do_val: true, do_test: false }
-        scheduler: { name: "cosine", T_max: 18 }
-
-  - name: "r50_transfer_8h"
-    mode: "sl"
-    override:
-      model:
-        sl:
-          name: "resnet50_transfer"
-          num_classes: 5
-          imagenet_weights: "DEFAULT"
-          freeze_backbone: false
-          bn_eval_freeze: false
-          dropout_p: 0.0
-      data:
-        webdataset: { samples_per_epoch: 3584 }   # idem per coerenza con tempi reali
-      train:
-        sl: { epochs: 18, amp: true, do_val: true, do_test: false }
-        scheduler: { name: "cosine", T_max: 18 }
-
-  # -------- SSL (~6h complessive) --------
-  - name: "moco_v3_8h"
-    mode: "ssl"
-    override:
-      model:
-        ssl: { name: "moco_v3", temperature: 0.2, proj_dim: 256 }
-      train:
-        ssl: { epochs: 24, steps_per_epoch: 500 }
-
-  - name: "ibot_8h"
-    mode: "ssl"
-    override:
-      model:
-        ssl:
-          name: "ibot"
-          mask_ratio: 0.4
-          prototypes: 1024
-          temp_teacher: 0.1
-          temp_student: 0.2
-      train:
-        ssl: { epochs: 24, steps_per_epoch: 500 }
-
-  - name: "i_jepa_8h"
-    mode: "ssl"
-    override:
-      model:
-        ssl:
-          name: "i_jepa"
-          context_scale: 0.6
-          targets_per_image: 2
-          target_scales: [0.1, 0.4]
-      train:
-        ssl: { epochs: 24, steps_per_epoch: 500 }
-
-  - name: "dino_v3_8h"
-    mode: "ssl"
-    override:
-      model:
-        ssl:
-          name: "dino_v3"
-          temp_teacher: 0.04
-          temp_student: 0.1
-          gram_lambda: 1.0
-      data:
-        dino_v3: { global_size: 224, local_size: 96, n_local: 2 }
-      train:
-        ssl: { epochs: 24, steps_per_epoch: 500 }
+  log_every_steps: 10
+  metrics_csv_name: "ssl_timeseries.csv"
+  smoothing_window: 50
