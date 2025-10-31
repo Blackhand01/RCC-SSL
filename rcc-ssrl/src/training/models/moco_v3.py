@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Dict, Any, List, Optional, Tuple
 import torch, torch.nn as nn, torch.nn.functional as F
 from src.training.trainer.backbones import ResNetBackbone, mlp_head, predictor_head
-from src.training.utils.torch_ops import copy_weights_and_freeze, cosine_logits, ema_update
+from src.training.utils.torch_ops import copy_weights_and_freeze, cosine_logits, ema_update, l2n
 from src.training.trainer.loops import SSLBaseModel
 from src.training.engine.schedules import CosineWithWarmup
 import math
@@ -18,7 +18,8 @@ class MoCoV3(SSLBaseModel):
                  ema_to_one: bool=True,
                  use_multicrop: bool=False,
                  wsi_debias: Optional[Dict[str,Any]]=None,
-                 total_steps: int=10000):
+                 total_steps: int=10000,
+                 queue_size: int=65536):
         super().__init__()
         self.backbone_q, self.backbone_k = backbone_q, backbone_k
         self.proj_q, self.proj_k, self.pred_q = proj_q, proj_k, pred_q
@@ -36,6 +37,7 @@ class MoCoV3(SSLBaseModel):
         if wsi_debias:
             self.debias.update(wsi_debias)
 
+        self.K = queue_size
         dim = self.proj_q[-1].out_features if hasattr(self.proj_q[-1], "out_features") else 256
         self.register_buffer("queue", torch.randn(dim, self.K))
         self.queue = l2n(self.queue.t()).t()
@@ -63,6 +65,7 @@ class MoCoV3(SSLBaseModel):
                 float(sched.get("end",   mcfg.get("temperature", 0.2))),
                 warmup_frac=float(sched.get("warmup_frac", 0.0))
             )
+        K = int(mcfg.get("queue_size", 65536))
         return cls(
             bb_q, bb_k, proj_q, proj_k, pred_q,
             tau=mcfg.get("temperature",0.2),
@@ -72,6 +75,7 @@ class MoCoV3(SSLBaseModel):
             use_multicrop=bool(mcfg.get("use_multicrop", False)),
             wsi_debias=mcfg.get("wsi_debias", None),
             total_steps=total_steps,
+            queue_size=K,
         )
 
     @torch.no_grad()
