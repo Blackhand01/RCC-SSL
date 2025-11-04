@@ -56,9 +56,9 @@ else:
 # Mapping of WebDataset aliases to their relative directory layout.
 WEB_DATASETS: Dict[str, Dict[str, str]] = {
     "rcc_v2": {
-        "train_dir": "data/processed/rcc_webdataset_v2/train",
-        "val_dir": "data/processed/rcc_webdataset_v2/val",
-        "test_dir": "data/processed/rcc_webdataset_v2/test",
+        "train_dir": "data/processed/rcc_webdataset_final/train",
+        "val_dir": "data/processed/rcc_webdataset_final/val",
+        "test_dir": "data/processed/rcc_webdataset_final/test",
     },
 }
 

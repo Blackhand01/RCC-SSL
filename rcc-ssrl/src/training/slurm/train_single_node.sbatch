@@ -54,13 +54,13 @@ DEFAULT_PROJECT_ROOT="/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ss
 export PROJECT_ROOT="${PROJECT_ROOT:-$DEFAULT_PROJECT_ROOT}"
 export OUTPUTS_ROOT="${OUTPUTS_ROOT:-${PROJECT_ROOT}/outputs/mlruns}"
 # ---- Staging su disco locale di nodo ($SLURM_TMPDIR) ----
-DATA_ROOT_ON_NET="${WEB_DATASET_ROOT:-$PROJECT_ROOT}/data/processed/rcc_webdataset_v2"
-DATA_ROOT_ON_LOCAL="${SLURM_TMPDIR:-/tmp}/data/processed/rcc_webdataset_v2"
+DATA_ROOT_ON_NET="${WEB_DATASET_ROOT:-$PROJECT_ROOT}/data/processed/rcc_webdataset_final"
+DATA_ROOT_ON_LOCAL="${SLURM_TMPDIR:-/tmp}/data/processed/rcc_webdataset_final"
 mkdir -p "$(dirname "$DATA_ROOT_ON_LOCAL")"
 rsync -a --info=progress2 "$DATA_ROOT_ON_NET"/ "$DATA_ROOT_ON_LOCAL"/
 # Punta la pipeline allo scratch locale (stesso layout relativi)
 export WEB_DATASET_ROOT="${SLURM_TMPDIR:-/tmp}"
-export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/src/training/configs/exp_24h.yaml}"
+export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/src/training/configs/experiment_debug.yaml}"
 export RUN_INDEX="${RUN_INDEX:--1}"
 
 # 6) Avvio dal path corretto
