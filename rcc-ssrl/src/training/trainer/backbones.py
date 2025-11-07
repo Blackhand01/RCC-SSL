@@ -78,12 +78,28 @@ class ResNetBackbone(nn.Module):
 
 class ViTBackbone(nn.Module):
     """Light wrapper for ViT-S/16 using timm (features only)."""
-    def __init__(self, name: str = "vit_small_patch16_224", pretrained: bool = False):
+    def __init__(
+        self,
+        name: str = "vit_small_patch16_224",
+        pretrained: bool = False,
+        *,
+        patch_size: Optional[int] = None,
+        freeze_patch_embed: bool = False,
+        random_patch_proj: bool = False,
+        bn_in_patch: bool = False,
+    ):
         super().__init__()
         if timm is None:
             raise RuntimeError("timm not available: pip install timm")
-        self.vit = timm.create_model(name, pretrained=pretrained, num_classes=0)
+        self.vit = timm.create_model(name, pretrained=pretrained, num_classes=0, dynamic_img_size=True)
         self.out_dim = self.vit.num_features
+        # Previeni NaN: clamp LayerScale / attn se presenti
+        if hasattr(self.vit, "blocks"):
+            for blk in self.vit.blocks:
+                if hasattr(blk, "ls1") and hasattr(blk.ls1, "gamma"):
+                    blk.ls1.gamma.data.clamp_(min=1e-4)
+                if hasattr(blk, "ls2") and hasattr(blk.ls2, "gamma"):
+                    blk.ls2.gamma.data.clamp_(min=1e-4)
 
     def forward_global(self, x: torch.Tensor) -> torch.Tensor:
         feats = self.vit.forward_features(x)  # [B,T,C] for ViT
@@ -96,12 +112,12 @@ class ViTBackbone(nn.Module):
         return feats if feats.dim() == 3 else feats.flatten(2).transpose(1, 2)
 
 
-def get_backbone(name: str, pretrained: bool) -> nn.Module:
+def get_backbone(name: str, pretrained: bool, **kwargs) -> nn.Module:
     n = name.lower()
     if n in ("resnet34","resnet50"):
         return ResNetBackbone(n, pretrained)
-    if n in ("vit_s16", "vit_small_patch16_224"):
-        return ViTBackbone("vit_small_patch16_224", pretrained)
+    if n in ("vit_s16", "vit_small_patch16_224", "vit_base_patch16_224"):
+        return ViTBackbone(name, pretrained, **kwargs)
     raise ValueError(f"Unsupported backbone: {name}")
 
 

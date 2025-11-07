@@ -39,4 +39,3 @@ def class_labels_from_cfg(cfg: Dict[str, Any]) -> List[str]:
         return []
     inverse = {idx: name for name, idx in mapping.items()}
     return [inverse[idx] for idx in sorted(inverse)]
-

@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
 import torch
 import torch.nn as nn
+from torch.nn.utils import clip_grad_norm_
 
 from ..utils.torch_ops import move_to
 
@@ -119,6 +120,9 @@ class SSLTrainer:
         device: Optional[torch.device] = None,
         log_every_steps: int = 0,
         log_tag: Optional[str] = None,
+        grad_clip_max: float = 0.0,
+        accumulate_steps: int = 1,
+        amp: bool = True,
     ):
         self.model = model
         self.optimizer = optimizer
@@ -129,7 +133,21 @@ class SSLTrainer:
         self.device = device or (torch.device("cuda", 0) if torch.cuda.is_available() else torch.device("cpu"))
         self.log_every = int(log_every_steps)
         self.log_tag = log_tag or model.__class__.__name__
+        self.grad_clip_max = float(max(0.0, grad_clip_max))
+        self.accumulate = int(max(1, accumulate_steps))
+        self._acc_counter = 0
+        self._pending_grads = False
         self.model.to(self.device)
+        # AMP (come SLTrainer): autocast + GradScaler
+        self._amp_enabled = bool(amp and torch.cuda.is_available())
+        try:
+            import torch.amp as _amp  # torch>=2
+            self.scaler = _amp.GradScaler("cuda", enabled=self._amp_enabled)
+            self._autocast = lambda: _amp.autocast(device_type="cuda", enabled=self._amp_enabled)
+        except Exception:
+            from torch.cuda import amp as _amp
+            self.scaler = _amp.GradScaler(enabled=self._amp_enabled)
+            self._autocast = lambda: _amp.autocast(enabled=self._amp_enabled)
 
     # ---- internals ----------------------------------------------------------
     def _run_step(self, batch: Dict[str, Any], global_step: int) -> Dict[str, float]:
@@ -148,15 +166,35 @@ class SSLTrainer:
             return obj
 
         batch = _as_channels_last(batch)
-        out = self.model.training_step(batch, global_step)
-        loss = out["loss_total"]
-        self.optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        self.optimizer.step()
-        if self.scheduler is not None:
-            self.scheduler.step()
+        # forward con autocast
+        with self._autocast():
+            out = self.model.training_step(batch, global_step)
+        raw_loss = out["loss_total"]
+        loss = raw_loss / float(self.accumulate)
+
+        # grad accumulation
+        if (self._acc_counter % self.accumulate) == 0:
+            self.optimizer.zero_grad(set_to_none=True)
+        if self._amp_enabled:
+            self.scaler.scale(loss).backward()
+        else:
+            loss.backward()
+        self._pending_grads = True
+        self._acc_counter += 1
+        if (self._acc_counter % self.accumulate) == 0:
+            if self.grad_clip_max > 0.0:
+                clip_grad_norm_(self.model.parameters(), self.grad_clip_max)
+            if self._amp_enabled:
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
+                self.optimizer.step()
+            if self.scheduler is not None:
+                self.scheduler.step()
+            self._pending_grads = False
+
         comp = {k: float(v) for k, v in out.get("loss_components", {}).items()}
-        val = float(loss.detach())
+        val = float(raw_loss.detach())
         # Maintain EMA of log-loss for more stable charts
         if self.ema_m > 0.0 and math.isfinite(val) and val > 0.0:
             logv = math.log(max(val, 1e-12))
@@ -199,7 +237,18 @@ class SSLTrainer:
             if step_callback:
                 step_callback(gstep, stats)
 
-
+        # flush step finale se rimangono grad non applicati
+        if self._pending_grads:
+            if self.grad_clip_max > 0.0:
+                clip_grad_norm_(self.model.parameters(), self.grad_clip_max)
+            if self._amp_enabled:
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
+                self.optimizer.step()
+            if self.scheduler is not None:
+                self.scheduler.step()
+            self._pending_grads = False
 
         avg = metrics.averaged(steps)
         avg["steps"] = steps

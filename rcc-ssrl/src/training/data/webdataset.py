@@ -17,6 +17,7 @@ def make_wds(shards: List[str], shuffle_shards: int, shuffle_samples: int) -> wd
         shardshuffle=shuffle_shards,
         nodesplitter=wds.split_by_node,
         workersplitter=wds.split_by_worker,
+        empty_check=False,
     )
     return ds.shuffle(shuffle_samples).decode("pil").to_tuple("img.jpg;jpg;jpeg;png", "meta.json;json")
 

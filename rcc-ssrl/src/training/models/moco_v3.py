@@ -2,24 +2,40 @@
 from __future__ import annotations
 from typing import Dict, Any, List, Optional, Tuple
 import torch, torch.nn as nn, torch.nn.functional as F
-from src.training.trainer.backbones import ResNetBackbone, mlp_head, predictor_head
-from src.training.utils.torch_ops import copy_weights_and_freeze, cosine_logits, ema_update, l2n
+from src.training.trainer.backbones import get_backbone, mlp_head, predictor_head
+from src.training.utils.torch_ops import copy_weights_and_freeze, cosine_logits, ema_update
 from src.training.trainer.loops import SSLBaseModel
-from src.training.engine.schedules import CosineWithWarmup
+
+class CosineWithWarmup:
+    """Cosine annealing from start->end with warmup in [0, warmup_frac]."""
+    def __init__(self, start: float, end: float, warmup_frac: float = 0.1):
+        self.start, self.end, self.warmup = float(start), float(end), float(warmup_frac)
+
+    def at(self, t: float) -> float:
+        t = min(max(t, 0.0), 1.0)
+        if t < self.warmup:
+            return self.start + (self.end - self.start) * (t / max(self.warmup, 1e-8))
+        # cosine on the remaining segment
+        import math
+        tc = (t - self.warmup) / max(1.0 - self.warmup, 1e-8)
+        return self.end + 0.5 * (self.start - self.end) * (1 + math.cos(math.pi * tc))
 import math
-import hashlib
 
 class MoCoV3(SSLBaseModel):
-    def __init__(self, backbone_q: ResNetBackbone, backbone_k: ResNetBackbone,
+    """
+    MoCo v3 “no-queue”: due viste globali, encoder a momentum (teacher) + predictor.
+    Negativi = in-batch. Loss simmetrizzata: ctr(q1,k2) + ctr(q2,k1).
+    """
+    def __init__(self, backbone_q: nn.Module, backbone_k: nn.Module,
                  proj_q: nn.Module, proj_k: nn.Module, pred_q: nn.Module,
-                 tau: float=0.2, momentum: float=0.996,
+                 tau: float = 0.2, momentum: float = 0.996,
                  *,
                  temp_teacher_sched: Optional[CosineWithWarmup]=None,
                  ema_to_one: bool=True,
                  use_multicrop: bool=False,
-                 wsi_debias: Optional[Dict[str,Any]]=None,
                  total_steps: int=10000,
-                 queue_size: int=65536):
+                 clip_qk: float = 50.0,
+                 sync_bn: bool = False):
         super().__init__()
         self.backbone_q, self.backbone_k = backbone_q, backbone_k
         self.proj_q, self.proj_k, self.pred_q = proj_q, proj_k, pred_q
@@ -31,28 +47,23 @@ class MoCoV3(SSLBaseModel):
         self.use_multicrop = bool(use_multicrop)
         self.total_steps = int(max(1, total_steps))
         self._step = 0
-
-        # WSI-aware debias: {'enabled': bool, 'mode': 'filter'|'downweight', 'downweight': 0.25}
-        self.debias = {"enabled": False, "mode": "filter", "downweight": 0.25}
-        if wsi_debias:
-            self.debias.update(wsi_debias)
-
-        self.K = queue_size
-        dim = self.proj_q[-1].out_features if hasattr(self.proj_q[-1], "out_features") else 256
-        self.register_buffer("queue", torch.randn(dim, self.K))
-        self.queue = l2n(self.queue.t()).t()
-        self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
-        # memorizza hash WSI per ciascun elemento in queue (int64); -1 se sconosciuto
-        self.register_buffer("queue_wsi", -torch.ones(self.K, dtype=torch.long), persistent=True)
+        self.clip_qk = float(clip_qk)
+        self._sync_bn_enabled = bool(sync_bn)
 
         self._bootstrap()
 
     @classmethod
     def from_config(cls, cfg: Dict[str,Any]) -> "MoCoV3":
-        mcfg = cfg["model"]["ssl"]; bname = cfg["model"].get("backbone","resnet50")
-        bb_q = ResNetBackbone(name=bname, pretrained=False); bb_k = ResNetBackbone(name=bname, pretrained=False)
-        dim = bb_q.out_dim; proj_q = mlp_head(dim, 4096, 256); proj_k = mlp_head(dim, 4096, 256)
-        pred_q = predictor_head(256, 4096)
+        mcfg = cfg["model"]["ssl"]
+        bname = cfg["model"].get("backbone","resnet50")
+        bopts = cfg["model"].get("backbone_opts", {}) or {}
+        bb_q = get_backbone(name=bname, pretrained=False, **bopts)
+        bb_k = get_backbone(name=bname, pretrained=False, **bopts)
+        dim = bb_q.out_dim
+        proj_dim = int(mcfg.get("proj_dim", 256))
+        hid = int(mcfg.get("hidden_dim", 4096))
+        proj_q = mlp_head(dim, hid, proj_dim); proj_k = mlp_head(dim, hid, proj_dim)
+        pred_q = predictor_head(proj_dim, hid)
         tr_ssl = (cfg.get("train",{}).get("ssl",{}) or {})
         steps_per_epoch = int(tr_ssl.get("steps_per_epoch", 1000))
         epochs = int(tr_ssl.get("epochs", 10))
@@ -65,23 +76,31 @@ class MoCoV3(SSLBaseModel):
                 float(sched.get("end",   mcfg.get("temperature", 0.2))),
                 warmup_frac=float(sched.get("warmup_frac", 0.0))
             )
-        K = int(mcfg.get("queue_size", 65536))
         return cls(
             bb_q, bb_k, proj_q, proj_k, pred_q,
             tau=mcfg.get("temperature",0.2),
             momentum=cfg["train"]["ssl"].get("ema_momentum",0.996),
             temp_teacher_sched=Ts,
-            ema_to_one=True,
-            use_multicrop=bool(mcfg.get("use_multicrop", False)),
-            wsi_debias=mcfg.get("wsi_debias", None),
+            ema_to_one=bool(mcfg.get("ema_to_one", True)),
+            use_multicrop=bool(mcfg.get("use_multicrop", False)),  # accettato ma ignoriamo le local per MoCo
             total_steps=total_steps,
-            queue_size=K,
+            clip_qk=float(mcfg.get("clip_qk", 50.0)),
+            sync_bn=bool(mcfg.get("sync_bn", False)),
         )
 
     @torch.no_grad()
     def _bootstrap(self) -> None:
         copy_weights_and_freeze(self.backbone_k, self.backbone_q)
         copy_weights_and_freeze(self.proj_k, self.proj_q)
+        # Converti BN in SyncBN solo su projector/predictor quando in DDP
+        if self._sync_bn_enabled:
+            try:
+                if torch.distributed.is_available() and torch.distributed.is_initialized():
+                    self.proj_q = nn.SyncBatchNorm.convert_sync_batchnorm(self.proj_q)
+                    self.proj_k = nn.SyncBatchNorm.convert_sync_batchnorm(self.proj_k)
+                    self.pred_q = nn.SyncBatchNorm.convert_sync_batchnorm(self.pred_q)
+            except Exception:
+                pass
 
     @torch.no_grad()
     def _ema_momentum(self) -> float:
@@ -97,42 +116,22 @@ class MoCoV3(SSLBaseModel):
         t = min(1.0, self._step / float(self.total_steps))
         return float(self.Tsched.at(t))
 
-    @staticmethod
-    def _hash_wsi_id(meta_item: Any) -> int:
-        # meta può essere dict o altro; cerchiamo 'wsi_id'
-        try:
-            wsi = str(meta_item.get("wsi_id", ""))
-        except Exception:
-            wsi = ""
-        if not wsi:
-            return -1
-        # hash stabile (sha1 → int64)
-        h = int(hashlib.sha1(wsi.encode("utf-8")).hexdigest()[:16], 16)
-        return h & ((1<<63)-1)
-
     def _info_nce_sym(self, q1, q2, k1, k2) -> torch.Tensor:
         lab = torch.arange(q1.size(0), device=q1.device)
         Tt = self._teacher_temp()
-        l12 = F.cross_entropy(cosine_logits(q1, k2, Tt), lab)
-        l21 = F.cross_entropy(cosine_logits(q2, k1, Tt), lab)
+        # clamp per stabilità numerica
+        l12 = F.cross_entropy(torch.clamp(cosine_logits(q1, k2, Tt), -self.clip_qk, self.clip_qk), lab)
+        l21 = F.cross_entropy(torch.clamp(cosine_logits(q2, k1, Tt), -self.clip_qk, self.clip_qk), lab)
         return (l12 + l21)
 
     def training_step(self, batch: Dict[str,Any], global_step: int) -> Dict[str,Any]:
         self._step = global_step
         imgs, meta = batch["images"], batch.get("meta", None)
-        # Views: (a) due global standard, (b) opzionali local extra se use_multicrop
-        if self.use_multicrop:
-            G = imgs[0]; L = imgs[1] if len(imgs) > 1 else imgs[0]     # compat: multicrop builder usa [G,L]
-            # split due global
-            if G.size(0) % 2 != 0:
-                raise ValueError("MoCo multi-crop richiede batch globale divisibile per 2.")
-            x1, x2 = G.chunk(2, dim=0)
-            extra_pos: List[torch.Tensor] = [L] if L is not None else []
-        else:
-            if len(imgs) < 2:
-                raise ValueError("MoCo v3 requires two global views.")
+        # Due viste globali (multi-crop accettato ma le local non vengono usate per MoCo v3)
+        if len(imgs) >= 2:
             x1, x2 = imgs[0], imgs[1]
-            extra_pos = []
+        else:
+            raise ValueError("MoCo v3 requires two global views.")
 
         q1 = self.pred_q(self.proj_q(self.backbone_q.forward_global(x1)))
         q2 = self.pred_q(self.proj_q(self.backbone_q.forward_global(x2)))
@@ -140,35 +139,31 @@ class MoCoV3(SSLBaseModel):
             ema_update(self.backbone_k, self.backbone_q, self._ema_momentum())
             k1 = self.proj_k(self.backbone_k.forward_global(x1))
             k2 = self.proj_k(self.backbone_k.forward_global(x2))
-        loss_main = self._info_nce_sym(q1, q2, k1.detach(), k2.detach())
-
-        # ulteriori positivi da local views (facoltativo)
-        aux_losses = []
-        if self.use_multicrop and len(extra_pos) > 0:
-            with torch.no_grad():
-                k_loc = self.proj_k(self.backbone_k.forward_global(extra_pos[0])).detach()  # treat as extra keys
-            q_loc = self.pred_q(self.proj_q(self.backbone_q.forward_global(extra_pos[0])))
-            aux_losses.append(self._info_nce_sym(q_loc, q_loc, k_loc, k_loc))  # dummy, adjust as needed
-
-        loss = loss_main + (sum(aux_losses) / len(aux_losses) if aux_losses else 0.0)
+        # normalizza e clampa per robustezza
+        q1 = torch.nn.functional.normalize(q1, dim=-1)
+        q2 = torch.nn.functional.normalize(q2, dim=-1)
+        k1 = torch.nn.functional.normalize(k1.detach(), dim=-1)
+        k2 = torch.nn.functional.normalize(k2.detach(), dim=-1)
+        loss_main = self._info_nce_sym(q1, q2, k1, k2)
+        loss = loss_main
 
         # metriche diagnostiche
         with torch.no_grad():
             Tt = self._teacher_temp()
-            # pos/neg sim
-            pos_sim = float((q1 * k2).mean().item())
-            # entropy media dei softmax sui negativi (dummy for now)
-            queue_entropy = 0.0
+            pos_sim = float((q1 * k2).sum(dim=-1).mean().item())
+            # media SOLO sugli off-diagonali (negativi)
+            sim_mat = q1 @ k2.t()
+            off = ~torch.eye(sim_mat.shape[0], dtype=torch.bool, device=sim_mat.device)
+            neg_sim = float(sim_mat[off].mean().item())
 
         return {
             "loss_total": loss,
             "loss_components": {
                 "loss_main": float(loss_main.detach()),
-                "aux_losses": float(sum([x.detach() for x in aux_losses]) / max(1, len(aux_losses))) if aux_losses else 0.0,
                 "t_teacher": float(Tt),
                 "ema_m": float(self._ema_momentum()),
                 "pos_sim": pos_sim,
-                "queue_entropy": queue_entropy,
+                "neg_sim": neg_sim,
             },
         }
 

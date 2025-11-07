@@ -19,6 +19,7 @@ __all__ = [
     "render_all_ssl",
     "render_all_sl",
     "render_ssl_classifier",
+    "tta_predict_simple",
 ]
 
 
@@ -199,6 +200,30 @@ def plot_confusion(cm, labels, out_png: Path | str) -> Path:
     return _save_figure(fig, out_png, plt)
 
 
+def tta_predict_simple(model, img: "torch.Tensor", *, rotations=(0,90,180,270), flips=("h","v")):
+    """
+    TTA leggero: rotazioni 90°k e flip H/V; media softmax delle predizioni.
+    img: (1,C,H,W) o (C,H,W)
+    """
+    import torch
+    if img.ndim == 3: img = img.unsqueeze(0)
+    outs = []
+    for r in rotations:
+        x = img
+        if r != 0:
+            k = (r // 90) % 4
+            x = torch.rot90(x, k, dims=(2,3))
+        for f in [None, "h", "v"]:
+            xf = x
+            if f == "h": xf = torch.flip(xf, dims=(3,))
+            if f == "v": xf = torch.flip(xf, dims=(2,))
+            with torch.no_grad():
+                logits = model(xf)
+                probs = torch.softmax(logits, dim=-1)
+            outs.append(probs)
+    return torch.stack(outs, dim=0).mean(dim=0)
+
+
 def render_all_ssl(csv_path: Path | str, plots_dir: Path | str, model_key: str) -> Dict[str, Path]:
     plots_root = Path(plots_dir)
     figures: Dict[str, Path] = {}
@@ -206,6 +231,28 @@ def render_all_ssl(csv_path: Path | str, plots_dir: Path | str, model_key: str) 
         csv_path,
         prefixed(plots_root, model_key, "ssl_losses", "png"),
         model_key,
+    )
+    # grafici diagnostici extra
+    figures["ssl_similarities"] = _lineplot(
+        _load_df(csv_path),
+        "step",
+        ["pos_sim", "neg_sim"],
+        f"{model_key} · SSL similarities",
+        prefixed(plots_root, model_key, "ssl_similarities", "png"),
+    )
+    figures["ssl_temperature"] = _lineplot(
+        _load_df(csv_path),
+        "step",
+        ["t_teacher"],
+        f"{model_key} · SSL temperature",
+        prefixed(plots_root, model_key, "ssl_temperature", "png"),
+    )
+    figures["ssl_lr"] = _lineplot(
+        _load_df(csv_path),
+        "step",
+        ["lr"],
+        f"{model_key} · SSL lr",
+        prefixed(plots_root, model_key, "ssl_lr", "png"),
     )
     return figures
 

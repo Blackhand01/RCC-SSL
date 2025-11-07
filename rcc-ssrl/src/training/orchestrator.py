@@ -248,6 +248,9 @@ class Orchestrator:
             device=self.device,
             log_every_steps=_log_every_steps(self.cfg),
             log_tag=self.model_key,
+            grad_clip_max=float(ssl_cfg.get("grad_clip_max", 0.0)),
+            accumulate_steps=int(ssl_cfg.get("accumulate_steps", 1)),
+            amp=bool(ssl_cfg.get("amp", True)),
         )
 
         t0_run = time.time()
@@ -280,14 +283,20 @@ class Orchestrator:
 
         for epoch in range(epochs):
             def _log_step(global_step: int, stats: Dict[str, float], epoch_idx: int = epoch) -> None:
-                row = {"epoch": epoch_idx, "step": global_step, "lr": optimizer.param_groups[0].get("lr", 0.0)}
+                row = {
+                    "epoch": epoch_idx,
+                    "step": global_step,
+                    "lr": optimizer.param_groups[0].get("lr", 0.0),
+                }
                 # ETA globale (fino a fine run)
                 done = min(global_step, total_steps)
                 elapsed = time.time() - t0_run
                 frac = max(1e-9, float(done) / float(total_steps))
                 eta_s = max(0.0, elapsed * (1.0 - frac) / frac)
                 row.update({"elapsed_s": round(elapsed, 2), "eta_s": round(eta_s, 2)})
-                row.update(stats)
+                # mantieni sottochiavi piatte per CSV
+                for k,v in stats.items():
+                    row[k] = v
                 append_row_csv(csv_path, row)
                 # Log solo da rank 0 per evitare rumore
                 if os.environ.get("RANK", "0") != "0":

@@ -181,3 +181,6 @@ sync_gdrive_836083.err
 .condarc
 rcc-ssrl/scripts
 rcc-ssrl/logs/
+src_mirko/
+rcc-ssrl/src/training_tmp/
+rcc-ssrl/src/training_copy/

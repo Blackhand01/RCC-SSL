@@ -1,78 +1,67 @@
 #!/usr/bin/env bash
-#SBATCH -J rcc-train
-#SBATCH -A mla_group_01
-#SBATCH -p gpu_a40
-#SBATCH --gpus=1
+#SBATCH --job-name=rcc-train
+#SBATCH --account=mla_group_01
+#SBATCH --partition=gpu_a40
+#SBATCH --nodes=1
+#SBATCH --gpus=1                    # 3 max che puoi usare ora
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
 #SBATCH --time=24:00:00
 #SBATCH -o /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.out
 #SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.err
-
-# Set EXP_DATETIME for log renaming
-export EXP_DATETIME="${EXP_DATETIME:-$(date +%Y%m%d-%H%M%S)}"
-
-
 set -euo pipefail
 
-# 1) Porta la working dir nel punto di submit (SLURM copia gli script nello spool)
+# 1) Workdir
 WORKDIR="${SLURM_SUBMIT_DIR:-$PWD}"
-# Ensure WORKDIR is the repo root (handle submission from subdirs)
 if [[ "$WORKDIR" == *"/src/training" ]]; then
   WORKDIR="$(dirname "$(dirname "$WORKDIR")")"
 fi
 cd "$WORKDIR"
 
-# 2) Ambiente software
+# 2) Env
 source "${WORKDIR}/src/training/scripts/bootstrap_env.sh"
-
-# 3) Backend headless e logging locale alla repo
-export MPLBACKEND=Agg
 export PYTHONUNBUFFERED=1
-export SKIP_VENV=1
+export MPLBACKEND=Agg
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
+export PYTHONPATH="${WORKDIR}${PYTHONPATH:+:$PYTHONPATH}"
 
-# Fondamentale per far vedere "src/" come package
-if [[ -n "${PYTHONPATH:-}" ]]; then
-  export PYTHONPATH="${WORKDIR}:${PYTHONPATH}"
-else
-  export PYTHONPATH="${WORKDIR}"
+# NCCL (single-node, A40)
+export NCCL_DEBUG=WARN
+export NCCL_IB_DISABLE=0
+export NCCL_P2P_DISABLE=0
+export NCCL_SOCKET_IFNAME=^lo,docker0
+
+# 3) Staging dataset su scratch locale (se disponibile)
+STAGING_DIR=""
+if [[ -n "${SLURM_TMPDIR:-}" && -d "$SLURM_TMPDIR" ]]; then
+  STAGING_DIR="$SLURM_TMPDIR"
+elif [[ -n "${TMPDIR:-}" && -d "$TMPDIR" ]]; then
+  STAGING_DIR="$TMPDIR"
+elif [[ -n "${SCRATCH:-}" && -d "${SCRATCH:-}" ]]; then
+  STAGING_DIR="${SCRATCH:-}/$USER"
 fi
 
-JOB_LOG_DIR="${WORKDIR}/logs"
-mkdir -p "${JOB_LOG_DIR}"
 
-# 4) Sanity log GPU
+# 4) Sanity log
 nvidia-smi -L || true
 python - <<'PY'
 import torch
 print("Torch", torch.__version__, "CUDA", torch.cuda.is_available(), "NGPU", torch.cuda.device_count())
 PY
 
-# 5) Config centralizzate
+# 5) Project paths
 DEFAULT_PROJECT_ROOT="/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project"
 export PROJECT_ROOT="${PROJECT_ROOT:-$DEFAULT_PROJECT_ROOT}"
 export OUTPUTS_ROOT="${OUTPUTS_ROOT:-${PROJECT_ROOT}/outputs/mlruns}"
-# ---- Staging su disco locale di nodo ($SLURM_TMPDIR) ----
-DATA_ROOT_ON_NET="${WEB_DATASET_ROOT:-$PROJECT_ROOT}/data/processed/rcc_webdataset_final"
-DATA_ROOT_ON_LOCAL="${SLURM_TMPDIR:-/tmp}/data/processed/rcc_webdataset_final"
-mkdir -p "$(dirname "$DATA_ROOT_ON_LOCAL")"
-rsync -a --info=progress2 "$DATA_ROOT_ON_NET"/ "$DATA_ROOT_ON_LOCAL"/
-# Punta la pipeline allo scratch locale (stesso layout relativi)
-export WEB_DATASET_ROOT="${SLURM_TMPDIR:-/tmp}"
-export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/src/training/configs/experiment_debug.yaml}"
-export RUN_INDEX="${RUN_INDEX:--1}"
+# Cambia questa variabile se vuoi un'altra config
+export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/src/training/configs/exp_debug_moco_v3_vit.yaml}"
+export RUN_INDEX="${RUN_INDEX:-0}"
 
-# 6) Avvio dal path corretto
-cd "${WORKDIR}"
-exec python -u src/training/launch_training.py
+# 6) DDP: lancia 1 processo per GPU (3 proc)
+NPROC="${SLURM_GPUS_ON_NODE:-3}"
 
-# 7) Rename logs with experiment datetime
-if [[ -n "${EXP_DATETIME:-}" ]]; then
-  LOG_OUT_ORIG="/home/mla_group_01/rcc-ssrl/src/logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.out"
-  LOG_ERR_ORIG="/home/mla_group_01/rcc-ssrl/src/logs/${SLURM_JOB_NAME}.${SLURM_JOB_ID}.err"
-  LOG_OUT_NEW="/home/mla_group_01/rcc-ssrl/src/logs/${SLURM_JOB_NAME}.${EXP_DATETIME}.out"
-  LOG_ERR_NEW="/home/mla_group_01/rcc-ssrl/src/logs/${SLURM_JOB_NAME}.${EXP_DATETIME}.err"
-  mv "$LOG_OUT_ORIG" "$LOG_OUT_NEW" 2>/dev/null || true
-  mv "$LOG_ERR_ORIG" "$LOG_ERR_NEW" 2>/dev/null || true
-fi
+# 7) Run con torchrun (standalone su singolo nodo)
+exec torchrun \
+  --standalone \
+  --nproc_per_node="${NPROC}" \
+  src/training/launch_training.py
