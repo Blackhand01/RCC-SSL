@@ -1,0 +1,244 @@
+{
+  "version": 1,
+  "suite_name": "ibot_histopathology_ablations",
+  "model": "ibot",
+  "base_config": "configs/exp_ibot_vit_1g.yaml",
+  "output_dir": "src/training/configs/ablations",
+  "exp_prefix": "exp_ibot_abl",
+  "sbatch_script": "slurm/train_single_node.sbatch",
+  "experiments": [
+    {
+      "id": 32,
+      "config_filename": "exp_ibot_abl32.yaml",
+      "name": "heads_sep__stain_jitter_off",
+      "tags": [
+        "heads",
+        "he_aug",
+        "stain_off"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "share_token_cls_heads": false
+          }
+        },
+        "aug": {
+          "stain": {
+            "jitter": {
+              "enable": false,
+              "mode": "HED",
+              "delta": 0.02
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 25,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 40
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 33,
+      "config_filename": "exp_ibot_abl33.yaml",
+      "name": "heads_sep__loss_reweight_token0.7_patch1.0",
+      "tags": [
+        "heads",
+        "loss_weights"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "share_token_cls_heads": false,
+            "loss_weights": {
+              "patch": 1.0,
+              "token": 0.7,
+              "global": 0.0
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 25,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 40
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 34,
+      "config_filename": "exp_ibot_abl34.yaml",
+      "name": "heads_sep__mask_cosine_0.5to0.7__blockwise",
+      "tags": [
+        "mask_ratio",
+        "schedule",
+        "block_mask",
+        "heads"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "share_token_cls_heads": false,
+            "mask": {
+              "ratio_start": 0.5,
+              "ratio_end": 0.7,
+              "schedule": "cosine",
+              "mode": "blockwise",
+              "block": 4
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 25,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 40
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 35,
+      "config_filename": "exp_ibot_abl35.yaml",
+      "name": "heads_sep__multicrop8_local96__macenko_norm",
+      "tags": [
+        "multicrop",
+        "local_crops",
+        "stain_norm",
+        "macenko",
+        "heads"
+      ],
+      "override": {
+        "data": {
+          "views": {
+            "global_crops": 2,
+            "local_crops": 8,
+            "local_crop_size": 96
+          }
+        },
+        "aug": {
+          "stain": {
+            "normalize": {
+              "enable": true,
+              "method": "macenko",
+              "p": 1.0
+            }
+          }
+        },
+        "model": {
+          "ssl": {
+            "share_token_cls_heads": false
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 25,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 40
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 36,
+      "config_filename": "exp_ibot_abl36.yaml",
+      "name": "stain_off__probe_class_weights__focal1.5",
+      "tags": [
+        "he_aug",
+        "stain_off",
+        "probe_loss"
+      ],
+      "override": {
+        "aug": {
+          "stain": {
+            "jitter": {
+              "enable": false,
+              "mode": "HED",
+              "delta": 0.02
+            }
+          }
+        },
+        "probe": {
+          "optimizer": {
+            "type": "adamw",
+            "lr": 0.0005,
+            "weight_decay": 0.02
+          },
+          "loss": {
+            "type": "weighted_focal",
+            "gamma": 1.5,
+            "alpha": {
+              "ccRCC": 1.2,
+              "pRCC": 1.0,
+              "CHROMO": 0.8,
+              "ONCO": 1.5
+            }
+          },
+          "epochs": 40
+        },
+        "train": {
+          "ssl": {
+            "epochs": 25,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16
+          }
+        }
+      }
+    },
+    {
+      "id": 37,
+      "config_filename": "exp_ibot_abl37.yaml",
+      "name": "heads_sep__teacher_temp_warm__ema_up",
+      "tags": [
+        "teacher_temp",
+        "ema",
+        "stability",
+        "heads"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "share_token_cls_heads": false,
+            "teacher": {
+              "temp_start": 0.04,
+              "temp_end": 0.07,
+              "warmup_epochs": 1
+            },
+            "ema": {
+              "base": 0.996,
+              "final": 0.9995
+            }
+          }
+        },
+        "optim": {
+          "grad_clip_norm": 1.0
+        },
+        "train": {
+          "ssl": {
+            "epochs": 25,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 40
+            }
+          }
+        }
+      }
+    }
+  ]
+}

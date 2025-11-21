@@ -39,8 +39,8 @@ def dataloader_args(pin_cuda: bool, batch_size: int, num_workers: int, prefetch_
         "persistent_workers": bool(num_workers > 0),
         "collate_fn": collate_fn,
     }
-    if pin_cuda and torch.cuda.is_available():
-        args["pin_memory_device"] = "cuda"
+    # NOTE: avoid setting 'pin_memory_device' to silence deprecation warnings on some torch builds.
+    # CUDA pinning remains enabled via 'pin_memory=True'.
     if num_workers > 0:
         args["prefetch_factor"] = int(prefetch_factor)
     return args

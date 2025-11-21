@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import Dict, Any, List, Optional, Tuple
 import torch, torch.nn as nn, torch.nn.functional as F
-from src.training.trainer.backbones import get_backbone, mlp_head, predictor_head
+from src.training.trainer.backbones import get_backbone, mlp_head, predictor_head, resolve_backbone_from_model_cfg
 from src.training.utils.torch_ops import copy_weights_and_freeze, cosine_logits, ema_update
 from src.training.trainer.loops import SSLBaseModel
 
@@ -55,8 +55,7 @@ class MoCoV3(SSLBaseModel):
     @classmethod
     def from_config(cls, cfg: Dict[str,Any]) -> "MoCoV3":
         mcfg = cfg["model"]["ssl"]
-        bname = cfg["model"].get("backbone","resnet50")
-        bopts = cfg["model"].get("backbone_opts", {}) or {}
+        bname, bopts = resolve_backbone_from_model_cfg(cfg["model"])
         bb_q = get_backbone(name=bname, pretrained=False, **bopts)
         bb_k = get_backbone(name=bname, pretrained=False, **bopts)
         dim = bb_q.out_dim
@@ -68,23 +67,40 @@ class MoCoV3(SSLBaseModel):
         steps_per_epoch = int(tr_ssl.get("steps_per_epoch", 1000))
         epochs = int(tr_ssl.get("epochs", 10))
         total_steps = max(1, steps_per_epoch * epochs)
+        # ---- Robust scheduling & numeric coercions (defensive vs. null/None) ----
         sched = (mcfg.get("temp_teacher_schedule") or {})
         Ts = None
         if sched:
+            t_default = mcfg.get("temperature", 0.2)
+            t_start  = sched.get("start", t_default)
+            t_end    = sched.get("end",   t_default)
+            t_warm   = sched.get("warmup_frac", 0.0)
+            # Coercioni sicure: se i campi sono None o stringhe vuote, usa i default
+            def _safe_float(v, d): 
+                try:
+                    return float(v if v is not None and v != "" else d)
+                except (TypeError, ValueError):
+                    return float(d)
             Ts = CosineWithWarmup(
-                float(sched.get("start", mcfg.get("temperature", 0.2))),
-                float(sched.get("end",   mcfg.get("temperature", 0.2))),
-                warmup_frac=float(sched.get("warmup_frac", 0.0))
+                _safe_float(t_start, t_default),
+                _safe_float(t_end,   t_default),
+                warmup_frac=_safe_float(t_warm, 0.0),
             )
+        clip_qk_val = mcfg.get("clip_qk", 50.0)
+        # Se è None/invalid, ripiega su 50.0 per stabilità numerica
+        try:
+            clip_qk_val = 50.0 if clip_qk_val is None else float(clip_qk_val)
+        except (TypeError, ValueError):
+            clip_qk_val = 50.0
         return cls(
             bb_q, bb_k, proj_q, proj_k, pred_q,
-            tau=mcfg.get("temperature",0.2),
+            tau=float(mcfg.get("temperature", 0.2) or 0.2),
             momentum=cfg["train"]["ssl"].get("ema_momentum",0.996),
             temp_teacher_sched=Ts,
             ema_to_one=bool(mcfg.get("ema_to_one", True)),
             use_multicrop=bool(mcfg.get("use_multicrop", False)),  # accettato ma ignoriamo le local per MoCo
             total_steps=total_steps,
-            clip_qk=float(mcfg.get("clip_qk", 50.0)),
+            clip_qk=float(clip_qk_val),
             sync_bn=bool(mcfg.get("sync_bn", False)),
         )
 
@@ -127,11 +143,18 @@ class MoCoV3(SSLBaseModel):
     def training_step(self, batch: Dict[str,Any], global_step: int) -> Dict[str,Any]:
         self._step = global_step
         imgs, meta = batch["images"], batch.get("meta", None)
-        # Due viste globali (multi-crop accettato ma le local non vengono usate per MoCo v3)
-        if len(imgs) >= 2:
-            x1, x2 = imgs[0], imgs[1]
+        # Two global views required. If multicrop is enabled, imgs == [G, L] where
+        # G is the stack of BOTH globals (shape: 2*B, C, H, W) and L are local crops.
+        if self.use_multicrop:
+            G = imgs[0]
+            if G.dim() != 4 or (G.size(0) % 2 != 0):
+                raise ValueError(f"MoCo v3 (multicrop) expects stacked 2 globals; got {tuple(G.shape)}.")
+            # Split stacked globals into x1/x2
+            x1, x2 = torch.chunk(G, 2, dim=0)
         else:
-            raise ValueError("MoCo v3 requires two global views.")
+            if len(imgs) < 2:
+                raise ValueError("MoCo v3 requires two global views.")
+            x1, x2 = imgs[0], imgs[1]
 
         q1 = self.pred_q(self.proj_q(self.backbone_q.forward_global(x1)))
         q2 = self.pred_q(self.proj_q(self.backbone_q.forward_global(x2)))

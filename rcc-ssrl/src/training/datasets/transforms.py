@@ -19,6 +19,7 @@ __all__ = [
     "pil_to_unit_tensor",
     "two_view_transform",
     "multicrop_transform",
+    "ijepa_input_transform",
     "single_image_transform",
     "sl_train_transforms",
     "sl_eval_transforms",
@@ -228,6 +229,25 @@ def build_stain_ops(stain_cfg: Dict[str, Any]) -> List[Callable[[Image.Image], I
     # randstainna stub: se vuoi usare una lib esterna, qui resta disattivato per design no-deps
     return ops
 
+def ijepa_input_transform(size: int, cfg_aug: Optional[Dict[str, Any]] = None) -> Callable[[Image.Image], torch.Tensor]:
+    """
+    Deterministic, no view-augmentation input pipeline for I-JEPA.
+    Optionally applies stain normalization / light HED jitter if provided
+    in cfg_aug['stain'], but avoids flips/solarize/blur to respect JEPA's
+    "no manual aug" principle (masking happens inside the model).
+    """
+    base_resize = transforms.Compose([
+        transforms.Resize(int(size * 256 / 224)),
+        transforms.CenterCrop(size),
+    ])
+    stain_ops = build_stain_ops((cfg_aug or {}).get("stain", {}) if cfg_aug else {})
+    def _apply(im: Image.Image) -> torch.Tensor:
+        out = base_resize(coerce_to_pil_rgb(im))
+        for op in stain_ops:  # optional, safe to keep empty
+            out = op(out)
+        return pil_to_unit_tensor(out)
+    return _apply
+
 def two_view_transform(
     size: int,
     jitter: float = 0.4,
@@ -290,6 +310,8 @@ def multicrop_transform(
     local_scale: Tuple[float, float] = (0.05, 0.14),
     blur_prob: float = 0.5,
     solarize_prob: float = 0.0,
+    solarize_prob_g2: float = 0.2,
+    cfg_aug: Optional[Dict[str, Any]] = None,
 ) -> Callable[[Image.Image], Tuple[List[torch.Tensor], List[torch.Tensor]]]:
     """
     Multi-crop alla DINO:
@@ -297,6 +319,15 @@ def multicrop_transform(
       - n_local local crops (field-of-view ridotto)
       - augment: jitter, blur opzionale, solarization opzionale
     """
+    # opzionale: stain ops + rotate90 dalle aug top-level
+    stain_ops = build_stain_ops((cfg_aug or {}).get("stain", {}) if cfg_aug else {})
+    rotate90_flag = bool(((cfg_aug or {}).get("base", {}) or {}).get("rotate90", False)) if cfg_aug else False
+
+    def _apply_stain(im: Image.Image) -> Image.Image:
+        for op in stain_ops:
+            im = op(im)
+        return im
+
     def _blur(size: int):
         k = int(max(3, (size // 20) * 2 + 1))  # kernel dispari ~ size/20
         return transforms.GaussianBlur(kernel_size=k, sigma=(0.1, 2.0))
@@ -309,6 +340,8 @@ def multicrop_transform(
 
     def _build_aug(size: int, scale: Tuple[float, float], do_blur: bool, do_solar: bool):
         ops: List[Any] = [
+            transforms.Lambda(_apply_stain),
+            _rotate90_multi() if rotate90_flag else transforms.Lambda(lambda im: im),
             transforms.RandomResizedCrop(size, scale=scale),
             transforms.RandomHorizontalFlip(),
             transforms.ColorJitter(jitter, jitter, 0.2, 0.1),
@@ -320,9 +353,16 @@ def multicrop_transform(
         ops.append(transforms.Lambda(lambda im: pil_to_unit_tensor(coerce_to_pil_rgb(im))))
         return transforms.Compose(ops)
 
-    global_aug = _build_aug(global_size, global_scale, do_blur=True, do_solar=True)
+    # Global #1: NO solarize; Global #2: solarize con p dedicata
+    global_aug1 = _build_aug(global_size, global_scale, do_blur=True, do_solar=False)
+    # usa p dedicata per la seconda global (stile DINO: solarize solo su una vista)
+    old_sp = float(solarize_prob)
+    solarize_prob = float(solarize_prob_g2)
+    global_aug2 = _build_aug(global_size, global_scale, do_blur=True, do_solar=True)
+    # ripristina (per sicurezza in caso di chiusure)
+    solarize_prob = old_sp
     local_aug  = _build_aug(local_size,  local_scale,  do_blur=True, do_solar=False)
-    return lambda img: ([global_aug(img), global_aug(img)], [local_aug(img) for _ in range(n_local)])
+    return lambda img: ([global_aug1(img), global_aug2(img)], [local_aug(img) for _ in range(n_local)])
 
 
 def single_image_transform(size: int) -> Callable[[Image.Image], torch.Tensor]:

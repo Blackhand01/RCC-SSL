@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Optional, Tuple, Any
 
 import torch
 import torch.nn as nn
@@ -13,7 +13,7 @@ try:
 except Exception:
     timm = None
 
-__all__ = ["ResNetBackbone", "ViTBackbone", "mlp_head", "predictor_head", "get_backbone"]
+__all__ = ["ResNetBackbone", "ViTBackbone", "mlp_head", "predictor_head", "get_backbone", "resolve_backbone_from_model_cfg"]
 
 
 def _get_resnet_factory(name: str):
@@ -87,12 +87,46 @@ class ViTBackbone(nn.Module):
         freeze_patch_embed: bool = False,
         random_patch_proj: bool = False,
         bn_in_patch: bool = False,
+        input_size: Optional[int] = None,
+        **kwargs: Any,
     ):
         super().__init__()
         if timm is None:
             raise RuntimeError("timm not available: pip install timm")
-        self.vit = timm.create_model(name, pretrained=pretrained, num_classes=0, dynamic_img_size=True)
+        # Accept 'input_size' from configs (e.g., i_jepa ablations). Not all timm models
+        # support 'img_size', so fall back gracefully.
+        try:
+            self.vit = timm.create_model(
+                name,
+                pretrained=pretrained,
+                num_classes=0,
+                img_size=input_size,
+                dynamic_img_size=True,
+            )
+        except TypeError:
+            self.vit = timm.create_model(
+                name,
+                pretrained=pretrained,
+                num_classes=0,
+                dynamic_img_size=True,
+            )
         self.out_dim = self.vit.num_features
+        patch_embed = getattr(self.vit, "patch_embed", None)
+        patch_sz = None
+        if patch_embed is not None and hasattr(patch_embed, "patch_size"):
+            patch_sz = patch_embed.patch_size
+            if isinstance(patch_sz, (tuple, list)):
+                patch_sz = patch_sz[0]
+        if patch_sz is None:
+            patch_sz = patch_size or 16
+        self.patch_size = int(patch_sz)
+        # Keep a record of intended input size (for downstream logic if needed)
+        self.default_img_size = input_size or getattr(self.vit, "img_size", None)
+        # opzionale: congela l'embed dei patch per stabilizzare i primi step
+        if freeze_patch_embed and hasattr(self.vit, "patch_embed"):
+            for p in self.vit.patch_embed.parameters():
+                p.requires_grad = False
+        # (gli altri flag sono placeholder compatibili)
         # Previeni NaN: clamp LayerScale / attn se presenti
         if hasattr(self.vit, "blocks"):
             for blk in self.vit.blocks:
@@ -116,9 +150,28 @@ def get_backbone(name: str, pretrained: bool, **kwargs) -> nn.Module:
     n = name.lower()
     if n in ("resnet34","resnet50"):
         return ResNetBackbone(n, pretrained)
-    if n in ("vit_s16", "vit_small_patch16_224", "vit_base_patch16_224"):
+    # add common aliases to be robust to configs
+    if n in ("vit_s16", "vit_small", "vit_small_16", "vit_small_patch16", "vit_small_patch16_224", "vit_base_patch16_224"):
         return ViTBackbone(name, pretrained, **kwargs)
     raise ValueError(f"Unsupported backbone: {name}")
+
+def resolve_backbone_from_model_cfg(model_cfg: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """
+    Accept both:
+      model.backbone: "vit_small_patch16_224"
+    or:
+      model.backbone: { name: "vit_small_patch16_224", patch_size: 16, ... }
+    Fallback to model.backbone_opts for the string form.
+    """
+    spec = model_cfg.get("backbone", "resnet50")
+    if isinstance(spec, dict):
+        name = spec.get("name") or spec.get("type")
+        if not isinstance(name, str) or not name:
+            raise ValueError("model.backbone must be a string or a dict with a 'name' (or 'type') field.")
+        opts = {k: v for k, v in spec.items() if k not in ("name", "type")}
+        return name, opts
+    # string form + optional legacy options
+    return str(spec), (model_cfg.get("backbone_opts", {}) or {})
 
 
 def _bn1d(dim: int, affine: bool = True) -> nn.BatchNorm1d:

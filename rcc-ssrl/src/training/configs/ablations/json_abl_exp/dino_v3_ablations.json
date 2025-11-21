@@ -1,0 +1,189 @@
+{
+  "version": 1,
+  "suite_name": "dino_v3_histopathology_ablations",
+  "model": "dino_v3",
+  "base_config": "exp_template_ssl.yaml",
+  "output_dir": "src/training/configs/ablations",
+  "exp_prefix": "exp_dino_v3_abl",
+  "sbatch_script": "slurm/train_single_node.sbatch",
+  "experiments": [
+    {
+      "id": 32,
+      "config_filename": "exp_dino_v3_abl32.yaml",
+      "name": "abl30_long_teacher_stable",
+      "tags": [
+        "final",
+        "multicrop",
+        "2g8l",
+        "cosine_temp",
+        "long",
+        "ema0.998",
+        "no_norm"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "use_multicrop": true,
+            "temp_teacher_schedule": {
+              "start": 0.06,
+              "end": 0.045,
+              "warmup_frac": 0.1
+            }
+          }
+        },
+        "data": {
+          "dino_v3": {
+            "global_size": 224,
+            "local_size": 96,
+            "n_local": 8,
+            "global_scale": [
+              0.14,
+              1.0
+            ],
+            "local_scale": [
+              0.05,
+              0.14
+            ],
+            "blur_prob": 0.3,
+            "solarize_prob": 0.0
+          }
+        },
+        "aug": {
+          "stain": {
+            "normalize": {
+              "enable": false
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 24,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 24,
+            "ema_momentum": 0.998,
+            "probe": {
+              "epochs": 80
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 33,
+      "config_filename": "exp_dino_v3_abl33.yaml",
+      "name": "multicrop_2g8l_local112_wide_cosine_temp",
+      "tags": [
+        "final",
+        "multicrop",
+        "2g8l",
+        "local112",
+        "scale_wide",
+        "cosine_temp",
+        "no_norm"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "use_multicrop": true,
+            "temp_teacher_schedule": {
+              "start": 0.06,
+              "end": 0.05,
+              "warmup_frac": 0.1
+            }
+          }
+        },
+        "data": {
+          "dino_v3": {
+            "global_size": 224,
+            "local_size": 112,
+            "n_local": 8,
+            "global_scale": [
+              0.14,
+              1.0
+            ],
+            "local_scale": [
+              0.08,
+              0.22
+            ],
+            "blur_prob": 0.3,
+            "solarize_prob": 0.0
+          }
+        },
+        "aug": {
+          "stain": {
+            "normalize": {
+              "enable": false
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 16,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 24,
+            "ema_momentum": 0.996,
+            "probe": {
+              "epochs": 60
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 34,
+      "config_filename": "exp_dino_v3_abl34.yaml",
+      "name": "multicrop_2g6l_scale_wide_temp055",
+      "tags": [
+        "final",
+        "multicrop",
+        "2g6l",
+        "scale_wide",
+        "temp_teacher_0.055",
+        "no_norm"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "use_multicrop": true,
+            "temp_teacher": 0.055
+          }
+        },
+        "data": {
+          "dino_v3": {
+            "global_size": 224,
+            "local_size": 96,
+            "n_local": 6,
+            "global_scale": [
+              0.14,
+              1.0
+            ],
+            "local_scale": [
+              0.06,
+              0.2
+            ],
+            "blur_prob": 0.3,
+            "solarize_prob": 0.02
+          }
+        },
+        "aug": {
+          "stain": {
+            "normalize": {
+              "enable": false
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 16,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 24,
+            "ema_momentum": 0.996,
+            "probe": {
+              "epochs": 60
+            }
+          }
+        }
+      }
+    }
+  ]
+}

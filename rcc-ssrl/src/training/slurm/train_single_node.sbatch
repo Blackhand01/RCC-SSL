@@ -1,67 +1,56 @@
-#!/usr/bin/env bash
-#SBATCH --job-name=rcc-train
-#SBATCH --account=mla_group_01
-#SBATCH --partition=gpu_a40
-#SBATCH --nodes=1
-#SBATCH --gpus=1                    # 3 max che puoi usare ora
+#!/bin/bash
+#SBATCH -p gpu_a40
+#SBATCH -N 1
+#SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=48G
-#SBATCH --time=24:00:00
-#SBATCH -o /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.out
-#SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.err
+#SBATCH --mem=64G
+#SBATCH -t 24:00:00
+# The job name and log paths are overridden by --job-name/--output/--error from sbatch
+
 set -euo pipefail
 
-# 1) Workdir
-WORKDIR="${SLURM_SUBMIT_DIR:-$PWD}"
-if [[ "$WORKDIR" == *"/src/training" ]]; then
-  WORKDIR="$(dirname "$(dirname "$WORKDIR")")"
+# -------- User/Repo paths -----------------------------------------------------
+ROOT="/home/mla_group_01/rcc-ssrl"
+TRAIN_DIR="${ROOT}/src/training"
+
+cd "${TRAIN_DIR}"
+
+# -------- Config argument (REQUIRED) ------------------------------------------
+# Accept config YAML as first CLI arg; fail fast if missing
+CONFIG_PATH="${1:-}"
+if [[ -z "${CONFIG_PATH}" ]]; then
+  echo "[sbatch] ERROR: missing CONFIG_PATH argument (YAML file)." >&2
+  exit 2
 fi
-cd "$WORKDIR"
-
-# 2) Env
-source "${WORKDIR}/src/training/scripts/bootstrap_env.sh"
-export PYTHONUNBUFFERED=1
-export MPLBACKEND=Agg
-export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
-export PYTHONPATH="${WORKDIR}${PYTHONPATH:+:$PYTHONPATH}"
-
-# NCCL (single-node, A40)
-export NCCL_DEBUG=WARN
-export NCCL_IB_DISABLE=0
-export NCCL_P2P_DISABLE=0
-export NCCL_SOCKET_IFNAME=^lo,docker0
-
-# 3) Staging dataset su scratch locale (se disponibile)
-STAGING_DIR=""
-if [[ -n "${SLURM_TMPDIR:-}" && -d "$SLURM_TMPDIR" ]]; then
-  STAGING_DIR="$SLURM_TMPDIR"
-elif [[ -n "${TMPDIR:-}" && -d "$TMPDIR" ]]; then
-  STAGING_DIR="$TMPDIR"
-elif [[ -n "${SCRATCH:-}" && -d "${SCRATCH:-}" ]]; then
-  STAGING_DIR="${SCRATCH:-}/$USER"
+if [[ ! -f "${CONFIG_PATH}" ]]; then
+  echo "[sbatch] ERROR: config not found: ${CONFIG_PATH}" >&2
+  exit 2
 fi
 
+# -------- Environment (venv/modules) ------------------------------------------
+if [[ -d "${ROOT}/.venv" ]]; then
+  source "${ROOT}/.venv/bin/activate"
+fi
 
-# 4) Sanity log
-nvidia-smi -L || true
-python - <<'PY'
-import torch
-print("Torch", torch.__version__, "CUDA", torch.cuda.is_available(), "NGPU", torch.cuda.device_count())
-PY
+# Optional: user can set GPUS_PER_NODE externally (defaults to 1)
+GPUS_PER_NODE="${GPUS_PER_NODE:-1}"
 
-# 5) Project paths
-DEFAULT_PROJECT_ROOT="/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project"
-export PROJECT_ROOT="${PROJECT_ROOT:-$DEFAULT_PROJECT_ROOT}"
-export OUTPUTS_ROOT="${OUTPUTS_ROOT:-${PROJECT_ROOT}/outputs/mlruns}"
-# Cambia questa variabile se vuoi un'altra config
-export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/src/training/configs/exp_debug_moco_v3_vit.yaml}"
-export RUN_INDEX="${RUN_INDEX:-0}"
+echo "[sbatch] Host: $(hostname)"
+echo "[sbatch] GPUs per node: ${GPUS_PER_NODE}"
+echo "[sbatch] Config: ${CONFIG_PATH}"
+echo "[sbatch] RUN_NAME=${RUN_NAME:-}"
+echo "[sbatch] EXP_GROUP=${EXP_GROUP:-}"
+echo "[sbatch] OUTPUTS_GROUP_DIR=${OUTPUTS_GROUP_DIR:-}"
 
-# 6) DDP: lancia 1 processo per GPU (3 proc)
-NPROC="${SLURM_GPUS_ON_NODE:-3}"
+# Export several conventional env vars so Python can locate the config
+export CONFIG_PATH="${CONFIG_PATH}"
+export TRAIN_CONFIG="${CONFIG_PATH}"
+export RUN_CFG="${CONFIG_PATH}"
 
-# 7) Run con torchrun (standalone su singolo nodo)
-exec torchrun \
-  --standalone \
-  --nproc_per_node="${NPROC}" \
-  src/training/launch_training.py
+# -------- Launch ---------------------------------------------------------------
+# torchrun is used as in your previous runs; --standalone for single-node
+command -v torchrun >/dev/null 2>&1 || { echo "[sbatch] ERROR: torchrun not found"; exit 3; }
+
+# Prefer an explicit --config ARG if your launcher supports it; otherwise the env var above is used.
+torchrun --nproc_per_node="${GPUS_PER_NODE}" --standalone \
+  "${TRAIN_DIR}/launch_training.py" --config "${CONFIG_PATH}"

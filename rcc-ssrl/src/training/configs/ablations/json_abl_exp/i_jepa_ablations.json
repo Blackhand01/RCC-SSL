@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "suite_name": "i_jepa_histopathology_ablations",
+  "model": "i_jepa",
+  "base_config": "exp_template_ssl.yaml",
+  "output_dir": "src/training/configs/ablations",
+  "exp_prefix": "exp_i_jepa_abl",
+  "sbatch_script": "slurm/train_single_node.sbatch",
+  "experiments": [
+    {
+      "id": 31,
+      "config_filename": "exp_i_jepa_abl31.yaml",
+      "name": "small_ctx_far_targets_longtrain_no_mixing",
+      "tags": ["longtrain", "no_mixing", "small_ctx", "far_targets"],
+      "override": {
+        "model": {
+          "ssl": {
+            "context_scale": 0.55,
+            "target_scales": [0.10, 0.18],
+            "context_jitter": 0.10,
+            "no_overlap": true,
+            "max_context_resample": 4,
+            "min_target_tokens": 2
+          }
+        },
+        "aug": {
+          "mixing": {
+            "mixup":  { "enable": false },
+            "cutmix": { "enable": false, "p": 0.0 }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 40,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 32,
+            "probe": { "epochs": 50 }
+          }
+        }
+      }
+    }
+  ]
+}

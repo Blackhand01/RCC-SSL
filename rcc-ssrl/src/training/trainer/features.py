@@ -103,7 +103,14 @@ def visualize_features_umap_pca(X: np.ndarray, y: np.ndarray, out_png: Path, lab
         return
     emb = None
     try:  # pragma: no cover - optional dependency
+        import warnings
         import umap  # type: ignore
+        warnings.filterwarnings(
+            "ignore",
+            message="n_jobs value 1 overridden to 1 by setting random_state. Use no seed for parallelism.",
+            category=UserWarning,
+            module="umap.umap_"
+        )
         emb = umap.UMAP(n_components=2, random_state=1337).fit_transform(X)
     except Exception:
         try:
@@ -164,7 +171,11 @@ def train_linear_probe_torch(
 
     head = nn.Linear(in_dim, num_classes).to(device)
     optimizer = torch.optim.SGD(head.parameters(), lr=lr, momentum=0.9, weight_decay=wd)
-    criterion = nn.CrossEntropyLoss()
+    # Pesi di classe = inv. frequenza (normalizzati)
+    _, counts = np.unique(ytr, return_counts=True)
+    w = counts.max() / np.maximum(counts, 1)
+    w = torch.tensor(w / w.mean(), dtype=torch.float32, device=device)
+    criterion = nn.CrossEntropyLoss(weight=w)
 
     def _iter_batches(X: np.ndarray, y: np.ndarray):
         N = X.shape[0]

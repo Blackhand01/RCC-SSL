@@ -1,0 +1,214 @@
+{
+  "version": 1,
+  "suite_name": "moco_v3_histopathology_ablations",
+  "model": "moco_v3",
+  "base_config": "configs/exp_moco_v3_vit.yaml",
+  "output_dir": "src/training/configs/ablations",
+  "exp_prefix": "exp_moco_v3_abl",
+  "sbatch_script": "slurm/train_single_node.sbatch",
+  "experiments": [
+    {
+      "id": 16,
+      "config_filename": "exp_moco_v3_abl16.yaml",
+      "name": "accum8__macenko__proj512",
+      "tags": [
+        "accum8",
+        "stain_norm",
+        "macenko",
+        "proj512"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "proj_dim": 512
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 25,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 8,
+            "probe": {
+              "epochs": 40
+            }
+          }
+        },
+        "aug": {
+          "stain": {
+            "normalize": {
+              "enable": true,
+              "method": "macenko"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 17,
+      "config_filename": "exp_moco_v3_abl17.yaml",
+      "name": "accum8__temp0.20to0.07__ema_to_one",
+      "tags": [
+        "accum8",
+        "temperature_schedule",
+        "ema_to_one"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "temp_teacher_schedule": {
+              "start": 0.2,
+              "end": 0.07,
+              "warmup_frac": 0.1
+            },
+            "ema_to_one": true
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 25,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 8,
+            "ema_momentum": 0.996,
+            "probe": {
+              "epochs": 40
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 18,
+      "config_filename": "exp_moco_v3_abl18.yaml",
+      "name": "accum8__macenko__hed_jitter0.01",
+      "tags": [
+        "accum8",
+        "stain_norm",
+        "macenko",
+        "hed_jitter"
+      ],
+      "override": {
+        "aug": {
+          "stain": {
+            "normalize": {
+              "enable": true,
+              "method": "macenko"
+            },
+            "jitter": {
+              "enable": true,
+              "mode": "HED",
+              "delta": 0.01
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 25,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 8,
+            "probe": {
+              "epochs": 40
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 19,
+      "config_filename": "exp_moco_v3_abl19.yaml",
+      "name": "accum8__multicrop2g6l96__macenko",
+      "tags": [
+        "accum8",
+        "multicrop",
+        "local_crops",
+        "stain_norm",
+        "macenko"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "use_multicrop": true
+          }
+        },
+        "data": {
+          "views": {
+            "global_crops": 2,
+            "local_crops": 6,
+            "local_crop_size": 96
+          }
+        },
+        "aug": {
+          "stain": {
+            "normalize": {
+              "enable": true,
+              "method": "macenko"
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 20,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 8,
+            "probe": {
+              "epochs": 40
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 20,
+      "config_filename": "exp_moco_v3_abl20.yaml",
+      "name": "accum4__proj512",
+      "tags": [
+        "accum4",
+        "proj512"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "proj_dim": 512
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 25,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 4,
+            "probe": {
+              "epochs": 40
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 21,
+      "config_filename": "exp_moco_v3_abl21.yaml",
+      "name": "accum8__hidden2048__proj512",
+      "tags": [
+        "accum8",
+        "proj_hidden2048",
+        "proj512"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "hidden_dim": 2048,
+            "proj_dim": 512
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 25,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 8,
+            "probe": {
+              "epochs": 40
+            }
+          }
+        }
+      }
+    }
+  ]
+}

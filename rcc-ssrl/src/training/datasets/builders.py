@@ -16,6 +16,7 @@ from .transforms import (
     collate_supervised_with_mixing,
     collate_two_views,
     estimate_tissue_fraction,
+    ijepa_input_transform,
     multicrop_transform,
     multiscale_transform_or_none,
     single_image_transform,
@@ -47,8 +48,14 @@ def _maybe_filter_tissue(dataset, sampler_cfg: Dict[str, Any]):
     return dataset.select(_keep)
 
 
-def build_ssl_loader(data_cfg: Dict[str, Any], model_cfg: Dict[str, Any], split: str = "train"
-                     ) -> torch.utils.data.DataLoader:
+def build_ssl_loader(
+    data_cfg: Dict[str, Any],
+    model_cfg: Dict[str, Any],
+    split: str = "train",
+    *,
+    sampler_cfg: Dict[str, Any] | None = None,
+    cfg_aug_top: Dict[str, Any] | None = None,
+) -> torch.utils.data.DataLoader:
     """Construct the SSL dataloader based on the configured model family."""
     if "webdataset" not in data_cfg:
         raise KeyError("Missing data.webdataset configuration.")
@@ -56,6 +63,8 @@ def build_ssl_loader(data_cfg: Dict[str, Any], model_cfg: Dict[str, Any], split:
     wds_cfg = data_cfg["webdataset"]
     shards = list_shards(wds_cfg[f"{split}_dir"])
     dataset = make_wds(shards, wds_cfg["shuffle_shards"], wds_cfg["shuffle_samples"])
+    # filtro tessuto (se richiesto)
+    dataset = _maybe_filter_tissue(dataset, sampler_cfg or {})
 
     img_size = int(data_cfg.get("img_size", 224))
     mode = model_cfg["ssl"]["name"].lower()
@@ -63,14 +72,24 @@ def build_ssl_loader(data_cfg: Dict[str, Any], model_cfg: Dict[str, Any], split:
     use_mc_moco = bool((model_cfg.get("ssl", {}) or {}).get("use_multicrop", False)) if mode == "moco_v3" else False
 
     if (mode in ("moco_v3",) and not use_mc_moco) or (mode == "ibot" and not use_mc_ibot):
-        aug = (model_cfg.get("ssl", {}) or {}).get("aug", {})
-        transform = two_view_transform(
-            img_size,
-            float(aug.get("jitter", 0.4)),
-            blur_prob=float(aug.get("blur_prob", 0.1)),
-            gray_prob=float(aug.get("gray_prob", 0.2)),
-            solarize_prob=float(aug.get("solarize_prob", 0.0)),
-        )
+        # Preferisci le aug top-level se fornite (Macenko/HED/rotate90 ecc.)
+        ssl_aug_legacy = (model_cfg.get("ssl", {}) or {}).get("aug", {})
+        if cfg_aug_top:
+            transform = two_view_transform(
+                img_size, float(ssl_aug_legacy.get("jitter", 0.4)),
+                blur_prob=float(ssl_aug_legacy.get("blur_prob", 0.1)),
+                gray_prob=float(ssl_aug_legacy.get("gray_prob", 0.2)),
+                solarize_prob=float(ssl_aug_legacy.get("solarize_prob", 0.0)),
+                cfg_aug=cfg_aug_top,
+            )
+        else:
+            transform = two_view_transform(
+                img_size,
+                float(ssl_aug_legacy.get("jitter", 0.4)),
+                blur_prob=float(ssl_aug_legacy.get("blur_prob", 0.1)),
+                gray_prob=float(ssl_aug_legacy.get("gray_prob", 0.2)),
+                solarize_prob=float(ssl_aug_legacy.get("solarize_prob", 0.0)),
+            )
         dataset = dataset.map_tuple(transform, lambda meta: meta)
         dataset = limit_epoch(dataset, wds_cfg.get("samples_per_epoch"))
         collate_fn = collate_two_views
@@ -85,12 +104,15 @@ def build_ssl_loader(data_cfg: Dict[str, Any], model_cfg: Dict[str, Any], split:
             local_scale=tuple(dino_cfg.get("local_scale", (0.05, 0.14))),
             blur_prob=float(dino_cfg.get("blur_prob", 0.5)),
             solarize_prob=float(dino_cfg.get("solarize_prob", 0.0)),
+            solarize_prob_g2=float(dino_cfg.get("solarize_prob_g2", 0.2)),
+            cfg_aug=cfg_aug_top,
         )
         dataset = dataset.map_tuple(transform, lambda meta: meta)
         dataset = limit_epoch(dataset, wds_cfg.get("samples_per_epoch"))
         collate_fn = collate_multicrop
     elif mode == "i_jepa":
-        transform = single_image_transform(img_size)
+        # No view-aug; optional stain normalization/jitter from top-level cfg.
+        transform = ijepa_input_transform(img_size, cfg_aug_top)
         dataset = dataset.map_tuple(transform, lambda meta: meta)
         dataset = limit_epoch(dataset, wds_cfg.get("samples_per_epoch"))
         collate_fn = collate_single_image
@@ -114,6 +136,9 @@ def build_ssl_dataset(cfg: Dict[str, Any], mode: str, *, use_mc_moco: bool = Fal
     model_cfg = cfg.get("model", {})
     aug_top = cfg.get("aug", {}) or {}
 
+    shards = list_shards(wds_cfg["train_dir"])
+    dataset = make_wds(shards, wds_cfg["shuffle_shards"], wds_cfg["shuffle_samples"])
+
     if (mode in ("moco_v3",) and not use_mc_moco) or (mode == "ibot" and not use_mc_ibot):
         # preferenza per aug top-level; retro-compat con model.ssl.aug
         ssl_aug = (model_cfg.get("ssl", {}) or {}).get("aug", {})
@@ -126,7 +151,7 @@ def build_ssl_dataset(cfg: Dict[str, Any], mode: str, *, use_mc_moco: bool = Fal
         dataset = limit_epoch(dataset, wds_cfg.get("samples_per_epoch"))
         collate_fn = collate_two_views
     elif mode == "dino_v3" or (mode == "ibot" and use_mc_ibot) or (mode == "moco_v3" and use_mc_moco):
-        dino_cfg = data_cfg.get("dino_v3", {})
+        dino_cfg = ds_cfg.get("dino_v3", {})
         transform = multicrop_transform(
             int(dino_cfg.get("global_size", img_size)),
             int(dino_cfg.get("local_size", 96)),
@@ -141,7 +166,7 @@ def build_ssl_dataset(cfg: Dict[str, Any], mode: str, *, use_mc_moco: bool = Fal
         dataset = limit_epoch(dataset, wds_cfg.get("samples_per_epoch"))
         collate_fn = collate_multicrop
     elif mode == "i_jepa":
-        transform = single_image_transform(img_size)
+        transform = ijepa_input_transform(img_size, aug_top)
         dataset = dataset.map_tuple(transform, lambda meta: meta)
         dataset = limit_epoch(dataset, wds_cfg.get("samples_per_epoch"))
         collate_fn = collate_single_image
@@ -185,4 +210,8 @@ def build_sl_loaders(cfg: Dict[str, Any], override_transforms=None
 
 
 def build_ssl_loader_from_cfg(cfg: Dict[str, Any], split: str = "train") -> torch.utils.data.DataLoader:
-    return build_ssl_loader(cfg["data"], cfg["model"], split=split)
+    return build_ssl_loader(
+        cfg["data"], cfg["model"], split=split,
+        sampler_cfg=cfg.get("sampler", {}) or {},
+        cfg_aug_top=cfg.get("aug", {}) or {},
+    )

@@ -1,7 +1,8 @@
 # utils/reproducibility.py
 from __future__ import annotations
 import os, json, random, shutil, hashlib
-from typing import Any, Dict
+from typing import Any, Dict, Iterable
+import sys
 
 try:  # pragma: no cover - optional dependency guard
     import numpy as np
@@ -51,11 +52,37 @@ def snapshot_config(cfg: Dict[str, Any], out_root: str) -> str:
     with open(path, "w") as f: json.dump(cfg, f, indent=2)
     return path
 
-def copy_code_snapshot(src_root: str, out_root: str, include=("models","utils",".","launch_training.py")) -> None:
-    snap_dir = os.path.join(out_root, "code_snapshot"); os.makedirs(snap_dir, exist_ok=True)
-    for p in include:
-        sp = os.path.join(src_root, p)
-        if os.path.isdir(sp):
-            shutil.copytree(sp, os.path.join(snap_dir, os.path.basename(p)), dirs_exist_ok=True)
-        elif os.path.isfile(sp):
-            shutil.copy2(sp, snap_dir)
+def _default_snapshot_excludes() -> Iterable[str]:
+    return (
+        ".git", ".gitignore", ".gitattributes",
+        ".venv", "venv", "__pycache__", "*.pyc",
+        "outputs", "mlruns", "wandb",
+        "dist", "build", "*.egg-info", "*.pth", "*.pt",
+        # any nested site-packages in accidental copies
+        "site-packages", "*.dist-info", "*.egg-info",
+    )
+
+def copy_code_snapshot(src_dir: str, dst_dir: str, *, excludes: Iterable[str] = ()) -> None:
+    """
+    Copy a slim snapshot of the training code into `dst_dir`.
+    Heavy/irrelevant folders are excluded by default.
+    """
+    if os.environ.get("DISABLE_CODE_SNAPSHOT", "0") == "1":
+        return
+    os.makedirs(dst_dir, exist_ok=True)
+    # If already populated, do nothing (idempotent per run dir)
+    if os.listdir(dst_dir):
+        return
+    patterns = list(_default_snapshot_excludes()) + list(excludes or ())
+    shutil.copytree(
+        src_dir,
+        dst_dir,
+        ignore=shutil.ignore_patterns(*patterns),
+        dirs_exist_ok=True,
+    )
+    # Optional: freeze environment for traceability
+    try:
+        req_out = os.path.join(dst_dir, "pip-freeze.txt")
+        os.system(f"{sys.executable} -m pip freeze > '{req_out}'")
+    except Exception:
+        pass

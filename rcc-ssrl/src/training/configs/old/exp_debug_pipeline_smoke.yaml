@@ -1,0 +1,103 @@
+# Smoke-test config to validate end-to-end pipeline integration
+# - 3 SSL runs (MoCo v3, DINO v3, I-JEPA) sharing the same lightweight ViT-S/16 backbone
+# - Very small debug budget: 2 epochs × 10 steps/epoch
+# - Quick linear probe to verify feature extractors and reporting
+# - Comments are in English as requested for code/docstrings
+
+experiment:
+  name: "exp_debug_pipeline_smoke"
+  date: "2025-11-07"
+  seed: 1337
+  default_run_index: -1
+  paper_tags: ["smoke", "pipeline", "ssl", "linear_probe"]
+  mlflow_experiment: null
+  outputs_layout: "v2"
+  validate: { paths: true, steps_per_epoch: true, batch_sizes: true }
+  allow_cpu: false
+
+data:
+  img_size: 224
+  webdataset:
+    dataset_key: "rcc_v2"
+    # Class mapping — adjust to match your taxonomy if needed
+    class_to_id: { ccRCC: 0, pRCC: 1, CHROMO: 2, ONCO: 3, NOT_TUMOR: 4 }
+    shuffle_shards: 16
+    shuffle_samples: 512
+    prefetch_factor: 2
+    batch_size_ssl: 32
+    batch_size_sl: 64
+    num_workers: 4
+    # Ensure exactly 10 steps/epoch at bs=32 → 10×32 = 320 samples
+    samples_per_epoch: 320
+
+model:
+  # Shared lightweight backbone for faster debug
+  backbone: "vit_small_patch16_224"
+  backbone_opts:
+    freeze_patch_embed: false
+  ssl:
+    # Default; will be overridden in runs[] for each method
+    name: "moco_v3"
+
+train:
+  optim:
+    name: "adamw"
+    lr: 0.0003
+    weight_decay: 0.05
+    betas: [0.9, 0.999]
+  scheduler:
+    name: "cosine"
+  ssl:
+    epochs: 2
+    steps_per_epoch: 10
+    amp: true
+    accumulate_steps: 1
+    grad_clip: 1.0
+    # Minimal linear probe (post-SSL) to confirm feature extraction + reporting
+    probe:
+      enabled: true
+      epochs: 2
+      lr: 0.01
+      weight_decay: 0.0
+      batch_size: 256
+
+eval:
+  sl:
+    epochs: 0
+    do_val: false
+    do_test: false
+    amp: true
+
+logging:
+  log_every_steps: 1
+  metrics_csv_name: "ssl_timeseries.csv"
+  smoothing_window: 10
+
+artifacts:
+  save_best_model: true
+  export_csv: ["metrics"]
+  report_md: true
+
+# Three lightweight SSL runs; hyperparameters rely on model defaults
+runs:
+  - name: "i_jepa_vit_s16_smoke"
+    mode: "ssl"
+    override:
+      model:
+        ssl:
+          name: "i_jepa"
+
+  - name: "moco_v3_vit_s16_smoke"
+    mode: "ssl"
+    override:
+      model:
+        ssl:
+          name: "moco_v3"
+
+  - name: "dino_v3_vit_s16_smoke"
+    mode: "ssl"
+    override:
+      model:
+        ssl:
+          name: "dino_v3"
+

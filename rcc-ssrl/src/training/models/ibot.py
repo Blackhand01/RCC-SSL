@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.training.trainer.backbones import ResNetBackbone, mlp_head
+from src.training.trainer.backbones import get_backbone, mlp_head, resolve_backbone_from_model_cfg
 from src.training.utils.torch_ops import copy_weights_and_freeze, ema_update, l2n
 from src.training.trainer.loops import SSLBaseModel
 
@@ -47,11 +47,16 @@ class IBOT(SSLBaseModel):
 
     @classmethod
     def from_config(cls, cfg: Dict[str,Any]) -> "IBOT":
-        bname = cfg["model"].get("backbone","resnet50"); m = cfg["model"]["ssl"]
-        stu, tea = ResNetBackbone(bname, False), ResNetBackbone(bname, False)
-        dim = stu.out_dim; head_cls_s = mlp_head(dim, 4096, 256); head_cls_t = mlp_head(dim, 4096, 256)
+        m = cfg["model"]["ssl"]
+        bname, bopts = resolve_backbone_from_model_cfg(cfg["model"])
+        stu = get_backbone(bname, pretrained=False, **bopts)
+        tea = get_backbone(bname, pretrained=False, **bopts)
+        dim = stu.out_dim
+        head_cls_s = mlp_head(dim, 4096, 256); head_cls_t = mlp_head(dim, 4096, 256)
         head_tok_s = mlp_head(stu.out_dim, 2048, 256); head_tok_t = mlp_head(stu.out_dim, 2048, 256)
-        K = m.get("prototypes", 8192); proto = nn.Parameter(l2n(torch.randn(K, 256)), requires_grad=True)
+        # accept both 'num_prototypes' and 'prototypes'
+        K = int(m.get("num_prototypes", m.get("prototypes", 8192)))
+        proto = nn.Parameter(l2n(torch.randn(K, 256)), requires_grad=True)
         return cls(stu, tea, head_cls_s, head_cls_t, head_tok_s, head_tok_t, proto,
                    t_s=m.get("temp_student",0.1), t_t=m.get("temp_teacher",0.04),
                    mask_ratio=m.get("mask_ratio",0.5), ema_m=cfg["train"]["ssl"].get("ema_momentum",0.996))

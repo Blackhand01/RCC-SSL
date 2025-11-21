@@ -38,22 +38,36 @@ def make_exp_id(outputs_root: str, ts: str | None = None) -> str:
     return f"exp_{ts}"
 
 
-def make_run_dirs(outputs_root: str, exp_id: str, exp_name: str, model_key: str) -> Dict[str, Path]:
-    base = Path(outputs_root) / "experiments" / exp_id / exp_name / model_key
-    sub = {
-        "configuration": base / "configuration" / model_key,
-        "checkpoints": base / "checkpoints",
-        "metrics": base / "metrics",
-        "plots": base / "plots",
-    }
-    for path in sub.values():
-        ensure_dir(path)
+def make_run_dirs(outputs_root: str, exp_id: str, exp_name: str, model_key: str, *, override_leaf: bool = False, outputs_group_dir: str | None = None):
+    """
+    Create (and return) a dict of run directories.
+    If override_leaf=True, the run root becomes:
+      <outputs>/experiments/<exp_id>/<exp_name>
+    ignoring model_key (no extra descriptive level).
+    If outputs_group_dir is provided, it is used as the absolute group directory
+    (<outputs>/experiments/<exp_id>) to guard against mismatches across hosts.
+    """
+    from pathlib import Path
+    base = Path(outputs_root) / "experiments" / exp_id
+    if outputs_group_dir:
+        base = Path(outputs_group_dir)
+    if override_leaf:
+        run_root = base / exp_name
+    else:
+        # Legacy layout (kept for backward compatibility)
+        run_root = base / exp_name / model_key
+    (run_root / "metrics").mkdir(parents=True, exist_ok=True)
+    (run_root / "plots").mkdir(parents=True, exist_ok=True)
+    (run_root / "checkpoints").mkdir(parents=True, exist_ok=True)
+    (run_root / "records").mkdir(parents=True, exist_ok=True)
+    (run_root / "configuration").mkdir(parents=True, exist_ok=True)
     return {
-        "root": base,
-        **sub,
-        "artifacts": sub["checkpoints"],
-        "figures": sub["plots"],
-        "records": sub["configuration"],
+        "root": run_root,
+        "metrics": run_root / "metrics",
+        "plots": run_root / "plots",
+        "checkpoints": run_root / "checkpoints",
+        "records": run_root / "records",
+        "configuration": run_root / "configuration",
     }
 
 

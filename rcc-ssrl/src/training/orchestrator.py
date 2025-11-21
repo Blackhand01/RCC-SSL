@@ -1,3 +1,4 @@
+
 # src/training/orchestrator.py
 from __future__ import annotations
 
@@ -34,7 +35,7 @@ def _f1_macro_np(y_true, y_pred) -> float:
         f1s.append(f1)
     return float(np.mean(f1s)) if f1s else 0.0
 
-from .datasets import build_sl_loaders, build_ssl_loader, class_labels_from_cfg, device_from_env
+from .datasets import build_sl_loaders, build_ssl_loader_from_cfg, class_labels_from_cfg, device_from_env
 from .trainer.features import save_features, train_linear_probe_torch, visualize_features_umap_pca
 from .utils.io import append_row_csv, copy_yaml_config, dump_json, make_exp_id, make_run_dirs, prefixed
 try:
@@ -151,7 +152,22 @@ class Orchestrator:
             self.exp_id = make_exp_id(outputs_root)
         runtime["exp_id"] = self.exp_id
         self.cfg.setdefault("experiment", {})["id"] = self.exp_id
-        self.run_dirs = make_run_dirs(outputs_root, self.exp_id, self.cfg["experiment"]["name"], self.model_key)
+        # Honor explicit group/leaf overrides set by the sbatch launcher:
+        subdir_override = os.environ.get("EXP_SUBDIR", "") or self.cfg.get("_runtime", {}).get("run_subdir", "")
+        group_dir_env   = os.environ.get("OUTPUTS_GROUP_DIR", "")
+        if subdir_override:
+            # New behavior: run root = <outputs>/experiments/<exp_id>/<exp_subdir>
+            # No extra "model_key" folder unless make_run_dirs chooses to add it.
+            self.run_dirs = make_run_dirs(
+                outputs_root,
+                self.exp_id,
+                subdir_override,
+                self.model_key,
+                override_leaf=True,
+                outputs_group_dir=group_dir_env or None,
+            )
+        else:
+            self.run_dirs = make_run_dirs(outputs_root, self.exp_id, self.cfg["experiment"]["name"], self.model_key)
         config_path = self.cfg.get("_runtime", {}).get("config_path") or os.environ.get("EXPERIMENT_CONFIG_PATH")
         copy_yaml_config(config_path, self.run_dirs["configuration"])
         self.override_transforms: Optional[Any] = None
@@ -210,8 +226,23 @@ class Orchestrator:
 
     # ------------------------------------------------------------------ SSL path
     def _fit_ssl(self) -> Dict[str, float]:
+        # --- OPTIONAL: dump a few augmented samples before training ---
+        try:
+            viz_cfg = ((self.cfg.get("viz", {}) or {}).get("dump_augmentations", {}) or {})
+            env_switch = os.environ.get("DUMP_AUGS", "0") == "1"
+            if bool(viz_cfg.get("enable", False)) or env_switch:
+                from src.training.tools.dump_augmentations import dump_from_config
+                out_root = viz_cfg.get(
+                    "out_root",
+                    "/home/mla_group_01/rcc-ssrl/src/training/configs/ablations/augms"
+                )
+                per_class = int(viz_cfg.get("per_class", 2))
+                dump_from_config(self.cfg, out_root=out_root, per_class=per_class, seed=self.cfg["experiment"].get("seed"))
+        except Exception as e:
+            print(f"[viz] dump_augmentations failed (non-fatal): {e}")
+        # ----------------------------------------------------------------
         model = _with_context("build_ssl_model", _ssl_model_factory, self.cfg)
-        loader = _with_context("build_ssl_loader", build_ssl_loader, self.cfg["data"], self.cfg["model"], "train")
+        loader = _with_context("build_ssl_loader", build_ssl_loader_from_cfg, self.cfg, "train")
         print(f"[RUN][{self.model_key}] device={self.device.type}")
 
         ssl_cfg = self.cfg["train"]["ssl"]
@@ -347,12 +378,20 @@ class Orchestrator:
             log_cfg = (self.cfg.get("logging", {}) or {})
             window = int(log_cfg.get("smoothing_window", 50))
             ema_m = float((self.cfg.get("train", {}).get("ssl", {}) or {}).get("ema_m", 0.0))
-            write_derived_csv(str(csv_path), target_col="ssl_loss", sma_window=window,
+            derived_csv_path = write_derived_csv(str(csv_path), target_col="ssl_loss", sma_window=window,
                               ema_m=(ema_m if ema_m > 0 else None))
-        except Exception:
+            print(f"[viz] Derived CSV written to: {derived_csv_path}")
+        except Exception as e:
+            print(f"[viz] Failed to write derived CSV: {e}")
             pass
 
-        render_all_ssl(csv_path, self.run_dirs["plots"], self.model_key)
+        # Render SSL plots; never fail the whole run because of viz
+        try:
+            render_all_ssl(csv_path, self.run_dirs["plots"], self.model_key)
+        except Exception as e:
+            import sys, traceback
+            print(f"[viz][WARNING] Plotting failed: {e}", file=sys.stderr)
+            traceback.print_exc()
 
         backbone_rel = str(backbone_ckpt.relative_to(self.run_dirs["root"])) if backbone_ckpt.exists() else ""
         metrics_path = prefixed(self.run_dirs["metrics"], self.model_key, "ssl_summary", "json")

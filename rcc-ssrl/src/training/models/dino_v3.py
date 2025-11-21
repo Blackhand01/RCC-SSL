@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.training.trainer.backbones import ResNetBackbone, mlp_head
+from src.training.trainer.backbones import get_backbone, mlp_head, resolve_backbone_from_model_cfg
 from src.training.utils.torch_ops import copy_weights_and_freeze, ema_update, l2n
 from src.training.trainer.loops import SSLBaseModel
 
@@ -31,7 +31,7 @@ def gram_loss(tokens_s: torch.Tensor, tokens_t: torch.Tensor) -> torch.Tensor:
     return F.mse_loss(Gs, Gt)
 
 class DINOv3(SSLBaseModel):
-    def __init__(self, stu: ResNetBackbone, tea: ResNetBackbone,
+    def __init__(self, stu: torch.nn.Module, tea: torch.nn.Module,
                  head_s_g: nn.Module, head_t_g: nn.Module,
                  head_s_l: nn.Module, head_t_l: nn.Module,
                  t_t: float=0.04, t_s: float=0.1, w_gram: float=1.0, ema_m: float=0.996,
@@ -53,12 +53,35 @@ class DINOv3(SSLBaseModel):
 
     @classmethod
     def from_config(cls, cfg: Dict[str,Any]) -> "DINOv3":
-        bname = cfg["model"].get("backbone","resnet50"); m = cfg["model"]["ssl"]
-        stu, tea = ResNetBackbone(bname, False), ResNetBackbone(bname, False)
+        m = cfg["model"]["ssl"]
+        bname, bopts = resolve_backbone_from_model_cfg(cfg["model"])
+        stu = get_backbone(name=bname, pretrained=False, **bopts)
+        tea = get_backbone(name=bname, pretrained=False, **bopts)
         dim = stu.out_dim
         head_s_g = mlp_head(dim, 4096, 1024, bn_last_affine=True); head_t_g = mlp_head(dim, 4096, 1024, bn_last_affine=True)
         head_s_l = mlp_head(dim, 2048, 256, bn_last_affine=True); head_t_l = mlp_head(dim, 2048, 256, bn_last_affine=True)
-        sched = (m.get("teacher_temp_schedule") or {})
+        # Accept both 'teacher_temp_schedule' and 'temp_teacher_schedule'
+        # and both naming schemes: {min,max,warmup_steps} or {start,end,warmup_frac}.
+        sched = (m.get("temp_teacher_schedule") or m.get("teacher_temp_schedule") or {})
+        # Derive warmup steps if only a fraction is provided.
+        tr_ssl = (cfg.get("train", {}).get("ssl", {}) or {})
+        total_steps = int(tr_ssl.get("epochs", 1)) * int(tr_ssl.get("steps_per_epoch", 1))
+        def _get(name, alt, default):
+            v = sched.get(name, None)
+            if v is None:
+                v = sched.get(alt, default)
+            return v
+        t_min = _get("min",   "start", m.get("temp_teacher", 0.04))
+        t_max = _get("max",   "end",   m.get("temp_teacher", 0.04))
+        wu_fr = sched.get("warmup_frac", None)
+        wu_st = sched.get("warmup_steps", None)
+        if wu_st is None and wu_fr is not None:
+            try:
+                wu_st = int(float(wu_fr) * max(1, total_steps))
+            except Exception:
+                wu_st = 0
+        if wu_st is None:
+            wu_st = 0
         return cls(
             stu, tea, head_s_g, head_t_g, head_s_l, head_t_l,
             t_t=m.get("temp_teacher", 0.04),
@@ -66,9 +89,9 @@ class DINOv3(SSLBaseModel):
             w_gram=m.get("gram_lambda", 1.0),
             ema_m=cfg["train"]["ssl"].get("ema_momentum", 0.996),
             center_m=m.get("center_momentum", 0.9),
-            t_warmup_min=sched.get("min"),
-            t_warmup_max=sched.get("max"),
-            t_warmup_steps=int(sched.get("warmup_steps", 0)),
+            t_warmup_min=float(t_min),
+            t_warmup_max=float(t_max),
+            t_warmup_steps=int(wu_st),
         )
 
     @torch.no_grad()

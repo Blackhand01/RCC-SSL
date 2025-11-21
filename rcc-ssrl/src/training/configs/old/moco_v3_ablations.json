@@ -1,0 +1,173 @@
+{
+  "version": 2,
+  "suite_name": "moco_v3_histopathology_ablations_v2",
+  "model": "moco_v3",
+  "base_config": "configs/exp_moco_v3_vit.yaml",
+  "output_dir": "src/training/configs/ablations/moco_v3",
+  "exp_prefix": "exp_moco_v3_abl",
+  "sbatch_script": "slurm/train_single_node.sbatch",
+  "experiments": [
+    {
+      "id": 16,
+      "config_filename": "exp_moco_v3_abl16.yaml",
+      "name": "baseline_long_pretrain_ep50",
+      "tags": ["baseline","duration","two_view"],
+      "override": {
+        "train": { "ssl": { "epochs": 50, "steps_per_epoch": 4450, "accumulate_steps": 16, "probe": { "epochs": 50 } } }
+      }
+    },
+    {
+      "id": 17,
+      "config_filename": "exp_moco_v3_abl17.yaml",
+      "name": "temp_sched_0.20_to_0.04_wu0.1_ep50",
+      "tags": ["temperature","schedule","duration"],
+      "override": {
+        "model": { "ssl": { "temp_teacher_schedule": { "start": 0.20, "end": 0.04, "warmup_frac": 0.1 } } },
+        "train": { "ssl": { "epochs": 50, "steps_per_epoch": 4450, "accumulate_steps": 16, "probe": { "epochs": 50 } } }
+      }
+    },
+    {
+      "id": 18,
+      "config_filename": "exp_moco_v3_abl18.yaml",
+      "name": "ema_to_one_sched_ep50",
+      "tags": ["ema","schedule","duration"],
+      "override": {
+        "model": { "ssl": { "ema_to_one": true } },
+        "train": { "ssl": { "epochs": 50, "steps_per_epoch": 4450, "accumulate_steps": 16, "probe": { "epochs": 50 } } }
+      }
+    },
+    {
+      "id": 19,
+      "config_filename": "exp_moco_v3_abl19.yaml",
+      "name": "multicrop_2g8l_std",
+      "tags": ["views","multicrop"],
+      "override": {
+        "model": { "ssl": { "use_multicrop": true } },
+        "data": {
+          "webdataset": { "batch_size_ssl": 32 },
+          "dino_v3": {
+            "global_size": 224, "local_size": 96, "n_local": 8,
+            "jitter": 0.4, "global_scale": [0.14, 1.0], "local_scale": [0.05, 0.14],
+            "blur_prob": 0.5, "solarize_prob": 0.0
+          }
+        },
+        "train": { "ssl": { "epochs": 30, "steps_per_epoch": 4450, "accumulate_steps": 24, "probe": { "epochs": 50 } } }
+      }
+    },
+    {
+      "id": 20,
+      "config_filename": "exp_moco_v3_abl20.yaml",
+      "name": "multicrop_2g10l_heavy",
+      "tags": ["views","multicrop","throughput"],
+      "override": {
+        "model": { "ssl": { "use_multicrop": true } },
+        "data": {
+          "webdataset": { "batch_size_ssl": 32 },
+          "dino_v3": {
+            "global_size": 224, "local_size": 96, "n_local": 10,
+            "jitter": 0.4, "global_scale": [0.10, 1.0], "local_scale": [0.05, 0.14],
+            "blur_prob": 0.5, "solarize_prob": 0.0
+          }
+        },
+        "train": { "ssl": { "epochs": 30, "steps_per_epoch": 4450, "accumulate_steps": 32, "probe": { "epochs": 50 } } }
+      }
+    },
+    {
+      "id": 21,
+      "config_filename": "exp_moco_v3_abl21.yaml",
+      "name": "proj_wide_h4096_out256",
+      "tags": ["projector","capacity"],
+      "override": {
+        "model": { "ssl": { "hidden_dim": 4096, "proj_dim": 256 } },
+        "train": { "ssl": { "epochs": 30, "steps_per_epoch": 4450, "accumulate_steps": 16, "probe": { "epochs": 50 } } }
+      }
+    },
+    {
+      "id": 22,
+      "config_filename": "exp_moco_v3_abl22.yaml",
+      "name": "stain_norm_macenko_plus_hed_jitter",
+      "tags": ["he_aug","stain_normalization","stain_jitter","robustness"],
+      "override": {
+        "aug": {
+          "stain": {
+            "normalize": { "enable": true, "method": "macenko" },
+            "jitter": { "enable": true, "mode": "HED", "delta": 0.02 }
+          }
+        },
+        "train": { "ssl": { "epochs": 30, "steps_per_epoch": 4450, "accumulate_steps": 16, "probe": { "epochs": 50 } } }
+      }
+    },
+    {
+      "id": 23,
+      "config_filename": "exp_moco_v3_abl23.yaml",
+      "name": "stain_norm_vahadane_plus_hed_jitter",
+      "tags": ["he_aug","stain_normalization","stain_jitter","robustness"],
+      "override": {
+        "aug": {
+          "stain": {
+            "normalize": { "enable": true, "method": "vahadane" },
+            "jitter": { "enable": true, "mode": "HED", "delta": 0.02 }
+          }
+        },
+        "train": { "ssl": { "epochs": 30, "steps_per_epoch": 4450, "accumulate_steps": 16, "probe": { "epochs": 50 } } }
+      }
+    },
+    {
+      "id": 24,
+      "config_filename": "exp_moco_v3_abl24.yaml",
+      "name": "multicrop_scale_boost_2g8l",
+      "tags": ["views","multicrop","scale"],
+      "override": {
+        "model": { "ssl": { "use_multicrop": true } },
+        "data": {
+          "webdataset": { "batch_size_ssl": 32 },
+          "dino_v3": {
+            "global_size": 224, "local_size": 96, "n_local": 8,
+            "jitter": 0.4, "global_scale": [0.08, 1.0], "local_scale": [0.05, 0.20],
+            "blur_prob": 0.5, "solarize_prob": 0.0
+          }
+        },
+        "train": { "ssl": { "epochs": 30, "steps_per_epoch": 4450, "accumulate_steps": 24, "probe": { "epochs": 50 } } }
+      }
+    },
+    {
+      "id": 25,
+      "config_filename": "exp_moco_v3_abl25.yaml",
+      "name": "temp_fixed_0.04_ep30",
+      "tags": ["temperature"],
+      "override": {
+        "model": { "ssl": { "temperature": 0.04 } },
+        "train": { "ssl": { "epochs": 30, "steps_per_epoch": 4450, "accumulate_steps": 16, "probe": { "epochs": 50 } } }
+      }
+    },
+    {
+      "id": 26,
+      "config_filename": "exp_moco_v3_abl26.yaml",
+      "name": "proj_bottleneck_out384",
+      "tags": ["projector","bottleneck"],
+      "override": {
+        "model": { "ssl": { "proj_dim": 384 } },
+        "train": { "ssl": { "epochs": 30, "steps_per_epoch": 4450, "accumulate_steps": 16, "probe": { "epochs": 50 } } }
+      }
+    },
+    {
+      "id": 27,
+      "config_filename": "exp_moco_v3_abl27.yaml",
+      "name": "multicrop_2g8l_plus_macenko",
+      "tags": ["views","multicrop","he_aug","stain_normalization"],
+      "override": {
+        "model": { "ssl": { "use_multicrop": true } },
+        "aug": { "stain": { "normalize": { "enable": true, "method": "macenko" } } },
+        "data": {
+          "webdataset": { "batch_size_ssl": 32 },
+          "dino_v3": {
+            "global_size": 224, "local_size": 96, "n_local": 8,
+            "jitter": 0.4, "global_scale": [0.14, 1.0], "local_scale": [0.05, 0.14],
+            "blur_prob": 0.5, "solarize_prob": 0.0
+          }
+        },
+        "train": { "ssl": { "epochs": 30, "steps_per_epoch": 4450, "accumulate_steps": 24, "probe": { "epochs": 50 } } }
+      }
+    }
+  ]
+}
