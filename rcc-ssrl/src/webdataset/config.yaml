@@ -1,0 +1,96 @@
+# tiling
+target_mpp: 0.50
+patch_size_px: 224
+stride_px_default: 224
+#stride_px_small_roi: 224
+min_tissue_ratio: 0.10
+roi_cover_threshold: 0.50      # τ: quota di copertura ROI per assegnare la classe
+ambiguous_policy: "discard"     # "discard" | "tumor_priority"
+
+# bilanciamento (train)
+balance:
+  enable: true
+  mode: "equal_per_class"       # ccRCC, pRCC, CHROMO, ONCO, NOT_TUMOR
+  max_target_per_class: null    # se null = auto (limitato dalla classe più piccola)
+  per_patient_cap_factor: 1.5   # q_cap = 1.5 * q_base
+  tumor_not_guard_rail: [0.30, 0.70]  # NOT_TUMOR vs tumor (solo per pazienti cc/p con entrambi)
+
+# split
+split:
+  folds_json: "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_splits/holdout_70_15_15/folds.json"
+
+# paths
+paths:
+  parquet: "/home/mla_group_01/rcc-ssrl/reports/02_parquet/slides.parquet"
+  out_masks: "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_masks_v3"
+  out_candidates: "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_candidates_v2"
+  out_balanced: "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_balanced_v2"
+  out_webdataset: "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final"
+
+  wsi_root: "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/raw"
+
+  # annotazioni
+  annotations:
+    ccRCC_xml_root: "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/raw/ccRCC/ccRCC_xml"
+    pRCC_xml_root:  "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/raw/pRCC/pRCC_xml"
+
+    pre_ccRCC_xml_root: "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/raw/pre/ccRCC/pre_ccRCC_xml"
+    pre_pRCC_xml_root:  "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/raw/pre/pRCC/pre_pRCC_xml"
+
+    chromo_roi_root: "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/raw/Annotations_chromo"
+    onco_roi_root:   "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/raw/Annotations_onco"
+
+    chromo_xlsx: "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/raw/Annotations_chromo/CHROMO_patients_correspondence.xlsx"
+    onco_xlsx:   "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/raw/Annotations_onco/ONCO_patients_correspondence.xlsx"
+
+# mapping label XML -> gruppi {tumor, not_tumor}
+xml_label_map:
+  tumor:
+    - "tumor"
+    - "cancer"
+    - "lesion"
+    - "carcinoma"
+    - "malignant"
+  not_tumor:
+    - "not_tumor"
+    - "normal"
+    - "benign"
+    - "stroma"
+    - "necrosis"
+    - "fibrosis"
+    - "fibrous"
+    - "fiber"      
+    - "inflammation"
+    - "fat"
+    - "adipose"
+    - "blood"
+    - "vessel"
+
+# sharding
+wds:
+  samples_per_shard: 5000
+  image_format: "jpg"
+
+generation:
+  seed: 1337
+  random_offset: true
+
+  budget_total:
+    train: 300000
+    val:   60000
+    test:  60000
+  slack_per_patient: 1.30     # cap dinamico per paziente = (budget/subset)/#pazienti × 1.30
+
+  # “tetti” locali per non far esplodere singole sorgenti
+  min_per_roi: 1500
+  per_roi_cap: 8000           # ↓ da 15000
+  per_wsi_cap: 8000           # ↓ da 15000
+  per_patient_class_cap: 10000  # opzionale (0 = disabilita)
+
+  # sampling
+  max_trials_factor: 30
+  stride_px_small_roi: 256
+  max_mask_pixels: 16000000 
+masks:
+  max_mask_side: 15000   # lato massimo consentito per le maschere salvate
+  min_mask_side: 4000    # lato minimo; serve a garantire che stiano almeno 2 patch

@@ -170,7 +170,7 @@ def load_ssl_loss_series(model_name: str, csv_path: Path) -> Tuple[pd.Series, pd
             loss = df[cols].sum(axis=1) if len(cols) > 1 else df[cols[0]]
 
     elif model_name == "i_jepa":
-        # i-JEPA: L2 loss, either 'loss' or mean of 'loss_target_*'.
+        # i-JEPA: accept canonical L2 loss plus common variants (ssl_loss, loss_target_*).
         if "loss" in df.columns:
             loss = df["loss"]
         else:
@@ -178,10 +178,14 @@ def load_ssl_loss_series(model_name: str, csv_path: Path) -> Tuple[pd.Series, pd
             if target_cols:
                 loss = df[target_cols].mean(axis=1)
             else:
-                cols = [c for c in df.columns if c.lower().startswith("loss")]
-                if not cols:
-                    raise ValueError(f"No i-JEPA-style loss columns found in {csv_path}")
-                loss = df[cols[0]]
+                preferred = [c for c in ("ssl_loss", "total_loss", "train_loss") if c in df.columns]
+                if preferred:
+                    loss = df[preferred[0]]
+                else:
+                    cols = [c for c in df.columns if "loss" in c.lower()]
+                    if not cols:
+                        raise ValueError(f"No i-JEPA-style loss columns found in {csv_path}")
+                    loss = df[cols[0]]
     else:
         # Generic fallback: pick the first 'loss*' column.
         cols = [c for c in df.columns if "loss" in c.lower()]

@@ -5,12 +5,25 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH -t 24:00:00
+#SBATCH -o /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.out
+#SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.err
 # The job name and log paths are overridden by --job-name/--output/--error from sbatch
 
 set -euo pipefail
 
+# -------- Standardized roots (HPC-safe) --------------------------------------
+export HOME_ROOT="${HOME_ROOT:-/home/mla_group_01}"
+export SCRATCH_ROOT="${SCRATCH_ROOT:-/beegfs-scratch/mla_group_01/workspace/mla_group_01}"
+export PROJECT_ROOT="${PROJECT_ROOT:-${HOME_ROOT}/rcc-ssrl}"
+export OUTPUTS_ROOT="${OUTPUTS_ROOT:-${PROJECT_ROOT}/outputs/mlruns}"
+export RCC_DATASET_ROOT="${RCC_DATASET_ROOT:-${SCRATCH_ROOT}/wsi-ssrl-rcc_project/data/processed}"
+export RCC_WDS_ROOT="${RCC_WDS_ROOT:-${RCC_DATASET_ROOT}/rcc_webdataset_final}"
+export WDS_ROOT="${WDS_ROOT:-${RCC_WDS_ROOT}}"
+export WEB_DATASET_ROOT="${WEB_DATASET_ROOT:-${RCC_WDS_ROOT}}"
+export PYTHONPATH="${PROJECT_ROOT}${PYTHONPATH:+:$PYTHONPATH}"
+
 # -------- User/Repo paths -----------------------------------------------------
-ROOT="/home/mla_group_01/rcc-ssrl"
+ROOT="${PROJECT_ROOT}"
 TRAIN_DIR="${ROOT}/src/training"
 
 cd "${TRAIN_DIR}"
@@ -41,11 +54,24 @@ echo "[sbatch] Config: ${CONFIG_PATH}"
 echo "[sbatch] RUN_NAME=${RUN_NAME:-}"
 echo "[sbatch] EXP_GROUP=${EXP_GROUP:-}"
 echo "[sbatch] OUTPUTS_GROUP_DIR=${OUTPUTS_GROUP_DIR:-}"
+echo "[sbatch] RCC_DATASET_ROOT=${RCC_DATASET_ROOT}"
 
 # Export several conventional env vars so Python can locate the config
 export CONFIG_PATH="${CONFIG_PATH}"
 export TRAIN_CONFIG="${CONFIG_PATH}"
 export RUN_CFG="${CONFIG_PATH}"
+
+# Quick sanity check on the target node to confirm visibility of the dataset
+srun -N1 -n1 bash -lc 'hostname; ls -ld ${RCC_DATASET_ROOT}/rcc_webdataset_final/train' || {
+  echo "[sbatch] Dataset path not visible on this node" >&2
+  exit 4
+}
+
+# Fail-fast preflight (dataset presence + shards)
+PYTHONPATH="${PYTHONPATH}" python -m src.training.utils.preflight || {
+  echo "[sbatch] Preflight failed" >&2
+  exit 5
+}
 
 # -------- Launch ---------------------------------------------------------------
 # torchrun is used as in your previous runs; --standalone for single-node

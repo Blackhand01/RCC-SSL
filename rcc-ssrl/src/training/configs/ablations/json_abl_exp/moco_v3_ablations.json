@@ -3,10 +3,419 @@
   "suite_name": "moco_v3_histopathology_ablations",
   "model": "moco_v3",
   "base_config": "configs/exp_moco_v3_vit.yaml",
-  "output_dir": "src/training/configs/ablations",
+  "output_dir": "src/training/configs/ablations/moco_v3",
   "exp_prefix": "exp_moco_v3_abl",
   "sbatch_script": "slurm/train_single_node.sbatch",
   "experiments": [
+    {
+      "id": 1,
+      "config_filename": "exp_moco_v3_abl01.yaml",
+      "name": "baseline_v2",
+      "tags": [
+        "baseline",
+        "two_view",
+        "hed_jitter_on"
+      ],
+      "override": {
+        "train": {
+          "ssl": {
+            "epochs": 65,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "config_filename": "exp_moco_v3_abl02.yaml",
+      "name": "temp_fixed_0.07",
+      "tags": [
+        "temperature"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "temperature": 0.07
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 65,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "config_filename": "exp_moco_v3_abl03.yaml",
+      "name": "temp_fixed_0.10",
+      "tags": [
+        "temperature"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "temperature": 0.10
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 60,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "config_filename": "exp_moco_v3_abl04.yaml",
+      "name": "temp_schedule_0.20_to_0.07_wu0.1",
+      "tags": [
+        "temperature",
+        "schedule"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "temp_teacher_schedule": {
+              "start": 0.20,
+              "end": 0.07,
+              "warmup_frac": 0.1
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 60,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "config_filename": "exp_moco_v3_abl05.yaml",
+      "name": "ema_fixed_0.995",
+      "tags": [
+        "ema"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "ema_to_one": false
+          }
+        },
+        "train": {
+          "ssl": {
+            "ema_momentum": 0.995,
+            "epochs": 60,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "config_filename": "exp_moco_v3_abl06.yaml",
+      "name": "ema_fixed_0.999",
+      "tags": [
+        "ema"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "ema_to_one": false
+          }
+        },
+        "train": {
+          "ssl": {
+            "ema_momentum": 0.999,
+            "epochs": 60,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "config_filename": "exp_moco_v3_abl07.yaml",
+      "name": "proj_hidden_2048",
+      "tags": [
+        "projector",
+        "capacity"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "hidden_dim": 2048
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 65,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 8,
+      "config_filename": "exp_moco_v3_abl08.yaml",
+      "name": "proj_hidden_8192",
+      "tags": [
+        "projector",
+        "capacity"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "hidden_dim": 8192
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 65,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 9,
+      "config_filename": "exp_moco_v3_abl09.yaml",
+      "name": "proj_outdim_512",
+      "tags": [
+        "projector",
+        "bottleneck"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "proj_dim": 512
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 65,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 10,
+      "config_filename": "exp_moco_v3_abl10.yaml",
+      "name": "views_multicrop_2g+6l",
+      "tags": [
+        "views",
+        "multicrop"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "use_multicrop": true
+          }
+        },
+        "data": {
+          "webdataset": {
+            "batch_size_ssl": 32
+          },
+          "dino_v3": {
+            "global_size": 224,
+            "local_size": 96,
+            "n_local": 6,
+            "jitter": 0.4,
+            "global_scale": [
+              0.14,
+              1.0
+            ],
+            "local_scale": [
+              0.05,
+              0.14
+            ],
+            "blur_prob": 0.5,
+            "solarize_prob": 0.0
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 35,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 11,
+      "config_filename": "exp_moco_v3_abl11.yaml",
+      "name": "stain_norm_macenko",
+      "tags": [
+        "he_aug",
+        "stain_normalization"
+      ],
+      "override": {
+        "aug": {
+          "stain": {
+            "normalize": {
+              "enable": true,
+              "method": "macenko"
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 65,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 12,
+      "config_filename": "exp_moco_v3_abl12.yaml",
+      "name": "stain_norm_vahadane",
+      "tags": [
+        "he_aug",
+        "stain_normalization"
+      ],
+      "override": {
+        "aug": {
+          "stain": {
+            "normalize": {
+              "enable": true,
+              "method": "vahadane"
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 65,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 13,
+      "config_filename": "exp_moco_v3_abl13.yaml",
+      "name": "stain_jitter_off",
+      "tags": [
+        "he_aug",
+        "stain_jitter"
+      ],
+      "override": {
+        "aug": {
+          "stain": {
+            "jitter": {
+              "enable": false,
+              "mode": "HED",
+              "delta": 0.02
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 65,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 14,
+      "config_filename": "exp_moco_v3_abl14.yaml",
+      "name": "accum_steps_8",
+      "tags": [
+        "batch_effective",
+        "throughput"
+      ],
+      "override": {
+        "train": {
+          "ssl": {
+            "accumulate_steps": 8,
+            "epochs": 65,
+            "steps_per_epoch": 4450,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 15,
+      "config_filename": "exp_moco_v3_abl15.yaml",
+      "name": "accum_steps_32",
+      "tags": [
+        "batch_effective",
+        "throughput"
+      ],
+      "override": {
+        "train": {
+          "ssl": {
+            "accumulate_steps": 32,
+            "epochs": 65,
+            "steps_per_epoch": 4450,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
     {
       "id": 16,
       "config_filename": "exp_moco_v3_abl16.yaml",
@@ -25,7 +434,7 @@
         },
         "train": {
           "ssl": {
-            "epochs": 25,
+            "epochs": 65,
             "steps_per_epoch": 4450,
             "accumulate_steps": 8,
             "probe": {
@@ -65,7 +474,7 @@
         },
         "train": {
           "ssl": {
-            "epochs": 25,
+            "epochs": 65,
             "steps_per_epoch": 4450,
             "accumulate_steps": 8,
             "ema_momentum": 0.996,
@@ -102,7 +511,7 @@
         },
         "train": {
           "ssl": {
-            "epochs": 25,
+            "epochs": 65,
             "steps_per_epoch": 4450,
             "accumulate_steps": 8,
             "probe": {
@@ -146,7 +555,7 @@
         },
         "train": {
           "ssl": {
-            "epochs": 20,
+            "epochs": 65,
             "steps_per_epoch": 4450,
             "accumulate_steps": 8,
             "probe": {
@@ -172,7 +581,7 @@
         },
         "train": {
           "ssl": {
-            "epochs": 25,
+            "epochs": 65,
             "steps_per_epoch": 4450,
             "accumulate_steps": 4,
             "probe": {
@@ -200,7 +609,7 @@
         },
         "train": {
           "ssl": {
-            "epochs": 25,
+            "epochs": 65,
             "steps_per_epoch": 4450,
             "accumulate_steps": 8,
             "probe": {

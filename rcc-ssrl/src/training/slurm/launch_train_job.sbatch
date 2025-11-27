@@ -11,8 +11,19 @@
 #SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.err
 set -euo pipefail
 
+# Standardized roots for HPC
+export HOME_ROOT="${HOME_ROOT:-/home/mla_group_01}"
+export SCRATCH_ROOT="${SCRATCH_ROOT:-/beegfs-scratch/mla_group_01/workspace/mla_group_01}"
+export PROJECT_ROOT="${PROJECT_ROOT:-${HOME_ROOT}/rcc-ssrl}"
+export OUTPUTS_ROOT="${OUTPUTS_ROOT:-${PROJECT_ROOT}/outputs/mlruns}"
+export RCC_DATASET_ROOT="${RCC_DATASET_ROOT:-${SCRATCH_ROOT}/wsi-ssrl-rcc_project/data/processed}"
+export RCC_WDS_ROOT="${RCC_WDS_ROOT:-${RCC_DATASET_ROOT}/rcc_webdataset_final}"
+export WDS_ROOT="${WDS_ROOT:-${RCC_WDS_ROOT}}"
+export WEB_DATASET_ROOT="${WEB_DATASET_ROOT:-${RCC_WDS_ROOT}}"
+export PYTHONPATH="${PROJECT_ROOT}${PYTHONPATH:+:$PYTHONPATH}"
+
 # 1) Workdir
-WORKDIR="${SLURM_SUBMIT_DIR:-$PWD}"
+WORKDIR="${SLURM_SUBMIT_DIR:-$PROJECT_ROOT}"
 if [[ "$WORKDIR" == *"/src/training" ]]; then
   WORKDIR="$(dirname "$(dirname "$WORKDIR")")"
 fi
@@ -49,10 +60,19 @@ import torch
 print("Torch", torch.__version__, "CUDA", torch.cuda.is_available(), "NGPU", torch.cuda.device_count())
 PY
 
+# Dataset visibility check on the allocated node
+srun -N1 -n1 bash -lc 'hostname; ls -ld ${RCC_DATASET_ROOT}/rcc_webdataset_final/train' || {
+  echo "[sbatch] Dataset path not visible on this node" >&2
+  exit 4
+}
+
+# Fail-fast preflight (dataset presence + shards)
+PYTHONPATH="${PYTHONPATH}" python -m src.training.utils.preflight || {
+  echo "[sbatch] Preflight failed" >&2
+  exit 5
+}
+
 # 5) Project paths
-DEFAULT_PROJECT_ROOT="/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project"
-export PROJECT_ROOT="${PROJECT_ROOT:-$DEFAULT_PROJECT_ROOT}"
-export OUTPUTS_ROOT="${OUTPUTS_ROOT:-${PROJECT_ROOT}/outputs/mlruns}"
 # Cambia questa variabile se vuoi un'altra config
 export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/src/training/configs/exp_debug_pipeline.yaml}"
 export RUN_INDEX="${RUN_INDEX:--1}"

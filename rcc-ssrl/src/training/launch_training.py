@@ -33,9 +33,36 @@ from src.training.utils.paths import CONFIG_PATH as DEFAULT_CONFIG_PATH, RUN_IND
 # ---------------------------------------------------------------------
 # YAML I/O
 # ---------------------------------------------------------------------
+def _merge_dicts(base: Dict[str, Any], override: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    merged = copy.deepcopy(base)
+    for key, value in (override or {}).items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_dicts(merged[key], value)
+        else:
+            merged[key] = copy.deepcopy(value)
+    return merged
+
+
 def read_yaml(path: Path | str) -> Dict[str, Any]:
-    with _as_abs(path).open("r") as handle:
-        return yaml.safe_load(handle) or {}
+    """
+    Read a YAML file, honoring optional `_include` entries for shared fragments.
+    Includes are resolved relative to the current file and merged depth-first.
+    """
+    path = _as_abs(path)
+    with path.open("r") as handle:
+        cfg = yaml.safe_load(handle) or {}
+
+    includes = cfg.pop("_include", []) or []
+    if isinstance(includes, str):
+        includes = [includes]
+
+    merged: Dict[str, Any] = {}
+    for inc in includes:
+        inc_path = (path.parent / inc).resolve()
+        merged = _merge_dicts(merged, read_yaml(inc_path))
+
+    merged = _merge_dicts(merged, cfg)
+    return merged
 
 # ---------------------------------------------------------------------
 # paths(): centralization of resolved project paths

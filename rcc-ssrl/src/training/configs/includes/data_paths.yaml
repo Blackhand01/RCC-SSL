@@ -1,0 +1,12 @@
+data:
+  rcc_final_ablation:
+    train_dir: "${RCC_DATASET_ROOT}/rcc_webdataset_final/train"
+    val_dir: "${RCC_DATASET_ROOT}/rcc_webdataset_final/val"
+    test_dir: "${RCC_DATASET_ROOT}/rcc_webdataset_final/test"
+#sposta <<data:
+#   rcc_final_ablation:
+#     train_dir: "${RCC_DATASET_ROOT}/rcc_webdataset_final/train"
+#     val_dir: "${RCC_DATASET_ROOT}/rcc_webdataset_final/val"
+#     test_dir: "${RCC_DATASET_ROOT}/rcc_webdataset_final/test"
+# >> di "/home/mla_group_01/rcc-ssrl/src/training/configs/includes/data_paths.yaml " 
+# in "/home/mla_group_01/rcc-ssrl/src/training/configs/templates/exp_template_ssl.yaml", tenendo integrati tutti i file

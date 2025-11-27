@@ -289,9 +289,22 @@ class Orchestrator:
         from pathlib import Path as _P
         csv_stem = _P((self.cfg.get("logging", {}) or {}).get("metrics_csv_name", "ssl_timeseries.csv")).stem
         csv_path = prefixed(self.run_dirs["metrics"], self.model_key, csv_stem, "csv")
-        best_loss = float("inf")
+        #---blocco nuovo test--------
+        # best_loss = float("inf")
+        # best_epoch = -1
+        # best_state = None
+        ssl_cfg = self.cfg["train"]["ssl"]
+        ckpt_cfg = (ssl_cfg.get("checkpoint") or {})
+        ckpt_metric = ckpt_cfg.get("metric", "ssl_loss")  # default = comportamento attuale
+        warmup_epochs = int(ckpt_cfg.get("warmup_epochs", 0))
+        eval_every = int(ckpt_cfg.get("eval_every_epochs", 1))
+
+        best_ssl_loss = float("inf")
+        best_probe_acc = -1.0
         best_epoch = -1
         best_state = None
+
+        #----fine blocco nuovo test----
         backbone_ckpt = prefixed(self.run_dirs["checkpoints"], self.model_key, "ssl_best", "pt")
         global_step_offset = 0
         log_every = max(1, _log_every_steps(self.cfg))
@@ -359,14 +372,42 @@ class Orchestrator:
                     epoch_stats.get("ssl_loss_ema", epoch_stats.get("ssl_loss", float("inf")))
                 )
             )
-            if loss_epoch < best_loss:
-                best_loss = loss_epoch
+            #---blocco nuovo test--------
+            # if loss_epoch < best_loss:
+            #     best_loss = loss_epoch
+            #     best_epoch = epoch
+            #     best_state = safe_state_dict(model)
+            
+            if ckpt_metric == "ssl_loss":
+                if loss_epoch < best_ssl_loss:
+                    best_ssl_loss = loss_epoch
+                    best_epoch = epoch
+                    best_state = safe_state_dict(model)
+
+            elif ckpt_metric == "ssl_loss_after_warmup":
+                if epoch >= warmup_epochs and loss_epoch < best_ssl_loss:
+                    best_ssl_loss = loss_epoch
+                    best_epoch = epoch
+                    best_state = safe_state_dict(model)
+
+            elif ckpt_metric == "final_epoch":
+                # sovrascrivi sempre: best = ultimo
+                best_ssl_loss = loss_epoch
                 best_epoch = epoch
                 best_state = safe_state_dict(model)
 
+            elif ckpt_metric == "probe_val_acc":
+                raise NotImplementedError("checkpoint.metric='probe_val_acc' non è ancora implementato")
+
+            else:
+                raise ValueError(f"Unsupported checkpoint.metric='{ckpt_metric}'")
+            
+            #---fine blocco nuovo test----
             if hasattr(model, "on_epoch_end"):
                 model.on_epoch_end(epoch)
-
+        
+        best_loss = best_ssl_loss
+        
         if best_state is not None:
             model.load_state_dict(best_state, strict=False)
             model.to(self.device)

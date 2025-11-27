@@ -2,39 +2,884 @@
   "version": 1,
   "suite_name": "i_jepa_histopathology_ablations",
   "model": "i_jepa",
-  "base_config": "exp_template_ssl.yaml",
-  "output_dir": "src/training/configs/ablations",
+  "base_config": "configs/exp_i_jepa_vit.yaml",
+  "output_dir": "src/training/configs/ablations/i_jepa",
   "exp_prefix": "exp_i_jepa_abl",
   "sbatch_script": "slurm/train_single_node.sbatch",
   "experiments": [
     {
-      "id": 31,
-      "config_filename": "exp_i_jepa_abl31.yaml",
-      "name": "small_ctx_far_targets_longtrain_no_mixing",
-      "tags": ["longtrain", "no_mixing", "small_ctx", "far_targets"],
+      "id": 1,
+      "config_filename": "exp_i_jepa_abl01.yaml",
+      "name": "baseline_def",
+      "tags": [
+        "baseline",
+        "no_view_aug",
+        "no_overlap",
+        "hed_off"
+      ],
       "override": {
         "model": {
           "ssl": {
-            "context_scale": 0.55,
-            "target_scales": [0.10, 0.18],
-            "context_jitter": 0.10,
-            "no_overlap": true,
-            "max_context_resample": 4,
-            "min_target_tokens": 2
-          }
-        },
-        "aug": {
-          "mixing": {
-            "mixup":  { "enable": false },
-            "cutmix": { "enable": false, "p": 0.0 }
+            "jepa": {
+              "context": {
+                "scale": [
+                  0.85,
+                  1.0
+                ],
+                "aspect_ratio": [
+                  0.9,
+                  1.1
+                ]
+              },
+              "target": {
+                "n": 4,
+                "scale": [
+                  0.15,
+                  0.20
+                ],
+                "aspect_ratio": [
+                  0.75,
+                  1.5
+                ],
+                "no_overlap": true,
+                "min_distance_from_context": 0.0
+              }
+            },
+            "prediction_space": "global_mean",
+            "ema_to_one": true,
+            "predictor": {
+              "hidden_mul": 4,
+              "depth": 2
+            }
           }
         },
         "train": {
           "ssl": {
-            "epochs": 40,
+            "epochs": 90,
             "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "config_filename": "exp_i_jepa_abl02.yaml",
+      "name": "context_scale_0.70_0.85",
+      "tags": [
+        "geometry",
+        "context"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "jepa": {
+              "context": {
+                "scale": [
+                  0.70,
+                  0.85
+                ],
+                "aspect_ratio": [
+                  0.9,
+                  1.1
+                ]
+              }
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "config_filename": "exp_i_jepa_abl03.yaml",
+      "name": "context_scale_0.90_1.00",
+      "tags": [
+        "geometry",
+        "context"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "jepa": {
+              "context": {
+                "scale": [
+                  0.90,
+                  1.0
+                ],
+                "aspect_ratio": [
+                  0.9,
+                  1.1
+                ]
+              }
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "config_filename": "exp_i_jepa_abl04.yaml",
+      "name": "targets_M2",
+      "tags": [
+        "geometry",
+        "targets"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "jepa": {
+              "target": {
+                "n": 2,
+                "scale": [
+                  0.15,
+                  0.20
+                ],
+                "aspect_ratio": [
+                  0.75,
+                  1.5
+                ],
+                "no_overlap": true
+              }
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "config_filename": "exp_i_jepa_abl05.yaml",
+      "name": "targets_M8",
+      "tags": [
+        "geometry",
+        "targets"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "jepa": {
+              "target": {
+                "n": 8,
+                "scale": [
+                  0.15,
+                  0.20
+                ],
+                "aspect_ratio": [
+                  0.75,
+                  1.5
+                ],
+                "no_overlap": true
+              }
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "config_filename": "exp_i_jepa_abl06.yaml",
+      "name": "target_scale_0.10_0.15",
+      "tags": [
+        "geometry",
+        "targets"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "jepa": {
+              "target": {
+                "scale": [
+                  0.10,
+                  0.15
+                ]
+              }
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "config_filename": "exp_i_jepa_abl07.yaml",
+      "name": "target_scale_0.20_0.25",
+      "tags": [
+        "geometry",
+        "targets"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "jepa": {
+              "target": {
+                "scale": [
+                  0.20,
+                  0.25
+                ]
+              }
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 8,
+      "config_filename": "exp_i_jepa_abl08.yaml",
+      "name": "predictor_2xD_depth1",
+      "tags": [
+        "predictor",
+        "capacity"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "predictor": {
+              "hidden_mul": 2,
+              "depth": 1
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 9,
+      "config_filename": "exp_i_jepa_abl09.yaml",
+      "name": "predictor_4xD_depth2",
+      "tags": [
+        "predictor",
+        "capacity"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "predictor": {
+              "hidden_mul": 4,
+              "depth": 2
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 10,
+      "config_filename": "exp_i_jepa_abl10.yaml",
+      "name": "ema_fixed_0.995",
+      "tags": [
+        "ema"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "ema_to_one": false
+          }
+        },
+        "train": {
+          "ssl": {
+            "ema_momentum": 0.995,
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 11,
+      "config_filename": "exp_i_jepa_abl11.yaml",
+      "name": "ema_fixed_0.999",
+      "tags": [
+        "ema"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "ema_to_one": false
+          }
+        },
+        "train": {
+          "ssl": {
+            "ema_momentum": 0.999,
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 12,
+      "config_filename": "exp_i_jepa_abl12.yaml",
+      "name": "ema_cosine_to_one_wu0.1",
+      "tags": [
+        "ema",
+        "schedule"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "ema_to_one": true
+          }
+        },
+        "train": {
+          "ssl": {
+            "ema_schedule": {
+              "type": "cosine_to_one",
+              "warmup_frac": 0.1
+            },
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 13,
+      "config_filename": "exp_i_jepa_abl13.yaml",
+      "name": "prediction_space_token_layer11",
+      "tags": [
+        "prediction_space",
+        "token"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "prediction_space": "token",
+            "prediction_layer": "block11"
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 14,
+      "config_filename": "exp_i_jepa_abl14.yaml",
+      "name": "overlap_10pct",
+      "tags": [
+        "geometry",
+        "overlap"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "jepa": {
+              "target": {
+                "no_overlap": false,
+                "max_overlap_frac": 0.10
+              }
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 15,
+      "config_filename": "exp_i_jepa_abl15.yaml",
+      "name": "res_256",
+      "tags": [
+        "resolution",
+        "throughput"
+      ],
+      "override": {
+        "data": {
+          "img_size": 256
+        },
+        "model": {
+          "backbone": {
+            "input_size": 256
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 16,
+      "config_filename": "exp_i_jepa_abl16.yaml",
+      "name": "hed_jitter_delta0.02",
+      "tags": [
+        "he_aug",
+        "stain_jitter"
+      ],
+      "override": {
+        "aug": {
+          "stain": {
+            "jitter": {
+              "enable": true,
+              "mode": "HED",
+              "delta": 0.02
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 17,
+      "config_filename": "exp_i_jepa_abl17.yaml",
+      "name": "stain_norm_macenko",
+      "tags": [
+        "he_aug",
+        "stain_normalization"
+      ],
+      "override": {
+        "aug": {
+          "stain": {
+            "normalize": {
+              "enable": true,
+              "method": "macenko"
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 18,
+      "config_filename": "exp_i_jepa_abl18.yaml",
+      "name": "stain_norm_vahadane",
+      "tags": [
+        "he_aug",
+        "stain_normalization"
+      ],
+      "override": {
+        "aug": {
+          "stain": {
+            "normalize": {
+              "enable": true,
+              "method": "vahadane"
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 19,
+      "config_filename": "exp_i_jepa_abl19.yaml",
+      "name": "accum_steps_8",
+      "tags": [
+        "batch_effective",
+        "throughput"
+      ],
+      "override": {
+        "train": {
+          "ssl": {
+            "accumulate_steps": 8,
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 20,
+      "config_filename": "exp_i_jepa_abl20.yaml",
+      "name": "accum_steps_32",
+      "tags": [
+        "batch_effective",
+        "throughput"
+      ],
+      "override": {
+        "train": {
+          "ssl": {
             "accumulate_steps": 32,
-            "probe": { "epochs": 50 }
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 21,
+      "config_filename": "exp_i_jepa_abl21.yaml",
+      "name": "guard-rail_small_targets",
+      "tags": [
+        "guardrail",
+        "targets",
+        "stability"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "min_target_tokens": 4,
+            "max_context_resample": 4
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 22,
+      "config_filename": "exp_i_jepa_abl22.yaml",
+      "name": "guard-rail_strong",
+      "tags": [
+        "guardrail",
+        "targets",
+        "stability"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "min_target_tokens": 9,
+            "max_context_resample": 8
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 23,
+      "config_filename": "exp_i_jepa_abl23.yaml",
+      "name": "context_jitter_0.05",
+      "tags": [
+        "context",
+        "jitter",
+        "sampling"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "context_jitter": 0.05
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 24,
+      "config_filename": "exp_i_jepa_abl24.yaml",
+      "name": "token_block9",
+      "tags": [
+        "prediction_space",
+        "token",
+        "block9"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "prediction_space": "token",
+            "prediction_layer": "block9"
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 25,
+      "config_filename": "exp_i_jepa_abl25.yaml",
+      "name": "no_mixing_ssl",
+      "tags": [
+        "ssl",
+        "no_mixing",
+        "consistency"
+      ],
+      "override": {
+        "aug": {
+          "mixing": {
+            "mixup": {
+              "enable": false
+            },
+            "cutmix": {
+              "enable": false,
+              "p": 0.0
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 26,
+      "config_filename": "exp_i_jepa_abl26.yaml",
+      "name": "ctx_big_tiny_targets",
+      "tags": [
+        "geometry",
+        "context_wide",
+        "tiny_targets"
+      ],
+      "override": {
+        "model": {
+          "ssl": {
+            "jepa": {
+              "context": {
+                "scale": [
+                  0.95,
+                  1.0
+                ]
+              },
+              "target": {
+                "scale": [
+                  0.10,
+                  0.12
+                ],
+                "n": 4
+              }
+            }
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 27,
+      "config_filename": "exp_i_jepa_abl27.yaml",
+      "name": "ema_cosine_wu0.2",
+      "tags": [
+        "ema",
+        "schedule",
+        "stability"
+      ],
+      "override": {
+        "train": {
+          "ssl": {
+            "ema_schedule": {
+              "type": "cosine_to_one",
+              "warmup_frac": 0.2
+            },
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 28,
+      "config_filename": "exp_i_jepa_abl28.yaml",
+      "name": "res_256_guard-rail",
+      "tags": [
+        "resolution",
+        "guardrail"
+      ],
+      "override": {
+        "data": {
+          "img_size": 256
+        },
+        "model": {
+          "backbone": {
+            "input_size": 256
+          },
+          "ssl": {
+            "min_target_tokens": 4,
+            "max_context_resample": 4
+          }
+        },
+        "train": {
+          "ssl": {
+            "epochs": 90,
+            "steps_per_epoch": 4450,
+            "accumulate_steps": 16,
+            "probe": {
+              "epochs": 30
+            }
           }
         }
       }

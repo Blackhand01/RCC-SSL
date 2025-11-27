@@ -1,0 +1,17 @@
+# core
+numpy>=1.23
+pyyaml>=6.0
+tqdm>=4.66.0
+
+# data + image
+Pillow>=9.5
+webdataset>=0.2.57
+
+# metrics & viz
+scikit-learn>=1.3
+umap-learn>=0.5.5
+matplotlib>=3.7
+seaborn>=0.13
+
+# opzionale per viT da timm (se vuoi alternative a torchvision vit)
+timm>=0.9.8

@@ -206,3 +206,7 @@ rcc-ssrl/src/training/configs/ablations/augms/dino_v3/
 rcc-ssrl/src/training/configs/ablations/augms/ibot/
 rcc-ssrl/src/training/configs/ablations/augms/moco_v3/
 rcc-ssrl/src/training/configs/ablations/augms/i_jepa/
+llava-med-venv/
+rcc-ssrl/src/explainability/concept/ontology/concept_candidates_images/
+rcc-ssrl/src/evaluation/auto_configs/
+rcc-ssrl/src/training/configs/old/
