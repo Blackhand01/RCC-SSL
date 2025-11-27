@@ -7,6 +7,7 @@
 #SBATCH -t 24:00:00
 #SBATCH -o /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.out
 #SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.err
+#SBATCH --exclude=compute-5-14,compute-5-11
 # The job name and log paths are overridden by --job-name/--output/--error from sbatch
 
 set -euo pipefail

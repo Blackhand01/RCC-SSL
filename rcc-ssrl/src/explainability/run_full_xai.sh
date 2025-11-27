@@ -22,19 +22,23 @@ SRC_DIR="${REPO_ROOT}/src"
 TRAIN_WDS_DIR="/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final/train"
 CANDIDATES_CSV="${SRC_DIR}/explainability/concept/ontology/concept_candidates_rcc.csv"
 CANDIDATES_IMG_ROOT="${SRC_DIR}/explainability/concept/ontology/concept_candidates_images"
-ONTOLOGY_YAML="${SRC_DIR}/explainability/concept/ontology/ontology_rcc_debug.yaml"
-CONCEPT_BANK_CSV_DEFAULT="${SRC_DIR}/explainability/concept/ontology/concepts_rcc_v2.csv"
+
+# default: file di debug a 4 concetti
+ONTOLOGY_YAML_DEFAULT="${SRC_DIR}/explainability/concept/ontology/ontology_rcc_debug.yaml"
+ONTOLOGY_YAML="${ONTOLOGY_YAML:-$ONTOLOGY_YAML_DEFAULT}"
+
+CONCEPT_BANK_CSV_DEFAULT="${SRC_DIR}/explainability/concept/ontology/concepts_rcc_debug.csv"
 CONCEPT_BANK_CSV="${CONCEPT_BANK_CSV:-$CONCEPT_BANK_CSV_DEFAULT}"
 
 # Experiment-level (Stage 1/2)
 EXP_ROOT_DEFAULT="/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/exp_20251123_220420_moco_v3"
-MODEL_NAME_DEFAULT="moco_v3"
+MODEL_NAME_DEFAULT="moco_v3_ssl_linear_best"
 BACKBONE_NAME_DEFAULT="vit_small_patch16_224"
 
 # VLM config for concept bank
 VLM_CONTROLLER_DEFAULT="http://localhost:10000"
 VLM_MODEL_DEFAULT="llava-med-v1.5-mistral-7b"
-PRESENCE_THRESHOLD_DEFAULT="0.6"
+PRESENCE_THRESHOLD_DEFAULT="0.3"
 
 # Se START_LOCAL_VLM=1, run_full_xai lancerà un server LLaVA-Med locale
 # (controller + model_worker) prima di build_concept_bank e lo killerà alla fine.
@@ -45,20 +49,43 @@ VLM_MODEL_PATH_DEFAULT="microsoft/llava-med-v1.5-mistral-7b"
 VLM_MODEL_PATH="${VLM_MODEL_PATH:-$VLM_MODEL_PATH_DEFAULT}"
 VLM_WARMUP_SECONDS="${VLM_WARMUP_SECONDS:-120}"
 
+# Path al repo e al python di LLaVA-Med (override via env se necessario)
+LLAVA_REPO_ROOT_DEFAULT="/home/mla_group_01/LLaVA-Med"
+LLAVA_REPO_ROOT="${LLAVA_REPO_ROOT:-$LLAVA_REPO_ROOT_DEFAULT}"
+
+LLAVA_PYTHON_BIN_DEFAULT="/home/mla_group_01/llava-med-venv/bin/python"
+LLAVA_PYTHON_BIN="${LLAVA_PYTHON_BIN:-$LLAVA_PYTHON_BIN_DEFAULT}"
+
 # ------------------- helper: LLaVA-Med server locale -------------------
 start_local_vlm() {
   if [[ "${START_LOCAL_VLM}" != "1" ]]; then
     return 0
   fi
+
   echo "[INFO] Starting local LLaVA-Med controller on ${VLM_CONTROLLER}"
-  python3 -m llava.serve.controller \
+  echo "[INFO]   LLAVA_REPO_ROOT=${LLAVA_REPO_ROOT}"
+  echo "[INFO]   LLAVA_PYTHON_BIN=${LLAVA_PYTHON_BIN}"
+
+  if [[ ! -x "${LLAVA_PYTHON_BIN}" ]]; then
+    echo "[ERROR] LLAVA_PYTHON_BIN='${LLAVA_PYTHON_BIN}' non eseguibile; controlla il venv LLaVA-Med." >&2
+    return 1
+  fi
+
+  if [[ ! -d "${LLAVA_REPO_ROOT}" ]]; then
+    echo "[ERROR] LLAVA_REPO_ROOT='${LLAVA_REPO_ROOT}' non esiste; clona il repo LLaVA-Med lì o override via env." >&2
+    return 1
+  fi
+
+  pushd "${LLAVA_REPO_ROOT}" >/dev/null
+
+  "${LLAVA_PYTHON_BIN}" -m llava.serve.controller \
     --host "0.0.0.0" \
     --port 10000 \
     > /tmp/llava_controller.log 2>&1 &
   VLM_CTRL_PID=$!
   sleep 5
-  echo "[INFO] Starting local LLaVA-Med worker (model_path=${VLM_MODEL_PATH})"
-  python3 -m llava.serve.model_worker \
+
+  "${LLAVA_PYTHON_BIN}" -m llava.serve.model_worker \
     --host "0.0.0.0" \
     --controller "${VLM_CONTROLLER}" \
     --port 40000 \
@@ -67,6 +94,9 @@ start_local_vlm() {
     --multi-modal \
     > /tmp/llava_worker.log 2>&1 &
   VLM_WORKER_PID=$!
+
+  popd >/dev/null
+
   echo "[INFO] Waiting ${VLM_WARMUP_SECONDS}s for VLM to load weights..."
   sleep "${VLM_WARMUP_SECONDS}"
 }
@@ -138,8 +168,8 @@ if [[ "${num_lines}" -le 1 ]]; then
     --out-csv "${CANDIDATES_CSV}" \
     --images-root "${CANDIDATES_IMG_ROOT}"
 
-  # 0b) concepts_rcc_v1.csv (VLM su candidates)
-  echo "[INFO] Stage 0b: building concepts_rcc_v1.csv via VLM"
+  # 0b) concepts_rcc_debug.csv (VLM su candidates)
+  echo "[INFO] Stage 0b: building concepts_rcc_debug.csv via VLM"
   start_local_vlm
   python3 -m explainability.concept.ontology.build_concept_bank \
     --ontology "${ONTOLOGY_YAML}" \
@@ -147,11 +177,20 @@ if [[ "${num_lines}" -le 1 ]]; then
     --controller "${VLM_CONTROLLER}" \
     --model-name "${VLM_MODEL}" \
     --out-csv "${CONCEPT_BANK_CSV}" \
-    --presence-threshold "${PRESENCE_THRESHOLD}"
+    --presence-threshold "${PRESENCE_THRESHOLD}" \
+    --max-images 100
   stop_local_vlm
+
+  # hard check: concept bank deve avere almeno header + 1 riga
+  lines_after=$(wc -l < "${CONCEPT_BANK_CSV}")
+  if [[ "${lines_after}" -le 1 ]]; then
+    echo "[ERROR] Concept bank ${CONCEPT_BANK_CSV} still empty after Stage 0 (lines=${lines_after}). Aborting."
+    exit 1
+  fi
 else
   echo "[INFO] Concept bank found at ${CONCEPT_BANK_CSV} with ${num_lines} lines – skipping Stage 0."
 fi
+
 
 # ------------------- STAGE 1/2: spatial + concept XAI per esperimento -------------------
 

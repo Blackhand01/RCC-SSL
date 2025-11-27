@@ -12,7 +12,7 @@ Input:
 - VLM server (e.g. LLaVA-Med) answering concept-level questions in JSON.
 
 Output:
-- concepts_rcc_v1.csv with columns:
+- concepts_rcc_debug.csv with columns:
     concept_name, wds_key, group, class_label
 
 This file is pointed to by concepts.meta_csv in config_concept.yaml.
@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
+import os
 import random
 from pathlib import Path
 from typing import Any, Dict, List
@@ -57,7 +59,7 @@ def main(argv: List[str] | None = None) -> None:
     parser.add_argument(
         "--out-csv",
         required=True,
-        help="Output CSV path for concept bank (concepts_rcc_v1.csv)",
+        help="Output CSV path for concept bank (concepts_rcc_debug.csv)",
     )
     parser.add_argument(
         "--presence-threshold",
@@ -134,6 +136,15 @@ def main(argv: List[str] | None = None) -> None:
             dt = time.time() - t0
 
             total_queries += 1
+
+            # LOG DI DEBUG: prime N risposte parse-ate, anche se poi vengono scartate
+            if vlm.debug and ans is not None and total_queries <= 20:
+                print(
+                    f"[BANK DEBUG] key={key}, concept={cname}, "
+                    f"class={cls}, dt={dt:.2f}s\n"
+                    f"{json.dumps(ans, indent=2)}\n"
+                    f"{'-'*80}"
+                )
 
             if total_queries % log_every == 0:
                 elapsed = time.time() - t_start

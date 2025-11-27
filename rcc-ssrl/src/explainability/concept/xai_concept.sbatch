@@ -18,7 +18,11 @@ echo "[INFO] CONFIG_PATH=${CONFIG_PATH}"
 echo "[INFO] WORKDIR=${WORKDIR}"
 
 module purge || true
-# source /home/mla_group_01/rcc-ssrl/.venvs/train/bin/activate || true
+
+if [[ -n "${VENV_PATH:-}" ]]; then
+  # shellcheck disable=SC1090
+  source "${VENV_PATH}/bin/activate"
+fi
 
 cd "$WORKDIR"
 srun python3 xai_concept.py --config "$CONFIG_PATH"

@@ -10,6 +10,7 @@ It expects the model to return a JSON string with:
 from __future__ import annotations
 
 import json
+import os
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -27,10 +28,16 @@ class VLMClient:
         controller_url: str,
         model_name: str,
         timeout: int = 120,
+        debug: Optional[bool] = None,
     ) -> None:
         self.controller_url = controller_url.rstrip("/")
         self.model_name = model_name
         self.timeout = timeout
+        # debug esplicito > env > default False
+        if debug is None:
+            self.debug = os.getenv("VLM_DEBUG", "0") == "1"
+        else:
+            self.debug = bool(debug)
 
     @staticmethod
     def _encode_image(pil_img: Image.Image) -> str:
@@ -66,18 +73,34 @@ class VLMClient:
             im = im.convert("RGB")
             img_b64 = self._encode_image(im)
 
+        prompt_str = self._build_prompt(concept_name, base_prompt)
+
         payload = {
             "model": self.model_name,
-            "prompt": self._build_prompt(concept_name, base_prompt),
+            "prompt": prompt_str,
             "images": [img_b64],
             "temperature": float(temperature),
             "max_new_tokens": int(max_new_tokens),
         }
 
+        if self.debug:
+            print(
+                f"[VLM DEBUG] >>> REQUEST\n"
+                f"concept={concept_name}\n"
+                f"image={image_path}\n"
+                f"prompt=\n{prompt_str}\n"
+                f"{'-'*60}"
+            )
+
         url = f"{self.controller_url}/worker_generate_stream"
         session = requests.Session()
-        resp = session.post(url, json=payload, stream=True, timeout=self.timeout)
-        resp.raise_for_status()
+        try:
+            resp = session.post(url, json=payload, stream=True, timeout=self.timeout)
+            resp.raise_for_status()
+        except Exception as e:
+            if self.debug:
+                print(f"[VLM DEBUG] HTTP error for concept={concept_name}, image={image_path}: {e}")
+            return None
 
         last_text: Optional[str] = None
 
@@ -89,21 +112,38 @@ class VLMClient:
             try:
                 data = json.loads(chunk.decode("utf-8"))
             except Exception:
+                if self.debug:
+                    try:
+                        raw_chunk = chunk.decode("utf-8", errors="ignore")
+                    except Exception:
+                        raw_chunk = str(chunk)
+                    print(f"[VLM DEBUG] Failed to decode stream chunk as JSON: {raw_chunk[:200]}")
                 continue
 
-            # Se il worker segnala errore, abortiamo
+            # Se il worker segnala errore, abortiamo immediatamente
             if data.get("error_code", 0) != 0:
-                last_text = None
-                break
+                error_code = data.get("error_code")
+                if self.debug:
+                    print(f"[VLM DEBUG] Worker error_code={error_code}, data={data}")
+                raise RuntimeError(f"Worker returned error_code {error_code}: {data}")
 
             text = data.get("text")
             if isinstance(text, str):
                 last_text = text
 
         if not last_text:
+            if self.debug:
+                print(f"[VLM DEBUG] No text received for concept={concept_name}, image={image_path}")
             return None
 
         full = last_text.strip()
+
+        if self.debug:
+            # Non tronco: stai già limitando il numero di immagini con --max-images
+            print(
+                f"[VLM DEBUG] <<< RAW COMPLETION for concept={concept_name}, image={image_path}\n"
+                f"{full}\n{'='*80}"
+            )
 
         # Alcuni modelli possono aggiungere ```json ... ```: ripulisci
         for token in ("```json", "```JSON", "```"):
@@ -119,13 +159,20 @@ class VLMClient:
             start = full.rfind("{")
             end = full.rfind("}")
             if start == -1 or end == -1 or end <= start:
+                if self.debug:
+                    print("[VLM DEBUG] No JSON object found in completion.")
                 return None
             try:
                 raw = json.loads(full[start : end + 1])
-            except Exception:
+            except Exception as e:
+                if self.debug:
+                    print(f"[VLM DEBUG] Failed to parse JSON from completion: {e}")
+                    print(f"[VLM DEBUG] JSON candidate:\n{full[start:end+1]}")
                 return None
 
         if not isinstance(raw, dict):
+            if self.debug:
+                print(f"[VLM DEBUG] Parsed JSON is not a dict: {raw}")
             return None
 
         # Normalizza tipi e range così build_concept_bank può fidarsi
@@ -141,9 +188,22 @@ class VLMClient:
             confidence = 0.0
         confidence = max(0.0, min(1.0, confidence))
 
-        return {
+        result = {
             "concept": raw.get("concept", concept_name),
             "present": present,
             "confidence": confidence,
             "rationale": raw.get("rationale", ""),
         }
+
+        # In debug aggiungi anche il testo grezzo e il prompt originali
+        if self.debug:
+            result["raw_text"] = full
+            result["raw_prompt"] = prompt_str
+
+            print(
+                f"[VLM DEBUG] >>> PARSED\n"
+                f"{json.dumps(result, indent=2)}\n"
+                f"{'#'*80}"
+            )
+
+        return result

@@ -1,10 +1,12 @@
 experiment:
-  name: "xai_concept_ssl_rcc_vit"
+  name: "xai_ssl_rcc_vit_concept"
   seed: 1337
-  outputs_root: null   # overridden per ablation
+  # sovrascritto dall'orchestratore per ogni ablation
+  outputs_root: null
 
 evaluation_inputs:
-  eval_run_dir: null   # overridden per ablation
+  # sovrascritto dall'orchestratore per ogni ablation
+  eval_run_dir: null
   predictions_csv: "predictions.csv"
   logits_npy: "logits_test.npy"
 
@@ -13,11 +15,8 @@ data:
   img_size: 224
   imagenet_norm: false
   num_workers: 4
-  batch_size: 1
   webdataset:
-    # NUOVO
     train_dir: "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final/train"
-    # esistente
     test_dir: "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final/test"
     pattern: "shard-*.tar"
     image_key: "img.jpg;jpg;jpeg;png"
@@ -27,11 +26,10 @@ labels:
   class_order: ["ccRCC", "pRCC", "CHROMO", "ONCO", "NOT_TUMOR"]
 
 model:
-  name: null                 # overridden per ablation
-  arch_hint: "ssl_linear"
+  name: null                 # sovrascritto per ablation
   backbone_name: "vit_small_patch16_224"
-  ssl_backbone_ckpt: null    # overridden per ablation
-  ssl_head_ckpt: null        # overridden per ablation
+  ssl_backbone_ckpt: null    # sovrascritto per ablation
+  ssl_head_ckpt: null        # sovrascritto per ablation
 
 selection:
   per_class:
@@ -42,9 +40,8 @@ selection:
   min_per_class: 10
 
 concepts:
-  # concepts_rcc_v1.csv viene generato da build_concept_bank.py
-  # concepts_rcc_v1.csv viene generato da build_concept_bank.py
-  meta_csv: "/home/mla_group_01/rcc-ssrl/src/explainability/concept/ontology/concepts_rcc_v2.csv"
+  # default, sovrascrivibile via env CONCEPT_BANK_CSV
+  meta_csv: "/home/mla_group_01/rcc-ssrl/src/explainability/concept/ontology/concepts_rcc_debug.csv"
   concept_name_col: "concept_name"
   key_col: "wds_key"
   group_col: "group"
@@ -54,10 +51,5 @@ concepts:
   topk_per_patch: 5
   min_patches_per_concept: 5
 
-  similarity: "cosine"
-  topk_per_patch: 5
-  min_patches_per_concept: 5
-
 runtime:
   device: "cuda"
-  precision: "fp32"

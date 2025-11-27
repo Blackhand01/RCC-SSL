@@ -70,6 +70,6 @@ Una volta che eval.py ha prodotto predictions.csv e (opzionalmente) logits_test.
 Esempio:
 
 python /home/mla_group_01/rcc-ssrl/src/evaluation/tools/batch_patient_aggregation.py \
-  --mlruns-root /beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/exp_20251123_213900_i_jepa \
+  --mlruns-root /beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/exp_jepa_ckpt_test/exp_i_jepa_abl35/i_jepa \
   --method prob_sum
 

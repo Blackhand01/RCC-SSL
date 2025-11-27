@@ -7,62 +7,89 @@
 # -------------------------------------------------------------------
 
 set -euo pipefail
+# === Costanti di inclusione/esclusione ===
+EXCLUDE_DIRS=("configs" "tools" "reporting" "scripts" "__pycache__" ".venv" "docs" "logs")
+EXCLUDE_FILES=("__init__.py" "*.pyc" "*.err" "*.out" "*.json" "*.png" "utils/viz.py" "viz.py" "utils/reproducibility.py")
+# File extra da includere sempre
+INCLUDE_EXTRA_FILES=(
+  # "/home/mla_group_01/rcc-ssrl/scripts/06_xai/config_xai.yaml"
+  # "/home/mla_group_01/rcc-ssrl/scripts/06_xai/run_xai.sh"
+  # "/home/mla_group_01/rcc-ssrl/scripts/06_xai/ssl_linear_loader.py"
+  # "/home/mla_group_01/rcc-ssrl/scripts/06_xai/xai_generate.py"
+  # "/home/mla_group_01/rcc-ssrl/scripts/06_xai/xai_generate.sbatch"
+  # "/home/mla_group_01/rcc-ssrl/scripts/05_evaluation/eval_test_only.py"
+  "/home/mla_group_01/rcc-ssrl/src/training/scripts/launch_ssl_ablations.sh"
+  "/home/mla_group_01/rcc-ssrl/src/training/scripts/generate_ssl_ablation_configs.py"
+)
 
 # === Percorsi sorgente e destinazione ===
-SRC_DIR="/home/mla_group_01/rcc-ssrl/src/training_copy"
-DST_DIR="/home/mla_group_01/rcc-ssrl/src/training_tmp"
+SRC_DIR="/home/mla_group_01/rcc-ssrl/src/training"
+TRACE_FILE="/home/mla_group_01/rcc-ssrl/src/training/trace.md"
 
 # === Creazione destinazione ===
-mkdir -p "$DST_DIR"
+:
 
 # === Copia con esclusioni ===
-echo "[INFO] Copia da: $SRC_DIR"
-echo "[INFO] A:        $DST_DIR"
-echo "[INFO] Escludendo: docs/, __pycache__/, *.pyc, *.err, *.out, .venv/"
-
-rsync -av \
-  --exclude 'docs/' \
-  --exclude '__pycache__/' \
-  --exclude '*.pyc' \
-  --exclude '*.err' \
-  --exclude '*.out' \
-  --exclude '.venv/' \
-  --exclude '/training/utils/reproducibility.py' \
-  --exclude '/training/slurm/train_multi_node.sbatch' \
-  --exclude '/training/reporting/' \
-  "$SRC_DIR"/ "$DST_DIR"/
-
-echo "[OK] Copia completata."
+EXTRA_XAI_FILES=(
+  # "/home/mla_group_01/rcc-ssrl/scripts/06_xai/config_xai.yaml"
+  # "/home/mla_group_01/rcc-ssrl/scripts/06_xai/run_xai.sh"
+  # "/home/mla_group_01/rcc-ssrl/scripts/06_xai/ssl_linear_loader.py"
+  # "/home/mla_group_01/rcc-ssrl/scripts/06_xai/xai_generate.py"
+  # "/home/mla_group_01/rcc-ssrl/scripts/06_xai/xai_generate.sbatch"
+  # "/home/mla_group_01/rcc-ssrl/scripts/05_evaluation/eval_test_only.py"
+  "/home/mla_group_01/rcc-ssrl/src/training/scripts/launch_ssl_ablations.sh"
+  "/home/mla_group_01/rcc-ssrl/src/training/scripts/generate_ssl_ablation_configs.py"
+)
 
 # === Generazione trace.md ===
-TRACE_FILE="$DST_DIR/trace.md"
 echo "[INFO] Genero $TRACE_FILE"
 
-# Nota: ordiniamo i percorsi; escludiamo di nuovo per sicurezza.
-# Includiamo file testuali tipici; se vuoi TUTTO, rimuovi il grep -E nel while.
-# Qui includiamo: .py, .sh, .sbatch, .yaml, .yml, .md, .txt
+# Genera lista file da tracciare
 TMP_LIST="$(mktemp)"
-find "$DST_DIR" -type f ! -name 'trace.md' \
-  ! -path "*/__pycache__/*" ! -name "*.pyc" \
-  ! -name "*.err" ! -name "*.out" ! -path "*/.venv/*" \
-  -print | sed "s|$DST_DIR/||" | sort > "$TMP_LIST"
+find "$SRC_DIR" -type f ! -name 'trace.md' -print | sed "s|$SRC_DIR/||" | sort > "$TMP_LIST"
 
-# Se vuoi filtrare per estensioni testuali, lascia questa variabile;
-# per includere tutti i file, imposta FILE_FILTER_REGEX=".*"
-FILE_FILTER_REGEX='(\.py|\.sh|\.sbatch|\.yaml|\.yml|\.md|\.txt)$'
+# Funzione di esclusione
+should_exclude() {
+  local path="$1"
+  for dir in "${EXCLUDE_DIRS[@]}"; do
+    if [[ "$path" =~ ^$dir/ ]]; then
+      return 0
+    fi
+  done
+  for pat in "${EXCLUDE_FILES[@]}"; do
+    if [[ "$path" == $pat ]]; then
+      return 0
+    fi
+    if [[ "$path" == *${pat#*\*} ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
 
 # Scrive trace.md
 {
   while IFS= read -r relpath; do
-    if [[ "$relpath" =~ $FILE_FILTER_REGEX ]]; then
-      abs="$DST_DIR/$relpath"
-      echo "$relpath codice <<"
-      # stampa contenuto così com'è (senza alterare i caratteri)
-      cat "$abs"
+    if should_exclude "$relpath"; then
+      continue
+    fi
+    abs="$SRC_DIR/$relpath"
+    echo "$relpath codice <<"
+    cat "$abs"
+    echo ">>"
+    echo
+  done < "$TMP_LIST"
+
+  # Includi sempre i file extra richiesti
+  for f in "${INCLUDE_EXTRA_FILES[@]}"; do
+    fname="${f##/home/mla_group_01/rcc-ssrl/src/training/}"
+    if [[ -f "$f" ]]; then
+      echo "$fname codice <<"
+      cat "$f"
       echo ">>"
       echo
     fi
-  done < "$TMP_LIST"
+  done
 } > "$TRACE_FILE"
 
 rm -f "$TMP_LIST"

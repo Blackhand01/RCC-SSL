@@ -23,6 +23,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
+import os
 
 import yaml
 
@@ -120,8 +121,7 @@ def main(argv: List[str] | None = None) -> None:
     log.info(f"[INFO] MODEL_NAME={args.model_name}  BACKBONE_BASE={backbone_base}")
     log.info(f"[INFO] Found {len(ablation_folders)} ablations.")
 
-    spatial_template = yaml.safe_load(open(args.spatial_config_template))
-    concept_template = yaml.safe_load(open(args.concept_config_template))
+    # i template vengono letti ogni volta; per ora va bene così
 
     for ablation in ablation_folders:
         log.info("=" * 80)
@@ -165,6 +165,16 @@ def main(argv: List[str] | None = None) -> None:
         concept_config["model"]["ssl_backbone_ckpt"] = str(backbone_ckpt)
         concept_config["model"]["ssl_head_ckpt"] = str(head_ckpt)
         concept_config["evaluation_inputs"]["eval_run_dir"] = str(eval_run)
+
+        # se CONCEPT_BANK_CSV è definita nell'env (es. da run_full_xai.sh),
+        # forza l'uso di quel path per il concept bank
+        concept_bank_csv_env = os.environ.get("CONCEPT_BANK_CSV")
+        if concept_bank_csv_env:
+            concept_config.setdefault("concepts", {})
+            concept_config["concepts"]["meta_csv"] = concept_bank_csv_env
+            log.info(
+                f"[CFG] Overriding concepts.meta_csv with CONCEPT_BANK_CSV={concept_bank_csv_env}"
+            )
 
         concept_config_path = ablation / "06_xai" / "config_concept.yaml"
         with open(concept_config_path, "w") as f:

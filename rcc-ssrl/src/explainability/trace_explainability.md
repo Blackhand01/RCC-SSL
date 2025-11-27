@@ -458,12 +458,14 @@ class SSLLinearClassifier(nn.Module):
 
 concept/config_concept.yaml codice <<
 experiment:
-  name: "xai_concept_ssl_rcc_vit"
+  name: "xai_ssl_rcc_vit_concept"
   seed: 1337
-  outputs_root: null   # overridden per ablation
+  # sovrascritto dall'orchestratore per ogni ablation
+  outputs_root: null
 
 evaluation_inputs:
-  eval_run_dir: null   # overridden per ablation
+  # sovrascritto dall'orchestratore per ogni ablation
+  eval_run_dir: null
   predictions_csv: "predictions.csv"
   logits_npy: "logits_test.npy"
 
@@ -472,11 +474,8 @@ data:
   img_size: 224
   imagenet_norm: false
   num_workers: 4
-  batch_size: 1
   webdataset:
-    # NUOVO
     train_dir: "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final/train"
-    # esistente
     test_dir: "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final/test"
     pattern: "shard-*.tar"
     image_key: "img.jpg;jpg;jpeg;png"
@@ -486,11 +485,10 @@ labels:
   class_order: ["ccRCC", "pRCC", "CHROMO", "ONCO", "NOT_TUMOR"]
 
 model:
-  name: null                 # overridden per ablation
-  arch_hint: "ssl_linear"
+  name: null                 # sovrascritto per ablation
   backbone_name: "vit_small_patch16_224"
-  ssl_backbone_ckpt: null    # overridden per ablation
-  ssl_head_ckpt: null        # overridden per ablation
+  ssl_backbone_ckpt: null    # sovrascritto per ablation
+  ssl_head_ckpt: null        # sovrascritto per ablation
 
 selection:
   per_class:
@@ -501,9 +499,8 @@ selection:
   min_per_class: 10
 
 concepts:
-  # concepts_rcc_v1.csv viene generato da build_concept_bank.py
-  # concepts_rcc_v1.csv viene generato da build_concept_bank.py
-  meta_csv: "/home/mla_group_01/rcc-ssrl/src/explainability/concept/ontology/concepts_rcc_v1.csv"
+  # default, sovrascrivibile via env CONCEPT_BANK_CSV
+  meta_csv: "/home/mla_group_01/rcc-ssrl/src/explainability/concept/ontology/concepts_rcc_debug.csv"
   concept_name_col: "concept_name"
   key_col: "wds_key"
   group_col: "group"
@@ -513,13 +510,8 @@ concepts:
   topk_per_patch: 5
   min_patches_per_concept: 5
 
-  similarity: "cosine"
-  topk_per_patch: 5
-  min_patches_per_concept: 5
-
 runtime:
   device: "cuda"
-  precision: "fp32"
 >>
 
 concept/__init__.py codice <<
@@ -541,7 +533,7 @@ Input:
 - VLM server (e.g. LLaVA-Med) answering concept-level questions in JSON.
 
 Output:
-- concepts_rcc_v1.csv with columns:
+- concepts_rcc_debug.csv with columns:
     concept_name, wds_key, group, class_label
 
 This file is pointed to by concepts.meta_csv in config_concept.yaml.
@@ -551,6 +543,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import random
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -585,13 +578,19 @@ def main(argv: List[str] | None = None) -> None:
     parser.add_argument(
         "--out-csv",
         required=True,
-        help="Output CSV path for concept bank (concepts_rcc_v1.csv)",
+        help="Output CSV path for concept bank (concepts_rcc_debug.csv)",
     )
     parser.add_argument(
         "--presence-threshold",
         type=float,
         default=0.6,
         help="Minimal confidence to accept concept as present",
+    )
+    parser.add_argument(
+        "--max-images",
+        type=int,
+        default=0,
+        help="If > 0, limit the number of candidate patches processed (debug).",
     )
     args = parser.parse_args(argv)
 
@@ -612,6 +611,13 @@ def main(argv: List[str] | None = None) -> None:
             f"Concept bank: no candidate patches in {args.images_csv}. "
             "Stage 0a (build_concept_candidates) probably failed or produced an empty CSV."
         )
+
+    # Debug mode: limit number of patches (e.g. 100) to reduce queries
+    if args.max_images and args.max_images > 0:
+        # shuffle with fixed seed for reproducibility
+        rng = random.Random(1337)
+        rng.shuffle(rows)
+        rows = rows[: args.max_images]
 
     out_path = Path(args.out_csv)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -782,7 +788,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument(
         "--max-patches-per-class",
         type=int,
-        default=2000,
+        default=200, # 2000
         help="Maximum number of candidate patches per class_label.",
     )
     p.add_argument(
@@ -829,7 +835,6 @@ def main(argv: Optional[List[str]] = None) -> None:
             [str(s) for s in shards],
             shardshuffle=True,
             handler=wds.warn_and_continue,
-            empty_check=False,
         )
         .shuffle(10000)
         .decode("pil")
@@ -924,136 +929,52 @@ concept/ontology/__init__.py codice <<
 # empty – marks "ontology" as a package
 >>
 
-concept/ontology/ontology_rcc_v1.yaml codice <<
-version: 2
-name: "rcc_histology_18_concepts_v2"
+concept/ontology/ontology_rcc_debug.yaml codice <<
+version: 1
+name: "rcc_histology_debug_4_concepts"
 
 concepts:
   - id: 1
     name: "Clear cytoplasm (ccRCC)"
-    short_name: "clear_cytoplasm"
+    short_name: "clear_cytoplasm_ccrcc"
     group: "ccRCC"
     primary_class: "ccRCC"
-    prompt: "Identify viable renal tumour cells with abundant optically clear or glassy cytoplasm and sharp cell borders, usually forming nests or alveoli. Exclude adipocytes and stromal fat, artefactual perinuclear clearing, and foamy macrophages."
+    prompt: >
+      Identify viable renal tumour cells with abundant optically clear or glassy
+      cytoplasm and sharp cell borders, in keeping with clear cell renal cell carcinoma.
+      Exclude adipocytes, stromal fat, artefactual perinuclear clearing, and foamy
+      macrophages.
 
   - id: 2
-    name: "Delicate branching capillary network (ccRCC)"
-    short_name: "delicate_capillary_network"
-    group: "ccRCC"
-    primary_class: "ccRCC"
-    prompt: "Identify a delicate, thin-walled branching capillary network intimately investing nests or alveoli of tumour cells, creating a fine chicken-wire vascular pattern typical of clear cell RCC. Exclude thick fibrous septa, large muscular vessels, and non-tumour parenchymal vessels."
+    name: "Papillary fronds with fibrovascular cores (pRCC)"
+    short_name: "papillary_fronds_prcc"
+    group: "pRCC"
+    primary_class: "pRCC"
+    prompt: >
+      Identify true papillary fronds: finger-like projections with central fibrovascular
+      cores containing loose stroma and vessels, lined by tumour cells, in keeping with
+      papillary renal cell carcinoma. Exclude folded flat epithelium and simple tubules.
 
   - id: 3
-    name: "Alveolar/nested architecture (ccRCC)"
-    short_name: "alveolar_nested_architecture"
-    group: "ccRCC"
-    primary_class: "ccRCC"
-    prompt: "Identify alveolar, acinar, or nested arrangements of tumour cells separated by delicate vasculature or thin fibrous septa, with open lumina or sinusoid-like spaces between nests. Exclude papillary fronds with fibrovascular cores and flat tubules."
+    name: "Perinuclear halos (chRCC)"
+    short_name: "perinuclear_halos_chrcc"
+    group: "chRCC"
+    primary_class: "CHROMO"
+    prompt: >
+      Identify tumour cells arranged in sheets or nests showing distinct perinuclear
+      clearing or halos within pale to eosinophilic cytoplasm, typical of chromophobe
+      renal cell carcinoma. Exclude artefactual vacuoles and mucin.
 
   - id: 4
-    name: "Cytoplasmic vacuolization (ccRCC)"
-    short_name: "cytoplasmic_vacuolization"
-    group: "ccRCC"
-    primary_class: "ccRCC"
-    prompt: "Identify viable tumour cells with multiple, sharply defined intracytoplasmic vacuoles within clear or eosinophilic cytoplasm, giving a bubbly appearance in the setting of clear cell RCC. Exclude foamy macrophages, mucin pools, and obvious fixation artefacts."
-
-  - id: 5
-    name: "Papillary fronds with fibrovascular cores (pRCC)"
-    short_name: "papillary_fronds"
-    group: "pRCC"
-    primary_class: "pRCC"
-    prompt: "Identify true papillary fronds: finger-like projections into spaces with central fibrovascular cores containing loose stroma and vessels, lined by one or more layers of tumour cells. Exclude folded flat epithelium, simple tubules, and solid nests."
-
-  - id: 6
-    name: "Foamy macrophages in papillary cores (pRCC)"
-    short_name: "foamy_macrophages"
-    group: "pRCC"
-    primary_class: "pRCC"
-    prompt: "Identify clusters or sheets of foamy macrophages with finely vacuolated cytoplasm and small dense nuclei located within papillary fibrovascular cores or lumina. Do not misinterpret clear tumour cells, necrotic debris, or artefactual vacuolation as foamy macrophages."
-
-  - id: 7
-    name: "Psammoma bodies (pRCC)"
-    short_name: "psammoma_bodies"
-    group: "pRCC"
-    primary_class: "pRCC"
-    prompt: "Identify round, concentrically laminated basophilic calcifications (psammoma bodies) within papillary cores or tumour stroma. Exclude coarse dystrophic calcification, bone formation, and foreign material."
-
-  - id: 8
-    name: "Hobnail nuclei / pseudostratification (pRCC)"
-    short_name: "hobnail_nuclei"
-    group: "pRCC"
-    primary_class: "pRCC"
-    prompt: "Identify hobnail tumour cells with apically protruding, hyperchromatic nuclei bulging into lumina, or crowded pseudostratified nuclei along papillary surfaces, often with nuclear atypia. Exclude evenly spaced single-layer cuboidal epithelium and benign reactive changes."
-
-  - id: 9
-    name: "Perinuclear halos (chRCC)"
-    short_name: "perinuclear_halos"
-    group: "chRCC"
-    primary_class: "CHROMO"
-    prompt: "Identify solid sheets or nests of tumour cells showing distinct perinuclear clearing or halos surrounding the nucleus within pale to eosinophilic cytoplasm, in keeping with chromophobe RCC. Exclude artefactual vacuoles, degenerative ballooning, and mucin."
-
-  - id: 10
-    name: "Raisinoid nuclei (chRCC)"
-    short_name: "raisinoid_nuclei"
-    group: "chRCC"
-    primary_class: "CHROMO"
-    prompt: "Identify tumour cells with irregular, wrinkled (raisinoid) nuclear membranes, hyperchromasia, and irregular nuclear contours typical of chromophobe RCC. Exclude smooth, round nuclei of oncocytoma and low-grade clear cell RCC."
-
-  - id: 11
-    name: "Plant-cell-like borders (chRCC)"
-    short_name: "plant_cell_borders"
-    group: "chRCC"
-    primary_class: "CHROMO"
-    prompt: "Identify tumour cells with thick, sharply delineated polygonal cell borders that create a plant-cell or mosaic appearance in sheets of chromophobe RCC. Exclude indistinct or very thin borders of clear cell RCC or ordinary tubular epithelium."
-
-  - id: 12
-    name: "Pale-to-eosinophilic granular cytoplasm (chRCC)"
-    short_name: "pale_eosinophilic_cytoplasm"
-    group: "chRCC"
-    primary_class: "CHROMO"
-    prompt: "Identify cytoplasm that is pale to lightly eosinophilic, finely granular or reticulated in chromophobe RCC cells, often combined with perinuclear halos and plant-cell-like borders. Exclude the uniformly dense, deeply eosinophilic granular cytoplasm of oncocytic tumours."
-
-  - id: 13
     name: "Oncocytic cytoplasm (oncocytoma)"
-    short_name: "oncocytic_cytoplasm"
+    short_name: "oncocytic_cytoplasm_onco"
     group: "Oncocytoma"
     primary_class: "ONCO"
-    prompt: "Identify tumour cells with abundant, dense, finely granular, deeply eosinophilic cytoplasm (oncocytes) and round, centrally placed nuclei with smooth membranes, typically in renal oncocytoma. Exclude chromophobe-like cells with prominent perinuclear halos or reticulated cytoplasm."
-
-  - id: 14
-    name: "Archipelagenous architecture in oedematous stroma (oncocytoma)"
-    short_name: "archipelagenous_architecture"
-    group: "Oncocytoma"
-    primary_class: "ONCO"
-    prompt: "Identify round or oval nests and islands of oncocytic tumour cells scattered in loose, oedematous or myxoid stroma, producing an archipelagenous or archipelago-like pattern. Exclude true papillary projections and densely packed solid sheets without intervening stroma."
-
-  - id: 15
-    name: "Central fibrous scar / stellate fibrosis (oncocytoma)"
-    short_name: "central_fibrous_scar"
-    group: "Oncocytoma"
-    primary_class: "ONCO"
-    prompt: "Identify dense, hyalinised, stellate fibrous tissue within or near the centre of an oncocytic tumour, often with radiating fibrous bands and thick-walled vessels. Exclude peripheral fibrous capsule, nonspecific peritumoural fibrosis, and scar outside the tumour."
-
-  - id: 16
-    name: "ISUP nucleolar grade"
-    short_name: "isup_nucleolar_grade"
-    group: "Grading"
-    primary_class: null
-    prompt: "Assess nucleolar prominence in viable tumour cells according to ISUP criteria: grade 1 with inconspicuous or small nucleoli at high power, grade 2 with clearly visible nucleoli at 400x but not at 100x, grade 3 with prominent nucleoli visible at 100x, and grade 4 in the presence of extreme nuclear pleomorphism, tumour giant cells, sarcomatoid or rhabdoid morphology. Ignore crushed areas, necrosis, and non-tumour tissue."
-
-  - id: 17
-    name: "Coagulative tumour necrosis"
-    short_name: "coagulative_necrosis"
-    group: "Necrosis"
-    primary_class: null
-    prompt: "Identify areas of coagulative tumour necrosis characterised by ghost outlines of tumour cells with loss of nuclei, increased eosinophilia, and granular debris, usually sharply demarcated from viable tumour. Exclude simple haemorrhage, cyst contents, autolysis, and cautery artefact."
-
-  - id: 18
-    name: "Sarcomatoid / rhabdoid dedifferentiation"
-    short_name: "sarcomatoid_rhabdoid_dedifferentiation"
-    group: "Dedifferentiation"
-    primary_class: null
-    prompt: "Identify foci of high-grade dedifferentiation within renal cell carcinoma composed of malignant spindle cells in fascicles (sarcomatoid change) and/or rhabdoid cells with eccentric nuclei, prominent nucleoli, and dense eosinophilic cytoplasmic inclusions. Any definite sarcomatoid or rhabdoid component should be marked, and should not be confused with benign stromal spindle cells or inflammatory infiltrates."
+    prompt: >
+      Identify tumour cells with abundant, dense, finely granular, deeply eosinophilic
+      cytoplasm (oncocytes) and round centrally placed nuclei with smooth membranes,
+      typical of renal oncocytoma. Exclude chromophobe-like cells with obvious
+      perinuclear halos.
 >>
 
 concept/ontology/vlm_client.py codice <<
@@ -1114,7 +1035,12 @@ class VLMClient:
         temperature: float = 0.0,
         max_new_tokens: int = 256,
     ) -> Optional[Dict[str, Any]]:
-        """Send (image, concept, question) to the VLM and parse JSON answer."""
+        """Send (image, concept, question) to the VLM and parse JSON answer.
+
+        Expectation: the worker at /worker_generate_stream is a LLaVA-style
+        endpoint that streams JSON objects separated by NUL ('\0'), each
+        with at least a 'text' field and an 'error_code'.
+        """
         image_path = str(image_path)
         with Image.open(image_path) as im:
             im = im.convert("RGB")
@@ -1133,36 +1059,74 @@ class VLMClient:
         resp = session.post(url, json=payload, stream=True, timeout=self.timeout)
         resp.raise_for_status()
 
-        full = ""
-        for line in resp.iter_lines():
-            if not line:
-                continue
-            if isinstance(line, bytes):
-                line = line.decode("utf-8", errors="ignore")
-            full += line
+        last_text: Optional[str] = None
 
-        full = full.strip()
-        if not full:
+        # LLaVA streams JSON chunks terminated by '\0'; each chunk is a JSON dict
+        # like {"text": "...", "error_code": 0, ...}. Usiamo l'ultimo 'text'.
+        for chunk in resp.iter_lines(chunk_size=8192, decode_unicode=False, delimiter=b"\0"):
+            if not chunk:
+                continue
+            try:
+                data = json.loads(chunk.decode("utf-8"))
+            except Exception:
+                continue
+
+            # Se il worker segnala errore, abortiamo
+            if data.get("error_code", 0) != 0:
+                last_text = None
+                break
+
+            text = data.get("text")
+            if isinstance(text, str):
+                last_text = text
+
+        if not last_text:
             return None
 
-        # Try to locate JSON substring
-        try:
-            # Direct JSON
-            return json.loads(full)
-        except Exception:
-            pass
+        full = last_text.strip()
 
-        # Fallback: heuristic – last {...}
+        # Alcuni modelli possono aggiungere ```json ... ```: ripulisci
+        for token in ("```json", "```JSON", "```"):
+            if token in full:
+                full = full.replace(token, "")
+        full = full.strip()
+
+        # Prova a fare parse diretto della stringa come JSON
         try:
+            raw = json.loads(full)
+        except Exception:
+            # fallback: prendi l'ultimo blocco {...}
             start = full.rfind("{")
             end = full.rfind("}")
-            if start != -1 and end != -1 and end > start:
-                candidate = full[start : end + 1]
-                return json.loads(candidate)
-        except Exception:
+            if start == -1 or end == -1 or end <= start:
+                return None
+            try:
+                raw = json.loads(full[start : end + 1])
+            except Exception:
+                return None
+
+        if not isinstance(raw, dict):
             return None
 
-        return None
+        # Normalizza tipi e range così build_concept_bank può fidarsi
+        present_val = raw.get("present", False)
+        if isinstance(present_val, str):
+            present = present_val.strip().lower() in ("true", "yes", "y", "present", "1")
+        else:
+            present = bool(present_val)
+
+        try:
+            confidence = float(raw.get("confidence", 0.0))
+        except Exception:
+            confidence = 0.0
+        confidence = max(0.0, min(1.0, confidence))
+
+        return {
+            "concept": raw.get("concept", concept_name),
+            "present": present,
+            "confidence": confidence,
+            "rationale": raw.get("rationale", ""),
+        }
 >>
 
 concept/xai_concept.py codice <<
@@ -1609,7 +1573,11 @@ echo "[INFO] CONFIG_PATH=${CONFIG_PATH}"
 echo "[INFO] WORKDIR=${WORKDIR}"
 
 module purge || true
-# source /home/mla_group_01/rcc-ssrl/.venvs/train/bin/activate || true
+
+if [[ -n "${VENV_PATH:-}" ]]; then
+  # shellcheck disable=SC1090
+  source "${VENV_PATH}/bin/activate"
+fi
 
 cd "$WORKDIR"
 srun python3 xai_concept.py --config "$CONFIG_PATH"
@@ -1630,20 +1598,25 @@ run_all_explainability.sbatch codice <<
 #SBATCH --mem=64G
 #SBATCH --time=24:00:00
 
-# This job wraps the .sh orchestrator and runs it inside an allocation.
-# SBATCH directives must appear before any non-comment lines and control the job submission. 
+# This job wraps the *existing* run_full_xai.sh orchestrator and runs it inside an allocation.
 
 set -euo pipefail
 
-# --------- user-configurable defaults (override at submission with --export=ALL,VAR=...) ----------
+# --------- user-configurable defaults (can be overridden via sbatch --export=ALL,VAR=...) ----------
+# N.B.: questi valori sono solo fallback; i reali possono essere esportati prima di chiamare sbatch.
+
 EXP_ROOT="${EXP_ROOT:-/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/exp_20251123_220420_moco_v3}"
 MODEL_NAME="${MODEL_NAME:-moco_v3_ssl_linear_best}"
 BACKBONE_NAME="${BACKBONE_NAME:-vit_small_patch16_224}"
-ONLY_SPATIAL="${ONLY_SPATIAL:-0}"      # 1 to enable
-ONLY_CONCEPT="${ONLY_CONCEPT:-0}"      # 1 to enable
-WITH_VLM_AGG="${WITH_VLM_AGG:-0}"      # 1 to enable
+
+ONLY_SPATIAL="${ONLY_SPATIAL:-0}"      # 1 to enable (non ancora usato in run_full_xai.sh)
+ONLY_CONCEPT="${ONLY_CONCEPT:-0}"      # 1 to enable (non ancora usato in run_full_xai.sh)
+
+WITH_VLM_AGG="${WITH_VLM_AGG:-0}"      # legacy; non usato dall’orchestratore attuale
 MIN_VLM_CONF="${MIN_VLM_CONF:-0.7}"
-VENV_PATH="${VENV_PATH:-}"             # e.g., /home/mla_group_01/rcc-ssrl/.venvs/train
+
+# venv per rcc-ssrl (train + explainability)
+VENV_PATH="${VENV_PATH:-}"
 
 echo "[INFO] Host: $(hostname)"
 echo "[INFO] EXP_ROOT=${EXP_ROOT}"
@@ -1653,23 +1626,21 @@ echo "[INFO] ONLY_SPATIAL=${ONLY_SPATIAL} ONLY_CONCEPT=${ONLY_CONCEPT}"
 echo "[INFO] WITH_VLM_AGG=${WITH_VLM_AGG} MIN_VLM_CONF=${MIN_VLM_CONF}"
 echo "[INFO] VENV_PATH=${VENV_PATH}"
 
-SCRIPT="/home/mla_group_01/rcc-ssrl/src/explainability/run_all_explainability.sh"
+# Orchestrator reale (esiste già)
+SCRIPT="/home/mla_group_01/rcc-ssrl/src/explainability/run_full_xai.sh"
+
+if [[ ! -f "$SCRIPT" ]]; then
+  echo "[ERROR] Orchestrator script not found: $SCRIPT" >&2
+  exit 1
+fi
+
 chmod +x "$SCRIPT"
 
-# srun runs the job step inside the allocation provided by sbatch. 
+# srun runs the job step inside the allocation provided by sbatch.
 SRUN_ARGS=( srun --ntasks=1 )
 
-ARGS=( --experiment-root "$EXP_ROOT"
-       --model-name "$MODEL_NAME"
-       --backbone-name "$BACKBONE_NAME" )
-
-if [[ "$ONLY_SPATIAL" == "1" ]]; then ARGS+=( --only-spatial ); fi
-if [[ "$ONLY_CONCEPT" == "1" ]]; then ARGS+=( --only-concept ); fi
-if [[ "$WITH_VLM_AGG" == "1" ]]; then ARGS+=( --with-vlm-aggregate --min-vlm-confidence "$MIN_VLM_CONF" ); fi
-if [[ -n "$VENV_PATH" ]]; then ARGS+=( --venv "$VENV_PATH" ); fi
-
-echo "[INFO] Command: ${SRUN_ARGS[*]} $SCRIPT ${ARGS[*]}"
-"${SRUN_ARGS[@]}" "$SCRIPT" "${ARGS[@]}"
+echo "[INFO] Command: ${SRUN_ARGS[*]} $SCRIPT"
+"${SRUN_ARGS[@]}" "$SCRIPT"
 >>
 
 run_explainability.py codice <<
@@ -1698,6 +1669,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
+import os
 
 import yaml
 
@@ -1795,8 +1767,7 @@ def main(argv: List[str] | None = None) -> None:
     log.info(f"[INFO] MODEL_NAME={args.model_name}  BACKBONE_BASE={backbone_base}")
     log.info(f"[INFO] Found {len(ablation_folders)} ablations.")
 
-    spatial_template = yaml.safe_load(open(args.spatial_config_template))
-    concept_template = yaml.safe_load(open(args.concept_config_template))
+    # i template vengono letti ogni volta; per ora va bene così
 
     for ablation in ablation_folders:
         log.info("=" * 80)
@@ -1840,6 +1811,16 @@ def main(argv: List[str] | None = None) -> None:
         concept_config["model"]["ssl_backbone_ckpt"] = str(backbone_ckpt)
         concept_config["model"]["ssl_head_ckpt"] = str(head_ckpt)
         concept_config["evaluation_inputs"]["eval_run_dir"] = str(eval_run)
+
+        # se CONCEPT_BANK_CSV è definita nell'env (es. da run_full_xai.sh),
+        # forza l'uso di quel path per il concept bank
+        concept_bank_csv_env = os.environ.get("CONCEPT_BANK_CSV")
+        if concept_bank_csv_env:
+            concept_config.setdefault("concepts", {})
+            concept_config["concepts"]["meta_csv"] = concept_bank_csv_env
+            log.info(
+                f"[CFG] Overriding concepts.meta_csv with CONCEPT_BANK_CSV={concept_bank_csv_env}"
+            )
 
         concept_config_path = ablation / "06_xai" / "config_concept.yaml"
         with open(concept_config_path, "w") as f:
@@ -1890,8 +1871,13 @@ SRC_DIR="${REPO_ROOT}/src"
 TRAIN_WDS_DIR="/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final/train"
 CANDIDATES_CSV="${SRC_DIR}/explainability/concept/ontology/concept_candidates_rcc.csv"
 CANDIDATES_IMG_ROOT="${SRC_DIR}/explainability/concept/ontology/concept_candidates_images"
-ONTOLOGY_YAML="${SRC_DIR}/explainability/concept/ontology/ontology_rcc_v1.yaml"
-CONCEPT_BANK_CSV="${SRC_DIR}/explainability/concept/ontology/concepts_rcc_v1.csv"
+
+# default: file di debug a 4 concetti
+ONTOLOGY_YAML_DEFAULT="${SRC_DIR}/explainability/concept/ontology/ontology_rcc_debug.yaml"
+ONTOLOGY_YAML="${ONTOLOGY_YAML:-$ONTOLOGY_YAML_DEFAULT}"
+
+CONCEPT_BANK_CSV_DEFAULT="${SRC_DIR}/explainability/concept/ontology/concepts_rcc_debug.csv"
+CONCEPT_BANK_CSV="${CONCEPT_BANK_CSV:-$CONCEPT_BANK_CSV_DEFAULT}"
 
 # Experiment-level (Stage 1/2)
 EXP_ROOT_DEFAULT="/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/exp_20251123_220420_moco_v3"
@@ -1901,7 +1887,7 @@ BACKBONE_NAME_DEFAULT="vit_small_patch16_224"
 # VLM config for concept bank
 VLM_CONTROLLER_DEFAULT="http://localhost:10000"
 VLM_MODEL_DEFAULT="llava-med-v1.5-mistral-7b"
-PRESENCE_THRESHOLD_DEFAULT="0.6"
+PRESENCE_THRESHOLD_DEFAULT="0.3"
 
 # Se START_LOCAL_VLM=1, run_full_xai lancerà un server LLaVA-Med locale
 # (controller + model_worker) prima di build_concept_bank e lo killerà alla fine.
@@ -1912,20 +1898,43 @@ VLM_MODEL_PATH_DEFAULT="microsoft/llava-med-v1.5-mistral-7b"
 VLM_MODEL_PATH="${VLM_MODEL_PATH:-$VLM_MODEL_PATH_DEFAULT}"
 VLM_WARMUP_SECONDS="${VLM_WARMUP_SECONDS:-120}"
 
+# Path al repo e al python di LLaVA-Med (override via env se necessario)
+LLAVA_REPO_ROOT_DEFAULT="/home/mla_group_01/LLaVA-Med"
+LLAVA_REPO_ROOT="${LLAVA_REPO_ROOT:-$LLAVA_REPO_ROOT_DEFAULT}"
+
+LLAVA_PYTHON_BIN_DEFAULT="/home/mla_group_01/llava-med-venv/bin/python"
+LLAVA_PYTHON_BIN="${LLAVA_PYTHON_BIN:-$LLAVA_PYTHON_BIN_DEFAULT}"
+
 # ------------------- helper: LLaVA-Med server locale -------------------
 start_local_vlm() {
   if [[ "${START_LOCAL_VLM}" != "1" ]]; then
     return 0
   fi
+
   echo "[INFO] Starting local LLaVA-Med controller on ${VLM_CONTROLLER}"
-  python3 -m llava.serve.controller \
+  echo "[INFO]   LLAVA_REPO_ROOT=${LLAVA_REPO_ROOT}"
+  echo "[INFO]   LLAVA_PYTHON_BIN=${LLAVA_PYTHON_BIN}"
+
+  if [[ ! -x "${LLAVA_PYTHON_BIN}" ]]; then
+    echo "[ERROR] LLAVA_PYTHON_BIN='${LLAVA_PYTHON_BIN}' non eseguibile; controlla il venv LLaVA-Med." >&2
+    return 1
+  fi
+
+  if [[ ! -d "${LLAVA_REPO_ROOT}" ]]; then
+    echo "[ERROR] LLAVA_REPO_ROOT='${LLAVA_REPO_ROOT}' non esiste; clona il repo LLaVA-Med lì o override via env." >&2
+    return 1
+  fi
+
+  pushd "${LLAVA_REPO_ROOT}" >/dev/null
+
+  "${LLAVA_PYTHON_BIN}" -m llava.serve.controller \
     --host "0.0.0.0" \
     --port 10000 \
     > /tmp/llava_controller.log 2>&1 &
   VLM_CTRL_PID=$!
   sleep 5
-  echo "[INFO] Starting local LLaVA-Med worker (model_path=${VLM_MODEL_PATH})"
-  python3 -m llava.serve.model_worker \
+
+  "${LLAVA_PYTHON_BIN}" -m llava.serve.model_worker \
     --host "0.0.0.0" \
     --controller "${VLM_CONTROLLER}" \
     --port 40000 \
@@ -1934,6 +1943,9 @@ start_local_vlm() {
     --multi-modal \
     > /tmp/llava_worker.log 2>&1 &
   VLM_WORKER_PID=$!
+
+  popd >/dev/null
+
   echo "[INFO] Waiting ${VLM_WARMUP_SECONDS}s for VLM to load weights..."
   sleep "${VLM_WARMUP_SECONDS}"
 }
@@ -2005,8 +2017,8 @@ if [[ "${num_lines}" -le 1 ]]; then
     --out-csv "${CANDIDATES_CSV}" \
     --images-root "${CANDIDATES_IMG_ROOT}"
 
-  # 0b) concepts_rcc_v1.csv (VLM su candidates)
-  echo "[INFO] Stage 0b: building concepts_rcc_v1.csv via VLM"
+  # 0b) concepts_rcc_debug.csv (VLM su candidates)
+  echo "[INFO] Stage 0b: building concepts_rcc_debug.csv via VLM"
   start_local_vlm
   python3 -m explainability.concept.ontology.build_concept_bank \
     --ontology "${ONTOLOGY_YAML}" \
@@ -2014,11 +2026,20 @@ if [[ "${num_lines}" -le 1 ]]; then
     --controller "${VLM_CONTROLLER}" \
     --model-name "${VLM_MODEL}" \
     --out-csv "${CONCEPT_BANK_CSV}" \
-    --presence-threshold "${PRESENCE_THRESHOLD}"
+    --presence-threshold "${PRESENCE_THRESHOLD}" \
+    --max-images 100
   stop_local_vlm
+
+  # hard check: concept bank deve avere almeno header + 1 riga
+  lines_after=$(wc -l < "${CONCEPT_BANK_CSV}")
+  if [[ "${lines_after}" -le 1 ]]; then
+    echo "[ERROR] Concept bank ${CONCEPT_BANK_CSV} still empty after Stage 0 (lines=${lines_after}). Aborting."
+    exit 1
+  fi
 else
   echo "[INFO] Concept bank found at ${CONCEPT_BANK_CSV} with ${num_lines} lines – skipping Stage 0."
 fi
+
 
 # ------------------- STAGE 1/2: spatial + concept XAI per esperimento -------------------
 
@@ -2730,7 +2751,12 @@ echo "[INFO] CONFIG_PATH=${CONFIG_PATH}"
 echo "[INFO] WORKDIR=${WORKDIR}"
 
 module purge || true
-# source /home/mla_group_01/rcc-ssrl/.venvs/train/bin/activate || true
+
+# Attiva eventuale venv (passata via env VENV_PATH, propagata da run_full_xai)
+if [[ -n "${VENV_PATH:-}" ]]; then
+  # shellcheck disable=SC1090
+  source "${VENV_PATH}/bin/activate"
+fi
 
 cd "$WORKDIR"
 srun python3 xai_generate.py --config "$CONFIG_PATH"

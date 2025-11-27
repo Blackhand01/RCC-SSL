@@ -80,7 +80,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument(
         "--max-patches-per-class",
         type=int,
-        default=2000,
+        default=200, # 2000
         help="Maximum number of candidate patches per class_label.",
     )
     p.add_argument(
@@ -127,7 +127,6 @@ def main(argv: Optional[List[str]] = None) -> None:
             [str(s) for s in shards],
             shardshuffle=True,
             handler=wds.warn_and_continue,
-            empty_check=False,
         )
         .shuffle(10000)
         .decode("pil")
