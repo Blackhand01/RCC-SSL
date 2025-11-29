@@ -37,7 +37,8 @@ selection:
     topk_tp: 5
     topk_fp: 3
     topk_fn: 3
-    lowconf_topk: 3
+  global_low_conf:
+    topk: 3
   min_per_class: 10
 
 xai:

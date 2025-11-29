@@ -4,7 +4,7 @@
 Build concept bank for RCC histology using a VLM.
 
 Input:
-- Ontology YAML with 18 RCC concepts.
+- Ontology YAML with RCC concepts.
 - CSV of candidate patches with columns:
     image_path, wds_key, class_label
   (produced automatically by build_concept_candidates.py)
@@ -23,14 +23,15 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import os
 import random
+import time
 from pathlib import Path
 from typing import Any, Dict, List
 
 import yaml
 
-from explainability.concept.ontology.vlm_client import VLMClient
+from explainability.concept.ontology.vlm_client import VLMClient  # backend HTTP esistente
+from explainability.concept.ontology.vlm_client_hf import VLMClientHF  # nuovo backend HF locale
 
 
 def load_ontology(path: str | Path) -> List[Dict[str, Any]]:
@@ -48,13 +49,22 @@ def main(argv: List[str] | None = None) -> None:
     )
     parser.add_argument(
         "--controller",
-        required=True,
-        help="VLM controller URL (e.g. http://localhost:10000)",
+        required=False,
+        help="VLM controller URL (e.g. http://localhost:10000) – usato SOLO se backend=http",
     )
     parser.add_argument(
         "--model-name",
-        default="llava-med-v1.5-mistral-7b",
-        help="VLM model name on the server",
+        default="Eren-Senoglu/llava-med-v1.5-mistral-7b-hf",
+        help="Nome del modello VLM. "
+             "Se backend=hf: id Hugging Face (es. Eren-Senoglu/llava-med-v1.5-mistral-7b-hf); "
+             "se backend=http: nome registrato sul server (es. llava-med-v1.5-mistral-7b).",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=["http", "hf"],
+        default="hf",
+        help="Tipo di backend VLM: 'hf' = modello locale via Hugging Face (no HTTP), "
+             "'http' = controller/worker HTTP (pipeline vecchia).",
     )
     parser.add_argument(
         "--out-csv",
@@ -76,7 +86,24 @@ def main(argv: List[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     concepts = load_ontology(args.ontology)
-    vlm = VLMClient(args.controller, args.model_name)
+
+    # Scegli il backend in base al flag --backend
+    if args.backend == "hf":
+        # modello locale via HuggingFace, NESSUN controller HTTP
+        vlm = VLMClientHF(
+            model_name=args.model_name,
+            device=None,        # auto: cuda se disponibile, altrimenti cpu
+            dtype="float16",    # va bene con A40
+            debug=False,        # o True se vuoi log verbosi
+        )
+    else:
+        # backend http vecchio: richiede --controller
+        if not args.controller:
+            raise RuntimeError(
+                "HTTP backend selected but --controller is None. "
+                "Pass --controller http://host:port oppure usa --backend hf."
+            )
+        vlm = VLMClient(args.controller, args.model_name)
 
     # Read candidate patches
     rows: List[Dict[str, str]] = []
@@ -95,7 +122,6 @@ def main(argv: List[str] | None = None) -> None:
 
     # Debug mode: limit number of patches (e.g. 100) to reduce queries
     if args.max_images and args.max_images > 0:
-        # shuffle with fixed seed for reproducibility
         rng = random.Random(1337)
         rng.shuffle(rows)
         rows = rows[: args.max_images]
@@ -107,7 +133,6 @@ def main(argv: List[str] | None = None) -> None:
     writer = csv.writer(out_f)
     writer.writerow(["concept_name", "wds_key", "group", "class_label"])
 
-    import time
     t_start = time.time()
     total_rows = len(rows)
     total_concepts = len(concepts)
@@ -132,9 +157,27 @@ def main(argv: List[str] | None = None) -> None:
             base_prompt = c["prompt"]
 
             t0 = time.time()
-            ans = vlm.ask_concept(img, cname, base_prompt)
-            dt = time.time() - t0
+            try:
+                ans = vlm.ask_concept(img, cname, base_prompt)
+            except RuntimeError as e:
+                # Tipicamente: error_code != 0 dal worker (es. problemi interni llava).
+                total_queries += 1
+                dt = time.time() - t0
 
+                if vlm.debug:
+                    print(
+                        f"[BANK DEBUG] RuntimeError for key={key}, concept={cname}, "
+                        f"class={cls}, dt={dt:.2f}s\n{e}\n{'-'*80}"
+                    )
+
+                # Log minimale anche fuori da debug per i primi casi
+                if total_queries <= 10:
+                    print(
+                        f"[WARN] VLM error for key={key}, concept={cname}: {e}"
+                    )
+                continue
+
+            dt = time.time() - t0
             total_queries += 1
 
             # LOG DI DEBUG: prime N risposte parse-ate, anche se poi vengono scartate
@@ -162,7 +205,10 @@ def main(argv: List[str] | None = None) -> None:
             if not ans:
                 # debug minimale
                 if total_queries <= 10:
-                    print(f"[DEBUG] Empty/invalid VLM answer for key={key}, concept={cname}")
+                    print(
+                        f"[DEBUG] Empty/invalid VLM answer for key={key}, "
+                        f"concept={cname}"
+                    )
                 continue
 
             present = bool(ans.get("present", False))
@@ -186,8 +232,9 @@ def main(argv: List[str] | None = None) -> None:
     if accepted == 0:
         raise RuntimeError(
             "Concept bank is empty (no accepted concept/key pairs). "
-            "Possible causes: presence_threshold too high, VLM misconfigured, "
-            "or ontology/prompts not matching the dataset."
+            "Cause probabili: modello VLM non raggiungibile / non caricato, "
+            "risposte non parse-abili come JSON, oppure tutte le decisioni present=False "
+            f"(backend={args.backend}, model_name={args.model_name})."
         )
 
 

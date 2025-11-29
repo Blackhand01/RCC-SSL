@@ -80,7 +80,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument(
         "--max-patches-per-class",
         type=int,
-        default=200, # 2000
+        default=20, # 2000
         help="Maximum number of candidate patches per class_label.",
     )
     p.add_argument(

@@ -7,8 +7,10 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
 #SBATCH --time=24:00:00
-#SBATCH -o /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.out
-#SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.err
+#SBATCH -o /home/mla_group_01/rcc-ssrl/src/logs/train/%x.%j.out
+
+#SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/train/%x.%j.err
+
 set -euo pipefail
 
 # Standardized roots for HPC

@@ -172,12 +172,18 @@ def select_items(
     def pick(arr, k, by_conf=None, reverse=True):
         if len(arr) == 0 or k <= 0:
             return []
-        idx = np.array(arr)
+        idx = np.asarray(arr, dtype=int)
         if by_conf is not None:
-            order = np.argsort(by_conf[idx])
-            if reverse:
-                order = order[::-1]
-            idx = idx[order]
+            # safety: conf shape check
+            if by_conf.shape[0] <= idx.max():
+                logger.warning(
+                    "Confidence array shorter than indices; ignoring confidence ordering."
+                )
+            else:
+                order = np.argsort(by_conf[idx])
+                if reverse:
+                    order = order[::-1]
+                idx = idx[order]
         return idx[:k].tolist()
 
     items: List[int] = []
@@ -188,14 +194,21 @@ def select_items(
             reason_by_idx[idx] = set()
         reason_by_idx[idx].add(reason)
 
+    # ------------------------------------------------------------------
+    # Per-class TP / FP / FN
+    # ------------------------------------------------------------------
     for c in range(n_classes):
         idx_c = np.where(y_true == c)[0] if y_true is not None else np.array([], dtype=int)
 
         # High-confidence TP
-        tpc = idx_c[y_pred[idx_c] == c] if idx_c.size > 0 else np.array([], dtype=int)
+        if idx_c.size > 0:
+            tpc = idx_c[y_pred[idx_c] == c]
+        else:
+            tpc = np.array([], dtype=int)
+
         chosen_tp = pick(
             tpc,
-            cfg_sel["per_class"]["topk_tp"],
+            cfg_sel["per_class"].get("topk_tp", 0),
             by_conf=conf,
             reverse=True,
         )
@@ -204,12 +217,16 @@ def select_items(
             add_reason(i, "tp_high_conf")
 
         # FN
-        fnc = idx_c[y_pred[idx_c] != c] if idx_c.size > 0 else np.array([], dtype=int)
+        if idx_c.size > 0:
+            fnc = idx_c[y_pred[idx_c] != c]
+        else:
+            fnc = np.array([], dtype=int)
+
         chosen_fn = pick(
             fnc,
-            cfg_sel["per_class"]["topk_fn"],
+            cfg_sel["per_class"].get("topk_fn", 0),
             by_conf=conf,
-            reverse=False,
+            reverse=False,  # lowest confidence among wrong
         )
         items += chosen_fn
         for i in chosen_fn:
@@ -217,10 +234,14 @@ def select_items(
 
         # FP
         idx_pred_c = np.where(y_pred == c)[0]
-        fpc = idx_pred_c[y_true[idx_pred_c] != c] if y_true is not None else idx_pred_c
+        if y_true is not None and idx_pred_c.size > 0:
+            fpc = idx_pred_c[y_true[idx_pred_c] != c]
+        else:
+            fpc = idx_pred_c
+
         chosen_fp = pick(
             fpc,
-            cfg_sel["per_class"]["topk_fp"],
+            cfg_sel["per_class"].get("topk_fp", 0),
             by_conf=conf,
             reverse=True,
         )
@@ -228,39 +249,41 @@ def select_items(
         for i in chosen_fp:
             add_reason(i, "fp_high_conf")
 
-        # Low-confidence TP
-        if tpc.size > 0 and conf is not None:
-            order = np.argsort(conf[tpc])  # ascending
-            chosen_lowconf = tpc[order][: cfg_sel["per_class"]["lowconf_topk"]].tolist()
-            items += chosen_lowconf
-            for i in chosen_lowconf:
-                add_reason(i, "tp_low_conf")
+    # ------------------------------------------------------------------
+    # Globally low-confidence cases (optional)
+    # ------------------------------------------------------------------
+    if conf is not None and "global_low_conf" in cfg_sel:
+        n_low = cfg_sel["global_low_conf"].get("topk", 0)
+        if n_low > 0:
+            order = np.argsort(conf)  # ascending → lowest confidence first
+            chosen_low = order[:n_low].tolist()
+            items += chosen_low
+            for i in chosen_low:
+                add_reason(i, "low_conf")
 
-        # Ensure minimum per class
-        if y_true is not None and idx_c.size > 0:
-            already = sum((y_true[i] == c) for i in set(items))
-            need = max(0, cfg_sel["min_per_class"] - already)
-            if need > 0:
-                extra = idx_c[:need].tolist()
-                items += extra
-                for i in extra:
-                    add_reason(i, "min_per_class")
-
-    items = sorted(set(items))
+    # Dedup preserving order
+    seen = set()
+    unique_items: List[int] = []
+    for i in items:
+        if i not in seen:
+            seen.add(i)
+            unique_items.append(i)
 
     if keys is not None:
-        target_keys = [keys[i] for i in items]
-        reason_by_key: Dict[str, List[str]] = {}
-        for i in items:
-            k = keys[i]
-            if i in reason_by_idx:
-                reason_by_key[k] = sorted(reason_by_idx[i])
-        logger.info(f"Selected {len(target_keys)} targets (with WebDataset keys).")
-        return target_keys, reason_by_key
+        targets = [keys[i] for i in unique_items]
+        reasons = {
+            keys[i]: sorted(list(reason_by_idx.get(i, [])))
+            for i in unique_items
+        }
+    else:
+        targets = unique_items
+        reasons = {
+            i: sorted(list(reason_by_idx.get(i, [])))
+            for i in unique_items
+        }
 
-    reason_by_idx_out = {i: sorted(list(rs)) for i, rs in reason_by_idx.items()}
-    logger.info(f"Selected {len(items)} targets (index-based).")
-    return items, reason_by_idx_out
+    logger.info(f"Selected {len(targets)} items for XAI.")
+    return targets, reasons
 
 
 # -------------------------------------------------------------------------
@@ -495,7 +518,8 @@ selection:
     topk_tp: 5
     topk_fp: 3
     topk_fn: 3
-    lowconf_topk: 3
+  global_low_conf:
+    topk: 3
   min_per_class: 10
 
 concepts:
@@ -525,7 +549,7 @@ concept/ontology/build_concept_bank.py codice <<
 Build concept bank for RCC histology using a VLM.
 
 Input:
-- Ontology YAML with 18 RCC concepts.
+- Ontology YAML with RCC concepts.
 - CSV of candidate patches with columns:
     image_path, wds_key, class_label
   (produced automatically by build_concept_candidates.py)
@@ -543,13 +567,16 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import random
+import time
 from pathlib import Path
 from typing import Any, Dict, List
 
 import yaml
 
-from explainability.concept.ontology.vlm_client import VLMClient
+from explainability.concept.ontology.vlm_client import VLMClient  # backend HTTP esistente
+from explainability.concept.ontology.vlm_client_hf import VLMClientHF  # nuovo backend HF locale
 
 
 def load_ontology(path: str | Path) -> List[Dict[str, Any]]:
@@ -567,13 +594,22 @@ def main(argv: List[str] | None = None) -> None:
     )
     parser.add_argument(
         "--controller",
-        required=True,
-        help="VLM controller URL (e.g. http://localhost:10000)",
+        required=False,
+        help="VLM controller URL (e.g. http://localhost:10000) – usato SOLO se backend=http",
     )
     parser.add_argument(
         "--model-name",
-        default="llava-med-v1.5-mistral-7b",
-        help="VLM model name on the server",
+        default="Eren-Senoglu/llava-med-v1.5-mistral-7b-hf",
+        help="Nome del modello VLM. "
+             "Se backend=hf: id Hugging Face (es. Eren-Senoglu/llava-med-v1.5-mistral-7b-hf); "
+             "se backend=http: nome registrato sul server (es. llava-med-v1.5-mistral-7b).",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=["http", "hf"],
+        default="hf",
+        help="Tipo di backend VLM: 'hf' = modello locale via Hugging Face (no HTTP), "
+             "'http' = controller/worker HTTP (pipeline vecchia).",
     )
     parser.add_argument(
         "--out-csv",
@@ -595,7 +631,24 @@ def main(argv: List[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     concepts = load_ontology(args.ontology)
-    vlm = VLMClient(args.controller, args.model_name)
+
+    # Scegli il backend in base al flag --backend
+    if args.backend == "hf":
+        # modello locale via HuggingFace, NESSUN controller HTTP
+        vlm = VLMClientHF(
+            model_name=args.model_name,
+            device=None,        # auto: cuda se disponibile, altrimenti cpu
+            dtype="float16",    # va bene con A40
+            debug=False,        # o True se vuoi log verbosi
+        )
+    else:
+        # backend http vecchio: richiede --controller
+        if not args.controller:
+            raise RuntimeError(
+                "HTTP backend selected but --controller is None. "
+                "Pass --controller http://host:port oppure usa --backend hf."
+            )
+        vlm = VLMClient(args.controller, args.model_name)
 
     # Read candidate patches
     rows: List[Dict[str, str]] = []
@@ -614,7 +667,6 @@ def main(argv: List[str] | None = None) -> None:
 
     # Debug mode: limit number of patches (e.g. 100) to reduce queries
     if args.max_images and args.max_images > 0:
-        # shuffle with fixed seed for reproducibility
         rng = random.Random(1337)
         rng.shuffle(rows)
         rows = rows[: args.max_images]
@@ -626,7 +678,6 @@ def main(argv: List[str] | None = None) -> None:
     writer = csv.writer(out_f)
     writer.writerow(["concept_name", "wds_key", "group", "class_label"])
 
-    import time
     t_start = time.time()
     total_rows = len(rows)
     total_concepts = len(concepts)
@@ -651,10 +702,37 @@ def main(argv: List[str] | None = None) -> None:
             base_prompt = c["prompt"]
 
             t0 = time.time()
-            ans = vlm.ask_concept(img, cname, base_prompt)
-            dt = time.time() - t0
+            try:
+                ans = vlm.ask_concept(img, cname, base_prompt)
+            except RuntimeError as e:
+                # Tipicamente: error_code != 0 dal worker (es. problemi interni llava).
+                total_queries += 1
+                dt = time.time() - t0
 
+                if vlm.debug:
+                    print(
+                        f"[BANK DEBUG] RuntimeError for key={key}, concept={cname}, "
+                        f"class={cls}, dt={dt:.2f}s\n{e}\n{'-'*80}"
+                    )
+
+                # Log minimale anche fuori da debug per i primi casi
+                if total_queries <= 10:
+                    print(
+                        f"[WARN] VLM error for key={key}, concept={cname}: {e}"
+                    )
+                continue
+
+            dt = time.time() - t0
             total_queries += 1
+
+            # LOG DI DEBUG: prime N risposte parse-ate, anche se poi vengono scartate
+            if vlm.debug and ans is not None and total_queries <= 20:
+                print(
+                    f"[BANK DEBUG] key={key}, concept={cname}, "
+                    f"class={cls}, dt={dt:.2f}s\n"
+                    f"{json.dumps(ans, indent=2)}\n"
+                    f"{'-'*80}"
+                )
 
             if total_queries % log_every == 0:
                 elapsed = time.time() - t_start
@@ -672,7 +750,10 @@ def main(argv: List[str] | None = None) -> None:
             if not ans:
                 # debug minimale
                 if total_queries <= 10:
-                    print(f"[DEBUG] Empty/invalid VLM answer for key={key}, concept={cname}")
+                    print(
+                        f"[DEBUG] Empty/invalid VLM answer for key={key}, "
+                        f"concept={cname}"
+                    )
                 continue
 
             present = bool(ans.get("present", False))
@@ -696,8 +777,9 @@ def main(argv: List[str] | None = None) -> None:
     if accepted == 0:
         raise RuntimeError(
             "Concept bank is empty (no accepted concept/key pairs). "
-            "Possible causes: presence_threshold too high, VLM misconfigured, "
-            "or ontology/prompts not matching the dataset."
+            "Cause probabili: modello VLM non raggiungibile / non caricato, "
+            "risposte non parse-abili come JSON, oppure tutte le decisioni present=False "
+            f"(backend={args.backend}, model_name={args.model_name})."
         )
 
 
@@ -788,7 +870,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument(
         "--max-patches-per-class",
         type=int,
-        default=200, # 2000
+        default=20, # 2000
         help="Maximum number of candidate patches per class_label.",
     )
     p.add_argument(
@@ -925,6 +1007,115 @@ if __name__ == "__main__":
     main()
 >>
 
+concept/ontology/debug_llava.py codice <<
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Debug script to test VLM client HTTP calls directly.
+Run this locally with one image to verify the worker is responding correctly.
+"""
+
+import base64
+import json
+import os
+from pathlib import Path
+
+import requests
+
+CONTROLLER_URL = os.getenv("CONTROLLER_URL", "http://localhost:10000")
+MODEL_NAME = "llava-med-v1.5-mistral-7b"
+
+def to_b64(image_path: Path) -> str:
+    """Convert image to base64 string."""
+    with open(image_path, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
+
+def test_llava_call(image_path: Path, concept_name: str, base_prompt: str):
+    """Test a single VLM call and print raw response."""
+    image_b64 = to_b64(image_path)
+
+    prompt = f"""<image>
+You are a board-certified renal pathologist.
+
+Analyse the attached histology patch.
+
+Concept: {concept_name}
+Question: {base_prompt}
+
+Respond ONLY with a single line containing a valid JSON object with the following keys:
+- "concept": string
+- "present": boolean (true or false)
+- "confidence": float between 0 and 1
+- "rationale": string (max 20 words)
+
+Example:
+{{"concept": "Clear cytoplasm (ccRCC)", "present": true, "confidence": 0.73, "rationale": "Concise reason"}}
+
+Now return ONLY the JSON object, with no additional text before or after."""
+
+    payload = {
+        "model": MODEL_NAME,
+        "prompt": prompt,
+        "images": [image_b64],
+        "temperature": 0.2,
+        "max_new_tokens": 128,
+        # mai None: evita crash del worker su KeywordsStoppingCriteria
+        "stop": "###",
+    }
+
+    print(f"Testing with image: {image_path}")
+    print(f"Concept: {concept_name}")
+    print(f"Sending request to: {CONTROLLER_URL}/worker_generate_stream")
+
+    try:
+        r = requests.post(f"{CONTROLLER_URL}/worker_generate_stream", json=payload, stream=True, timeout=120)
+        print(f"STATUS: {r.status_code}")
+
+        if r.status_code != 200:
+            print(f"ERROR RESPONSE: {r.text}")
+            return
+
+        text = ""
+        for chunk in r.iter_lines(delimiter=b"\0"):
+            if chunk:
+                try:
+                    data = json.loads(chunk.decode())
+                    text = data.get("text", "")
+                except json.JSONDecodeError:
+                    continue
+
+        print(f"TEXT FIELD (first 400 chars): {repr(text[:400])}")
+
+        # Try to parse as JSON
+        try:
+            parsed = json.loads(text.strip())
+            print("PARSED JSON:", json.dumps(parsed, indent=2))
+        except json.JSONDecodeError as e:
+            print(f"JSON PARSE ERROR: {e}")
+
+    except Exception as e:
+        print(f"HTTP ERROR: {e}")
+
+if __name__ == "__main__":
+    # Use first available image from concept candidates
+    images_root = Path("concept_candidates_images")
+    if not images_root.exists():
+        print(f"Images directory {images_root} not found. Run build_concept_candidates.py first.")
+        exit(1)
+
+    # Find first image
+    image_files = list(images_root.rglob("*.png"))
+    if not image_files:
+        print("No PNG images found in concept_candidates_images/")
+        exit(1)
+
+    test_image = image_files[0]
+    concept_name = "Clear cytoplasm (ccRCC)"
+    base_prompt = "Identify viable renal tumour cells with abundant optically clear or glassy cytoplasm and sharp cell borders, in keeping with clear cell renal cell carcinoma. Exclude adipocytes, stromal fat, artefactual perinuclear clearing, and foamy macrophages."
+
+    test_llava_call(test_image, concept_name, base_prompt)
+>>
+
 concept/ontology/__init__.py codice <<
 # empty – marks "ontology" as a package
 >>
@@ -977,6 +1168,248 @@ concepts:
       perinuclear halos.
 >>
 
+concept/ontology/vlm_client_hf.py codice <<
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Client locale (no HTTP) per LLaVA-Med via Hugging Face.
+
+- Carica il modello da Hugging Face (es. Eren-Senoglu/llava-med-v1.5-mistral-7b-hf).
+- Usa AutoProcessor per gestire testo + immagine.
+- Espone ask_concept(image_path, concept_name, base_prompt) con stesso contratto di VLMClient HTTP:
+  ritorna dict {"concept", "present", "confidence", "rationale"} oppure None.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+import torch
+from PIL import Image
+from transformers import AutoModelForVision2Seq, AutoProcessor
+
+
+class VLMClientHF:
+    """
+    LLaVA-Med locale via Hugging Face (no controller/worker HTTP).
+    """
+
+    def __init__(
+        self,
+        model_name: str,
+        device: Optional[str] = None,
+        dtype: str = "float16",
+        debug: Optional[bool] = None,
+    ) -> None:
+        self.model_name = model_name
+
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = device
+
+        if dtype == "bfloat16":
+            torch_dtype = torch.bfloat16
+        else:
+            torch_dtype = torch.float16
+
+        # debug esplicito > env > default False
+        if debug is None:
+            self.debug = os.getenv("VLM_DEBUG", "0") == "1"
+        else:
+            self.debug = bool(debug)
+
+        if self.debug:
+            print(f"[VLM-HF DEBUG] Loading model '{self.model_name}' on {self.device} dtype={torch_dtype}")
+
+        # AutoProcessor/AutoModel per LLaVA-HF (llava-med-v1.5-mistral-7b-hf)
+        self.processor = AutoProcessor.from_pretrained(self.model_name)
+        self.model = AutoModelForVision2Seq.from_pretrained(
+            self.model_name,
+            torch_dtype=torch_dtype,
+            device_map="auto" if self.device == "cuda" else None,
+        )
+        self.model.eval()
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _extract_json(text: str) -> Optional[Dict[str, Any]]:
+        """
+        Estrai un oggetto JSON da una stringa arbitraria (stessa logica del client HTTP).
+        """
+        text = text.strip()
+
+        # Tentativo diretto
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        # Cerca blocco {...} più esterno
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            candidate = text[start : end + 1]
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                pass
+
+        # Regex fallback
+        import re
+
+        json_pattern = r'\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]*\}'
+        matches = re.findall(json_pattern, text)
+        for match in reversed(matches):
+            try:
+                return json.loads(match)
+            except json.JSONDecodeError:
+                continue
+
+        return None
+
+    def _build_prompt(self, concept_name: str, base_prompt: str) -> str:
+        """
+        Prompt per LLaVA-HF:
+        - include un token <image> per la singola immagine
+        - stile USER/ASSISTANT
+        - risposta SOLO JSON.
+        """
+        system = (
+            "You are a board-certified renal pathologist. "
+            "Answer succinctly and return ONLY a JSON with fields: "
+            "concept, present (true/false), confidence (0..1), rationale (<=20 words)."
+        )
+
+        user = (
+            f"{system}\n\n"
+            "Analyse the attached histology patch.\n"
+            f"Concept: {concept_name}\n"
+            f"Question: {base_prompt}\n"
+            'Respond ONLY with a single JSON object with keys: '
+            '"concept" (string), "present" (true/false), '
+            '"confidence" (0..1 float), "rationale" (<=20 words). '
+            'Example: {"concept": "Clear cytoplasm (ccRCC)", "present": true, '
+            '"confidence": 0.73, "rationale": "Concise reason"}'
+        )
+
+        # 1 immagine -> 1 token <image>
+        prompt = f"<image>\nUSER: {user}\nASSISTANT:"
+        return prompt
+
+    # ------------------------------------------------------------------
+    # API principale
+    # ------------------------------------------------------------------
+    def ask_concept(
+        self,
+        image_path: str | Path,
+        concept_name: str,
+        base_prompt: str,
+        temperature: float = 0.2,
+        max_new_tokens: int = 128,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Esegue una singola query (immagine + concept + domanda) al modello HF locale.
+
+        Ritorna:
+            dict normalizzato {"concept", "present", "confidence", "rationale"}
+            oppure None se il testo non è parse-abile come JSON.
+        """
+        image_path = Path(image_path)
+        if not image_path.is_file():
+            if self.debug:
+                print(f"[VLM-HF DEBUG] Image not found: {image_path}")
+            return None
+
+        image = Image.open(image_path).convert("RGB")
+        prompt_str = self._build_prompt(concept_name, base_prompt)
+
+        if self.debug:
+            print(
+                f"[VLM-HF DEBUG] >>> REQUEST\n"
+                f"image={image_path}\n"
+                f"concept={concept_name}\n"
+                f"prompt_preview={prompt_str[:200]}...\n"
+                f"{'-'*60}"
+            )
+
+        inputs = self.processor(
+            text=[prompt_str],
+            images=[image],
+            return_tensors="pt",
+        )
+
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+        with torch.no_grad():
+            generate_kwargs: Dict[str, Any] = {
+                "max_new_tokens": int(max_new_tokens),
+            }
+            # Se temperature > 0, abilita sampling
+            if temperature and temperature > 0:
+                generate_kwargs.update(
+                    dict(
+                        do_sample=True,
+                        temperature=float(temperature),
+                        top_p=0.9,
+                    )
+                )
+
+            output_ids = self.model.generate(**inputs, **generate_kwargs)
+
+        # Decodifica output (completo; l'estrattore JSON filtrerà eventuale rumore)
+        text = self.processor.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+
+        if self.debug:
+            print(
+                f"[VLM-HF DEBUG] <<< RAW COMPLETION for concept={concept_name}, image={image_path}\n"
+                f"{text}\n{'='*80}"
+            )
+
+        raw = self._extract_json(text)
+        if raw is None or not isinstance(raw, dict):
+            if self.debug:
+                print("[VLM-HF DEBUG] No valid JSON object found in completion.")
+            return None
+
+        # Normalizza
+        present_val = raw.get("present", False)
+        if isinstance(present_val, str):
+            present = present_val.strip().lower() in (
+                "true",
+                "yes",
+                "y",
+                "present",
+                "1",
+            )
+        else:
+            present = bool(present_val)
+
+        try:
+            confidence = float(raw.get("confidence", 0.0))
+        except Exception:
+            confidence = 0.0
+        confidence = max(0.0, min(1.0, confidence))
+
+        result: Dict[str, Any] = {
+            "concept": raw.get("concept", concept_name),
+            "present": present,
+            "confidence": confidence,
+            "rationale": raw.get("rationale", ""),
+        }
+
+        if self.debug:
+            result["raw_text"] = text
+            result["raw_prompt"] = prompt_str
+            print(f"[VLM-HF DEBUG] >>> PARSED\n{json.dumps(result, indent=2)}\n{'#'*80}")
+
+        return result
+>>
+
 concept/ontology/vlm_client.py codice <<
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
@@ -989,12 +1422,13 @@ It expects the model to return a JSON string with:
 
 from __future__ import annotations
 
+import base64
 import json
+import os
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import base64
 import requests
 from PIL import Image
 
@@ -1007,11 +1441,26 @@ class VLMClient:
         controller_url: str,
         model_name: str,
         timeout: int = 120,
+        debug: Optional[bool] = None,
+        stop_string: Optional[str] = None,
     ) -> None:
         self.controller_url = controller_url.rstrip("/")
         self.model_name = model_name
         self.timeout = timeout
+        # llava.serve.model_worker expects a non-None `stop` string; if None is
+        # passed, KeywordsStoppingCriteria tokenization raises and the worker
+        # returns error_code=1 (server_error_msg). Use a safe default separator.
+        self.stop_string = stop_string or "###"
 
+        # debug esplicito > env > default False
+        if debug is None:
+            self.debug = os.getenv("VLM_DEBUG", "0") == "1"
+        else:
+            self.debug = bool(debug)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
     @staticmethod
     def _encode_image(pil_img: Image.Image) -> str:
         buf = BytesIO()
@@ -1020,70 +1469,177 @@ class VLMClient:
         return base64.b64encode(buf.read()).decode("utf-8")
 
     def _build_prompt(self, concept_name: str, base_prompt: str) -> str:
+        """
+        Costruisce il prompt testuale per LLaVA-Med.
+
+        PUNTO CHIAVE: inseriamo esplicitamente un token <image> in testa,
+        così len(images) == prompt.count("<image>") e il worker non alza
+        più `ValueError: Number of images does not match number of <image> tokens`.
+        """
         system = (
             "You are a board-certified renal pathologist. "
             "Answer succinctly and return a JSON with fields: "
             "concept, present (true/false), confidence (0..1), rationale (<=20 words)."
         )
-        return f"{system}\nConcept: {concept_name}\nQuestion: {base_prompt}\nReturn JSON only."
 
+        user = (
+            f"{system}\n\n"
+            "Analyse the attached histology patch.\n"
+            f"Concept: {concept_name}\n"
+            f"Question: {base_prompt}\n"
+            'Return ONLY a JSON object with keys: concept (string), present (true/false), '
+            'confidence (0..1 float), rationale (<=20 words). '
+            'Example: {"concept": "Clear cytoplasm (ccRCC)", "present": true, "confidence": 0.73, '
+            '"rationale": "Concise reason"}'
+        )
+
+        # Formato compatibile con llava.serve.model_worker:
+        # una immagine -> un solo token <image> nel prompt.
+        return f"<image>\n{user}"
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _extract_json(text: str) -> Optional[Dict[str, Any]]:
+        """
+        Extract and parse JSON from text, trying multiple strategies.
+        Returns the parsed dict or None if no valid JSON found.
+        """
+        text = text.strip()
+
+        # Strategy 1: Direct parse
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        # Strategy 2: Find outermost {...}
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            candidate = text[start:end+1]
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                pass
+
+        # Strategy 3: Use regex to find potential JSON objects
+        import re
+        json_pattern = r'\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]*\}'
+        matches = re.findall(json_pattern, text)
+        for match in reversed(matches):  # Try longest first
+            try:
+                return json.loads(match)
+            except json.JSONDecodeError:
+                continue
+
+        return None
+
+    # ------------------------------------------------------------------
+    # Main API
+    # ------------------------------------------------------------------
     def ask_concept(
         self,
         image_path: str | Path,
         concept_name: str,
         base_prompt: str,
-        temperature: float = 0.0,
-        max_new_tokens: int = 256,
+        temperature: float = 0.2,
+        max_new_tokens: int = 128,
     ) -> Optional[Dict[str, Any]]:
-        """Send (image, concept, question) to the VLM and parse JSON answer.
+        """
+        Invia (image, concept, question) al VLM e ritorna un dict Python
+        già normalizzato, oppure None in caso di problemi "soft".
 
-        Expectation: the worker at /worker_generate_stream is a LLaVA-style
-        endpoint that streams JSON objects separated by NUL ('\0'), each
-        with at least a 'text' field and an 'error_code'.
+        Se il worker risponde con error_code != 0, viene alzato RuntimeError
+        (gestito dal chiamante in build_concept_bank).
         """
         image_path = str(image_path)
         with Image.open(image_path) as im:
             im = im.convert("RGB")
             img_b64 = self._encode_image(im)
 
+        prompt_str = self._build_prompt(concept_name, base_prompt)
+
         payload = {
             "model": self.model_name,
-            "prompt": self._build_prompt(concept_name, base_prompt),
+            "prompt": prompt_str,
             "images": [img_b64],
             "temperature": float(temperature),
             "max_new_tokens": int(max_new_tokens),
+            # llava.serve.model_worker vuole una stringa non-None
+            "stop": self.stop_string,
         }
 
+        if self.debug:
+            print(
+                f"[VLM DEBUG] >>> REQUEST\n"
+                f"concept={concept_name}\n"
+                f"image={image_path}\n"
+                f"payload_keys={list(payload.keys())}\n"
+                f"prompt_preview={prompt_str[:200]}...\n"
+                f"{'-'*60}"
+            )
+
+        # Usa l'endpoint streaming, che ritorna chunk JSON con "text"
         url = f"{self.controller_url}/worker_generate_stream"
-        session = requests.Session()
-        resp = session.post(url, json=payload, stream=True, timeout=self.timeout)
-        resp.raise_for_status()
+        try:
+            resp = requests.post(url, json=payload, stream=True, timeout=self.timeout)
+            resp.raise_for_status()
 
-        last_text: Optional[str] = None
-
-        # LLaVA streams JSON chunks terminated by '\0'; each chunk is a JSON dict
-        # like {"text": "...", "error_code": 0, ...}. Usiamo l'ultimo 'text'.
-        for chunk in resp.iter_lines(chunk_size=8192, decode_unicode=False, delimiter=b"\0"):
-            if not chunk:
-                continue
-            try:
-                data = json.loads(chunk.decode("utf-8"))
-            except Exception:
-                continue
-
-            # Se il worker segnala errore, abortiamo
-            if data.get("error_code", 0) != 0:
-                last_text = None
-                break
-
-            text = data.get("text")
-            if isinstance(text, str):
-                last_text = text
-
-        if not last_text:
+            text = ""
+            for chunk in resp.iter_lines(delimiter=b"\0"):
+                if chunk:
+                    try:
+                        data = json.loads(chunk.decode())
+                        text = data.get("text", "")
+                    except json.JSONDecodeError:
+                        continue
+        except Exception as e:
+            if self.debug:
+                print(
+                    f"[VLM DEBUG] HTTP error for concept={concept_name}, "
+                    f"image={image_path}: {e}"
+                )
+            # Errore "hard" di rete -> nessuna risposta utile
             return None
 
-        full = last_text.strip()
+        if self.debug:
+            print(
+                f"[VLM DEBUG] <<< RAW RESPONSE\n"
+                f"status={resp.status_code}\n"
+                f"response_type={type(data)}\n"
+                f"response_keys={list(data.keys()) if isinstance(data, dict) else 'N/A'}\n"
+                f"{'-'*60}"
+            )
+
+        # Gestione esplicita di error_code dal worker/controller
+        if isinstance(data, dict) and data.get("error_code", 0) != 0:
+            msg = data.get("text", "") or data.get("message", "")
+            if self.debug:
+                print(
+                    f"[VLM DEBUG] Worker returned error_code={data.get('error_code')}: {msg}"
+                )
+            raise RuntimeError(
+                f"VLM worker error (code={data.get('error_code')}): {msg}"
+            )
+
+        # Extract text from response
+        if not isinstance(data, dict) or "text" not in data:
+            if self.debug:
+                print(
+                    f"[VLM DEBUG] Invalid response format for concept={concept_name}, "
+                    f"image={image_path}: {data}"
+                )
+            return None
+
+        full = data["text"].strip()
+
+        if self.debug:
+            print(
+                f"[VLM DEBUG] <<< RAW COMPLETION for concept={concept_name}, "
+                f"image={image_path}\n{full}\n{'='*80}"
+            )
 
         # Alcuni modelli possono aggiungere ```json ... ```: ripulisci
         for token in ("```json", "```JSON", "```"):
@@ -1091,27 +1647,28 @@ class VLMClient:
                 full = full.replace(token, "")
         full = full.strip()
 
-        # Prova a fare parse diretto della stringa come JSON
-        try:
-            raw = json.loads(full)
-        except Exception:
-            # fallback: prendi l'ultimo blocco {...}
-            start = full.rfind("{")
-            end = full.rfind("}")
-            if start == -1 or end == -1 or end <= start:
-                return None
-            try:
-                raw = json.loads(full[start : end + 1])
-            except Exception:
-                return None
+        # Usa il parser robusto invece di duplicare la logica
+        raw = self._extract_json(full)
+        if raw is None:
+            if self.debug:
+                print("[VLM DEBUG] No valid JSON object found in completion.")
+            return None
 
         if not isinstance(raw, dict):
+            if self.debug:
+                print(f"[VLM DEBUG] Parsed JSON is not a dict: {raw}")
             return None
 
         # Normalizza tipi e range così build_concept_bank può fidarsi
         present_val = raw.get("present", False)
         if isinstance(present_val, str):
-            present = present_val.strip().lower() in ("true", "yes", "y", "present", "1")
+            present = present_val.strip().lower() in (
+                "true",
+                "yes",
+                "y",
+                "present",
+                "1",
+            )
         else:
             present = bool(present_val)
 
@@ -1121,12 +1678,25 @@ class VLMClient:
             confidence = 0.0
         confidence = max(0.0, min(1.0, confidence))
 
-        return {
+        result: Dict[str, Any] = {
             "concept": raw.get("concept", concept_name),
             "present": present,
             "confidence": confidence,
             "rationale": raw.get("rationale", ""),
         }
+
+        # In debug aggiungi anche il testo grezzo e il prompt originali
+        if self.debug:
+            result["raw_text"] = full
+            result["raw_prompt"] = prompt_str
+
+            print(
+                f"[VLM DEBUG] >>> PARSED\n"
+                f"{json.dumps(result, indent=2)}\n"
+                f"{'#'*80}"
+            )
+
+        return result
 >>
 
 concept/xai_concept.py codice <<
@@ -1866,6 +2436,13 @@ set -euo pipefail
 
 REPO_ROOT="/home/mla_group_01/rcc-ssrl"
 SRC_DIR="${REPO_ROOT}/src"
+LOG_DIR="${SRC_DIR}/logs/xai"
+mkdir -p "${LOG_DIR}"
+LOG_SUFFIX="${SLURM_JOB_ID:-local_$$}"
+LLAVA_CTRL_LOG="${LLAVA_CTRL_LOG:-${LOG_DIR}/llava_controller.${LOG_SUFFIX}.log}"
+LLAVA_WORKER_LOG="${LLAVA_WORKER_LOG:-${LOG_DIR}/llava_worker.${LOG_SUFFIX}.log}"
+# Worker port overrideable to avoid collisions
+VLM_WORKER_PORT="${VLM_WORKER_PORT:-40000}"
 
 # Dataset-level (Stage 0)
 TRAIN_WDS_DIR="/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final/train"
@@ -1886,7 +2463,7 @@ BACKBONE_NAME_DEFAULT="vit_small_patch16_224"
 
 # VLM config for concept bank
 VLM_CONTROLLER_DEFAULT="http://localhost:10000"
-VLM_MODEL_DEFAULT="llava-med-v1.5-mistral-7b"
+VLM_MODEL_DEFAULT="Eren-Senoglu/llava-med-v1.5-mistral-7b-hf"  # HF-converted weights for local HF backend
 PRESENCE_THRESHOLD_DEFAULT="0.3"
 
 # Se START_LOCAL_VLM=1, run_full_xai lancerà un server LLaVA-Med locale
@@ -1915,6 +2492,17 @@ start_local_vlm() {
   echo "[INFO]   LLAVA_REPO_ROOT=${LLAVA_REPO_ROOT}"
   echo "[INFO]   LLAVA_PYTHON_BIN=${LLAVA_PYTHON_BIN}"
 
+  # Parse controller host/port from VLM_CONTROLLER (e.g., http://localhost:11000)
+  CTRL_HOST=$(echo "${VLM_CONTROLLER}" | sed -E 's#https?://([^:/]+).*#\1#')
+  CTRL_PORT=$(echo "${VLM_CONTROLLER}" | awk -F: '{print $NF}')
+  # Fallback if parsing fails
+  if [[ -z "${CTRL_HOST}" || "${CTRL_HOST}" == "${VLM_CONTROLLER}" ]]; then
+    CTRL_HOST="0.0.0.0"
+  fi
+  if ! [[ "${CTRL_PORT}" =~ ^[0-9]+$ ]]; then
+    CTRL_PORT="10000"
+  fi
+
   if [[ ! -x "${LLAVA_PYTHON_BIN}" ]]; then
     echo "[ERROR] LLAVA_PYTHON_BIN='${LLAVA_PYTHON_BIN}' non eseguibile; controlla il venv LLaVA-Med." >&2
     return 1
@@ -1927,27 +2515,46 @@ start_local_vlm() {
 
   pushd "${LLAVA_REPO_ROOT}" >/dev/null
 
+  echo "[INFO] Controller log: ${LLAVA_CTRL_LOG}"
+  echo "[INFO] Worker log: ${LLAVA_WORKER_LOG}"
+
+  VLM_DEBUG="${VLM_DEBUG:-1}" \
   "${LLAVA_PYTHON_BIN}" -m llava.serve.controller \
     --host "0.0.0.0" \
-    --port 10000 \
-    > /tmp/llava_controller.log 2>&1 &
+    --port "${CTRL_PORT}" \
+    > "${LLAVA_CTRL_LOG}" 2>&1 &
   VLM_CTRL_PID=$!
   sleep 5
 
+  VLM_DEBUG="${VLM_DEBUG:-1}" \
   "${LLAVA_PYTHON_BIN}" -m llava.serve.model_worker \
     --host "0.0.0.0" \
     --controller "${VLM_CONTROLLER}" \
-    --port 40000 \
-    --worker "http://127.0.0.1:40000" \
+    --port "${VLM_WORKER_PORT}" \
+    --worker "http://127.0.0.1:${VLM_WORKER_PORT}" \
     --model-path "${VLM_MODEL_PATH}" \
     --multi-modal \
-    > /tmp/llava_worker.log 2>&1 &
+    > "${LLAVA_WORKER_LOG}" 2>&1 &
   VLM_WORKER_PID=$!
 
   popd >/dev/null
 
   echo "[INFO] Waiting ${VLM_WARMUP_SECONDS}s for VLM to load weights..."
   sleep "${VLM_WARMUP_SECONDS}"
+
+  # health-check controller -> /list_models (max 5 tentativi)
+  local hc_ok=0
+  for i in {1..5}; do
+    if curl -s -X POST "${VLM_CONTROLLER}/list_models" >/dev/null 2>&1; then
+      hc_ok=1
+      break
+    fi
+    sleep 2
+  done
+  if [[ "${hc_ok}" != "1" ]]; then
+    echo "[ERROR] VLM controller health-check failed on ${VLM_CONTROLLER}. See logs: ${LLAVA_CTRL_LOG} ${LLAVA_WORKER_LOG}" >&2
+    return 1
+  fi
 }
 
 stop_local_vlm() {
@@ -2017,18 +2624,18 @@ if [[ "${num_lines}" -le 1 ]]; then
     --out-csv "${CANDIDATES_CSV}" \
     --images-root "${CANDIDATES_IMG_ROOT}"
 
-  # 0b) concepts_rcc_debug.csv (VLM su candidates)
-  echo "[INFO] Stage 0b: building concepts_rcc_debug.csv via VLM"
-  start_local_vlm
+  # 0b) concepts_rcc_debug.csv (VLM su candidates) – HF locale, nessun HTTP
+  echo "[INFO] Stage 0b: building concepts_rcc_debug.csv via local HF LLaVA-Med (no HTTP)"
+  export VLM_DEBUG="${VLM_DEBUG:-0}"  # metti 1 se vuoi log dettagliati dal client HF
+
   python3 -m explainability.concept.ontology.build_concept_bank \
     --ontology "${ONTOLOGY_YAML}" \
     --images-csv "${CANDIDATES_CSV}" \
-    --controller "${VLM_CONTROLLER}" \
     --model-name "${VLM_MODEL}" \
     --out-csv "${CONCEPT_BANK_CSV}" \
     --presence-threshold "${PRESENCE_THRESHOLD}" \
-    --max-images 100
-  stop_local_vlm
+    --max-images 100 \
+    --backend "hf"
 
   # hard check: concept bank deve avere almeno header + 1 riga
   lines_after=$(wc -l < "${CONCEPT_BANK_CSV}")
@@ -2106,7 +2713,8 @@ selection:
     topk_tp: 5
     topk_fp: 3
     topk_fn: 3
-    lowconf_topk: 3
+  global_low_conf:
+    topk: 3
   min_per_class: 10
 
 xai:

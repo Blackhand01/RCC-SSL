@@ -6,8 +6,9 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=24:00:00
-#SBATCH -o /home/mla_group_01/rcc-ssrl/logs/05_eval/eval.%j.out
-#SBATCH -e /home/mla_group_01/rcc-ssrl/logs/05_eval/eval.%j.err
+#SBATCH -o /home/mla_group_01/rcc-ssrl/src/logs/eval/eval.%j.out
+#SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/eval/eval.%j.err
+#SBATCH --exclude=compute-5-14,compute-5-11,compute-3-12
 
 set -euo pipefail
 
@@ -15,7 +16,7 @@ WORKDIR="/home/mla_group_01/rcc-ssrl/src/evaluation"
 VENV="/home/mla_group_01/rcc-ssrl/.venvs/rcc-eval"
 PYTHON="$VENV/bin/python"
 
-mkdir -p /home/mla_group_01/rcc-ssrl/logs/05_eval
+mkdir -p /home/mla_group_01/rcc-ssrl/src/logs/eval
 cd "$WORKDIR"
 
 # venv bootstrap (idempotente)

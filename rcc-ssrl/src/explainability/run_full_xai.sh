@@ -17,6 +17,13 @@ set -euo pipefail
 
 REPO_ROOT="/home/mla_group_01/rcc-ssrl"
 SRC_DIR="${REPO_ROOT}/src"
+LOG_DIR="${SRC_DIR}/logs/xai"
+mkdir -p "${LOG_DIR}"
+LOG_SUFFIX="${SLURM_JOB_ID:-local_$$}"
+LLAVA_CTRL_LOG="${LLAVA_CTRL_LOG:-${LOG_DIR}/llava_controller.${LOG_SUFFIX}.log}"
+LLAVA_WORKER_LOG="${LLAVA_WORKER_LOG:-${LOG_DIR}/llava_worker.${LOG_SUFFIX}.log}"
+# Worker port overrideable to avoid collisions
+VLM_WORKER_PORT="${VLM_WORKER_PORT:-40000}"
 
 # Dataset-level (Stage 0)
 TRAIN_WDS_DIR="/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final/train"
@@ -37,7 +44,7 @@ BACKBONE_NAME_DEFAULT="vit_small_patch16_224"
 
 # VLM config for concept bank
 VLM_CONTROLLER_DEFAULT="http://localhost:10000"
-VLM_MODEL_DEFAULT="llava-med-v1.5-mistral-7b"
+VLM_MODEL_DEFAULT="Eren-Senoglu/llava-med-v1.5-mistral-7b-hf"  # HF-converted weights for local HF backend
 PRESENCE_THRESHOLD_DEFAULT="0.3"
 
 # Se START_LOCAL_VLM=1, run_full_xai lancerà un server LLaVA-Med locale
@@ -66,6 +73,17 @@ start_local_vlm() {
   echo "[INFO]   LLAVA_REPO_ROOT=${LLAVA_REPO_ROOT}"
   echo "[INFO]   LLAVA_PYTHON_BIN=${LLAVA_PYTHON_BIN}"
 
+  # Parse controller host/port from VLM_CONTROLLER (e.g., http://localhost:11000)
+  CTRL_HOST=$(echo "${VLM_CONTROLLER}" | sed -E 's#https?://([^:/]+).*#\1#')
+  CTRL_PORT=$(echo "${VLM_CONTROLLER}" | awk -F: '{print $NF}')
+  # Fallback if parsing fails
+  if [[ -z "${CTRL_HOST}" || "${CTRL_HOST}" == "${VLM_CONTROLLER}" ]]; then
+    CTRL_HOST="0.0.0.0"
+  fi
+  if ! [[ "${CTRL_PORT}" =~ ^[0-9]+$ ]]; then
+    CTRL_PORT="10000"
+  fi
+
   if [[ ! -x "${LLAVA_PYTHON_BIN}" ]]; then
     echo "[ERROR] LLAVA_PYTHON_BIN='${LLAVA_PYTHON_BIN}' non eseguibile; controlla il venv LLaVA-Med." >&2
     return 1
@@ -78,27 +96,46 @@ start_local_vlm() {
 
   pushd "${LLAVA_REPO_ROOT}" >/dev/null
 
+  echo "[INFO] Controller log: ${LLAVA_CTRL_LOG}"
+  echo "[INFO] Worker log: ${LLAVA_WORKER_LOG}"
+
+  VLM_DEBUG="${VLM_DEBUG:-1}" \
   "${LLAVA_PYTHON_BIN}" -m llava.serve.controller \
     --host "0.0.0.0" \
-    --port 10000 \
-    > /tmp/llava_controller.log 2>&1 &
+    --port "${CTRL_PORT}" \
+    > "${LLAVA_CTRL_LOG}" 2>&1 &
   VLM_CTRL_PID=$!
   sleep 5
 
+  VLM_DEBUG="${VLM_DEBUG:-1}" \
   "${LLAVA_PYTHON_BIN}" -m llava.serve.model_worker \
     --host "0.0.0.0" \
     --controller "${VLM_CONTROLLER}" \
-    --port 40000 \
-    --worker "http://127.0.0.1:40000" \
+    --port "${VLM_WORKER_PORT}" \
+    --worker "http://127.0.0.1:${VLM_WORKER_PORT}" \
     --model-path "${VLM_MODEL_PATH}" \
     --multi-modal \
-    > /tmp/llava_worker.log 2>&1 &
+    > "${LLAVA_WORKER_LOG}" 2>&1 &
   VLM_WORKER_PID=$!
 
   popd >/dev/null
 
   echo "[INFO] Waiting ${VLM_WARMUP_SECONDS}s for VLM to load weights..."
   sleep "${VLM_WARMUP_SECONDS}"
+
+  # health-check controller -> /list_models (max 5 tentativi)
+  local hc_ok=0
+  for i in {1..5}; do
+    if curl -s -X POST "${VLM_CONTROLLER}/list_models" >/dev/null 2>&1; then
+      hc_ok=1
+      break
+    fi
+    sleep 2
+  done
+  if [[ "${hc_ok}" != "1" ]]; then
+    echo "[ERROR] VLM controller health-check failed on ${VLM_CONTROLLER}. See logs: ${LLAVA_CTRL_LOG} ${LLAVA_WORKER_LOG}" >&2
+    return 1
+  fi
 }
 
 stop_local_vlm() {
@@ -168,18 +205,18 @@ if [[ "${num_lines}" -le 1 ]]; then
     --out-csv "${CANDIDATES_CSV}" \
     --images-root "${CANDIDATES_IMG_ROOT}"
 
-  # 0b) concepts_rcc_debug.csv (VLM su candidates)
-  echo "[INFO] Stage 0b: building concepts_rcc_debug.csv via VLM"
-  start_local_vlm
+  # 0b) concepts_rcc_debug.csv (VLM su candidates) – HF locale, nessun HTTP
+  echo "[INFO] Stage 0b: building concepts_rcc_debug.csv via local HF LLaVA-Med (no HTTP)"
+  export VLM_DEBUG="${VLM_DEBUG:-0}"  # metti 1 se vuoi log dettagliati dal client HF
+
   python3 -m explainability.concept.ontology.build_concept_bank \
     --ontology "${ONTOLOGY_YAML}" \
     --images-csv "${CANDIDATES_CSV}" \
-    --controller "${VLM_CONTROLLER}" \
     --model-name "${VLM_MODEL}" \
     --out-csv "${CONCEPT_BANK_CSV}" \
     --presence-threshold "${PRESENCE_THRESHOLD}" \
-    --max-images 100
-  stop_local_vlm
+    --max-images 100 \
+    --backend "hf"
 
   # hard check: concept bank deve avere almeno header + 1 riga
   lines_after=$(wc -l < "${CONCEPT_BANK_CSV}")

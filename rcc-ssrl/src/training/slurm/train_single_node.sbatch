@@ -5,9 +5,10 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH -t 24:00:00
-#SBATCH -o /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.out
-#SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/%x.%j.err
-#SBATCH --exclude=compute-5-14,compute-5-11
+#SBATCH -o /home/mla_group_01/rcc-ssrl/src/logs/train/%x.%j.out
+#SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/train/%x.%j.err
+
+#SBATCH --exclude=compute-5-14,compute-5-11,compute-3-12
 # The job name and log paths are overridden by --job-name/--output/--error from sbatch
 
 set -euo pipefail
@@ -42,8 +43,13 @@ if [[ ! -f "${CONFIG_PATH}" ]]; then
 fi
 
 # -------- Environment (venv/modules) ------------------------------------------
-if [[ -d "${ROOT}/.venv" ]]; then
-  source "${ROOT}/.venv/bin/activate"
+# Use a specific, fixed venv path
+VENV_PATH="/home/mla_group_01/rcc-ssrl/.venvs/train"
+if [[ -f "${VENV_PATH}/bin/activate" ]]; then
+  source "${VENV_PATH}/bin/activate"
+else
+  echo "[sbatch] ERROR: venv not found at ${VENV_PATH}" >&2
+  exit 1
 fi
 
 # Optional: user can set GPUS_PER_NODE externally (defaults to 1)

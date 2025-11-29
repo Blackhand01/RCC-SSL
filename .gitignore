@@ -191,10 +191,7 @@ rcc-ssrl/src/training/configs/ablations/ibot/
 rcc-ssrl/src/training/configs/ablations/dino_v3/
 rcc-ssrl/src/training/configs/ablations/moco_v3/
 rcc-ssrl/src/training/configs/ablations/i_jepa/
-rcc-ssrl/src/logs/ibot/
-rcc-ssrl/src/logs/dino_v3/
-rcc-ssrl/src/logs/moco_v3/
-rcc-ssrl/src/logs/i_jepa/
+rcc-ssrl/src/logs/train/
 rcc-ssrl/src/training/reporting/
 rcc-ssrl/TODO.md
 rcc-ssrl/todo.md

@@ -57,7 +57,7 @@ Esecuzione: evaluation automatica
 Esempio: lanciare l’evaluation automatica su tutti i run dentro un esperimento MLflow (exp_20251118_105221_dino_v3):
 
 python /home/mla_group_01/rcc-ssrl/src/evaluation/tools/auto_eval.py \
-  --mlruns-root "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/exp_jepa_ckpt_test/exp_i_jepa_abl35/i_jepa" \
+  --mlruns-root "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/exp_20251127_214113_i_jepa" \
   --submit
 
 
@@ -72,4 +72,3 @@ Esempio:
 python /home/mla_group_01/rcc-ssrl/src/evaluation/tools/batch_patient_aggregation.py \
   --mlruns-root /beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/exp_jepa_ckpt_test/exp_i_jepa_abl35/i_jepa \
   --method prob_sum
-

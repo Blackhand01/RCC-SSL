@@ -171,12 +171,18 @@ def select_items(
     def pick(arr, k, by_conf=None, reverse=True):
         if len(arr) == 0 or k <= 0:
             return []
-        idx = np.array(arr)
+        idx = np.asarray(arr, dtype=int)
         if by_conf is not None:
-            order = np.argsort(by_conf[idx])
-            if reverse:
-                order = order[::-1]
-            idx = idx[order]
+            # safety: conf shape check
+            if by_conf.shape[0] <= idx.max():
+                logger.warning(
+                    "Confidence array shorter than indices; ignoring confidence ordering."
+                )
+            else:
+                order = np.argsort(by_conf[idx])
+                if reverse:
+                    order = order[::-1]
+                idx = idx[order]
         return idx[:k].tolist()
 
     items: List[int] = []
@@ -187,14 +193,21 @@ def select_items(
             reason_by_idx[idx] = set()
         reason_by_idx[idx].add(reason)
 
+    # ------------------------------------------------------------------
+    # Per-class TP / FP / FN
+    # ------------------------------------------------------------------
     for c in range(n_classes):
         idx_c = np.where(y_true == c)[0] if y_true is not None else np.array([], dtype=int)
 
         # High-confidence TP
-        tpc = idx_c[y_pred[idx_c] == c] if idx_c.size > 0 else np.array([], dtype=int)
+        if idx_c.size > 0:
+            tpc = idx_c[y_pred[idx_c] == c]
+        else:
+            tpc = np.array([], dtype=int)
+
         chosen_tp = pick(
             tpc,
-            cfg_sel["per_class"]["topk_tp"],
+            cfg_sel["per_class"].get("topk_tp", 0),
             by_conf=conf,
             reverse=True,
         )
@@ -203,12 +216,16 @@ def select_items(
             add_reason(i, "tp_high_conf")
 
         # FN
-        fnc = idx_c[y_pred[idx_c] != c] if idx_c.size > 0 else np.array([], dtype=int)
+        if idx_c.size > 0:
+            fnc = idx_c[y_pred[idx_c] != c]
+        else:
+            fnc = np.array([], dtype=int)
+
         chosen_fn = pick(
             fnc,
-            cfg_sel["per_class"]["topk_fn"],
+            cfg_sel["per_class"].get("topk_fn", 0),
             by_conf=conf,
-            reverse=False,
+            reverse=False,  # lowest confidence among wrong
         )
         items += chosen_fn
         for i in chosen_fn:
@@ -216,10 +233,14 @@ def select_items(
 
         # FP
         idx_pred_c = np.where(y_pred == c)[0]
-        fpc = idx_pred_c[y_true[idx_pred_c] != c] if y_true is not None else idx_pred_c
+        if y_true is not None and idx_pred_c.size > 0:
+            fpc = idx_pred_c[y_true[idx_pred_c] != c]
+        else:
+            fpc = idx_pred_c
+
         chosen_fp = pick(
             fpc,
-            cfg_sel["per_class"]["topk_fp"],
+            cfg_sel["per_class"].get("topk_fp", 0),
             by_conf=conf,
             reverse=True,
         )
@@ -227,39 +248,41 @@ def select_items(
         for i in chosen_fp:
             add_reason(i, "fp_high_conf")
 
-        # Low-confidence TP
-        if tpc.size > 0 and conf is not None:
-            order = np.argsort(conf[tpc])  # ascending
-            chosen_lowconf = tpc[order][: cfg_sel["per_class"]["lowconf_topk"]].tolist()
-            items += chosen_lowconf
-            for i in chosen_lowconf:
-                add_reason(i, "tp_low_conf")
+    # ------------------------------------------------------------------
+    # Globally low-confidence cases (optional)
+    # ------------------------------------------------------------------
+    if conf is not None and "global_low_conf" in cfg_sel:
+        n_low = cfg_sel["global_low_conf"].get("topk", 0)
+        if n_low > 0:
+            order = np.argsort(conf)  # ascending → lowest confidence first
+            chosen_low = order[:n_low].tolist()
+            items += chosen_low
+            for i in chosen_low:
+                add_reason(i, "low_conf")
 
-        # Ensure minimum per class
-        if y_true is not None and idx_c.size > 0:
-            already = sum((y_true[i] == c) for i in set(items))
-            need = max(0, cfg_sel["min_per_class"] - already)
-            if need > 0:
-                extra = idx_c[:need].tolist()
-                items += extra
-                for i in extra:
-                    add_reason(i, "min_per_class")
-
-    items = sorted(set(items))
+    # Dedup preserving order
+    seen = set()
+    unique_items: List[int] = []
+    for i in items:
+        if i not in seen:
+            seen.add(i)
+            unique_items.append(i)
 
     if keys is not None:
-        target_keys = [keys[i] for i in items]
-        reason_by_key: Dict[str, List[str]] = {}
-        for i in items:
-            k = keys[i]
-            if i in reason_by_idx:
-                reason_by_key[k] = sorted(reason_by_idx[i])
-        logger.info(f"Selected {len(target_keys)} targets (with WebDataset keys).")
-        return target_keys, reason_by_key
+        targets = [keys[i] for i in unique_items]
+        reasons = {
+            keys[i]: sorted(list(reason_by_idx.get(i, [])))
+            for i in unique_items
+        }
+    else:
+        targets = unique_items
+        reasons = {
+            i: sorted(list(reason_by_idx.get(i, [])))
+            for i in unique_items
+        }
 
-    reason_by_idx_out = {i: sorted(list(rs)) for i, rs in reason_by_idx.items()}
-    logger.info(f"Selected {len(items)} targets (index-based).")
-    return items, reason_by_idx_out
+    logger.info(f"Selected {len(targets)} items for XAI.")
+    return targets, reasons
 
 
 # -------------------------------------------------------------------------
