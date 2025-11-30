@@ -1,43 +1,36 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-Build concept candidate CSV for RCC concepts directly from TRAIN WebDataset.
+Build RCC concept candidate CSV from a WebDataset split.
 
-Dataset-level (project-level), NOT experiment-level.
+Given a train WebDataset (shard-*.tar) with entries like:
+  <wds_key>.img.jpg
+  <wds_key>.meta.json   (must contain class_label)
 
-Input:
-- train_dir: root of WebDataset train split
-- pattern: glob for shards (e.g. 'shard-*.tar')
-- image_key: e.g. 'img.jpg;jpg;jpeg;png'
-- meta_key: e.g. 'meta.json;json'
+This script:
+  - extracts up to N patches per class into PNGs under --images-root/<class_label>/
+  - writes a CSV with columns: image_path, wds_key, class_label
 
-Output:
-- concept_candidates_rcc.csv with columns:
-    image_path, wds_key, class_label
-
-Additionally exports PNG crops to an images_root directory so the VLM
-can read them from filesystem.
-
-NOTE:
-- This is STAGE 0, dataset-level, independent from a specific experiment.
-- run_full_xai.sh will call this with default paths for the RCC project.
+No VLM calls happen here: this is Stage 0a (dataset-level candidates). Stage 0b
+will consume the CSV to query the VLM and build the concept bank.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
+import tarfile
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Sequence
 
-import webdataset as wds
 from PIL import Image
 
-from explainability.common.eval_utils import setup_logger, set_seed
 
-
-def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+# ----------------------------------------------------------------------
+# CLI
+# ----------------------------------------------------------------------
+def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Build RCC concept candidate CSV from TRAIN WebDataset."
     )
@@ -80,136 +73,133 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument(
         "--max-patches-per-class",
         type=int,
-        default=20, # 2000
-        help="Maximum number of candidate patches per class_label.",
+        default=2000,
+        help="Maximum number of candidate patches per class_label (default: 2000).",
     )
     p.add_argument(
         "--seed",
         type=int,
         default=1337,
-        help="Random seed (used mostly for shuffle).",
+        help="Random seed (currently unused, kept for compatibility).",
     )
-    return p.parse_args(argv)
+    return p.parse_args()
 
 
-def _parse_meta(meta_raw) -> Dict:
-    if isinstance(meta_raw, dict):
-        return meta_raw
-    if isinstance(meta_raw, (bytes, bytearray)):
+def _suffixes(raw: str) -> List[str]:
+    """Return list of suffixes with leading dot, splitting on ';'."""
+    out: List[str] = []
+    for part in raw.split(";"):
+        part = part.strip()
+        if not part:
+            continue
+        out.append(part if part.startswith(".") else f".{part}")
+    return out
+
+
+def _find_meta_member(tf: tarfile.TarFile, base: str, meta_suffixes: Sequence[str]) -> tarfile.TarInfo | None:
+    for suf in meta_suffixes:
+        candidate = f"{base}{suf}"
         try:
-            return json.loads(meta_raw.decode("utf-8"))
-        except Exception:
-            return {}
-    if isinstance(meta_raw, str):
-        try:
-            return json.loads(meta_raw)
-        except Exception:
-            return {}
-    return {}
+            return tf.getmember(candidate)
+        except KeyError:
+            continue
+    return None
 
 
-def main(argv: Optional[List[str]] = None) -> None:
-    args = parse_args(argv)
-    log = setup_logger("build_concept_candidates_train")
-    set_seed(args.seed)
+def _iter_image_members(tf: tarfile.TarFile, image_suffixes: Sequence[str]) -> Iterable[tarfile.TarInfo]:
+    for member in tf.getmembers():
+        for suf in image_suffixes:
+            if member.name.endswith(suf):
+                yield member
+                break
 
-    shard_glob = str(args.train_dir / args.pattern)
-    log.info(f"Reading train shards from: {shard_glob}")
 
-    shards = list(Path(args.train_dir).glob(args.pattern))
+# ----------------------------------------------------------------------
+# Main logic
+# ----------------------------------------------------------------------
+def main() -> None:
+    args = parse_args()
+
+    shards = sorted(args.train_dir.glob(args.pattern))
     if not shards:
-        raise FileNotFoundError(f"No shards found matching {shard_glob}")
+        raise FileNotFoundError(f"No shards found under {args.train_dir} matching {args.pattern}")
 
-    log.info(f"Found {len(shards)} shards.")
-
-    ds = (
-        wds.WebDataset(
-            [str(s) for s in shards],
-            shardshuffle=True,
-            handler=wds.warn_and_continue,
-        )
-        .shuffle(10000)
-        .decode("pil")
-        .to_tuple(args.image_key, args.meta_key, "__key__", handler=wds.warn_and_continue)
-    )
+    image_suffixes = _suffixes(args.image_key)
+    meta_suffixes = _suffixes(args.meta_key)
 
     args.images_root.mkdir(parents=True, exist_ok=True)
     args.out_csv.parent.mkdir(parents=True, exist_ok=True)
 
-    import time
-    t_start = time.time()
-    log_every = 200  # stampa log ogni N esempi
+    per_class_counts: Dict[str, int] = {}
+    written_rows = 0
 
-    total_seen = 0
-    rows: List[Dict[str, str]] = []
-    class_counts: Dict[str, int] = {}
+    with args.out_csv.open("w", newline="") as out_f:
+        writer = csv.writer(out_f)
+        writer.writerow(["image_path", "wds_key", "class_label"])
 
-    for img, meta_raw, key in ds:
-        total_seen += 1
-        if total_seen % log_every == 0:
-            elapsed = time.time() - t_start
-            eps = elapsed / max(1, total_seen)
-            msg = (
-                f"[PROGRESS] seen={total_seen} examples, "
-                f"class_counts={class_counts}, "
-                f"elapsed={elapsed/60:.1f} min, "
-                f"~{eps:.3f} s/example"
-            )
-            log.info(msg)
+        for shard in shards:
+            print(f"[INFO] Processing shard {shard.name}")
+            with tarfile.open(shard) as tf:
+                for img_member in _iter_image_members(tf, image_suffixes):
+                    # strip the image suffix to get base key
+                    for suf in image_suffixes:
+                        if img_member.name.endswith(suf):
+                            base = img_member.name[: -len(suf)]
+                            break
+                    else:
+                        continue
 
-        meta = _parse_meta(meta_raw)
-        cls = str(meta.get("class_label", "")).strip()
-        if not cls:
-            continue
+                    meta_member = _find_meta_member(tf, base, meta_suffixes)
+                    if meta_member is None:
+                        continue
 
-        cnt = class_counts.get(cls, 0)
-        if cnt >= args.max_patches_per_class:
-            continue  # already enough for this class
+                    with tf.extractfile(meta_member) as mf:
+                        if mf is None:
+                            continue
+                        try:
+                            meta = json.load(mf)
+                        except Exception:
+                            continue
 
-        safe_key = key.replace("/", "_")
-        class_dir = args.images_root / cls
-        class_dir.mkdir(parents=True, exist_ok=True)
+                    class_label = str(meta.get("class_label", "")).strip()
+                    if not class_label:
+                        continue
 
-        out_img_path = class_dir / f"{safe_key}.png"
+                    # enforce per-class cap
+                    current = per_class_counts.get(class_label, 0)
+                    if args.max_patches_per_class > 0 and current >= args.max_patches_per_class:
+                        continue
 
-        if isinstance(img, Image.Image):
-            pil_img = img.convert("RGB")
-        else:
-            pil_img = Image.fromarray(img)
-        pil_img.save(out_img_path)
+                    # derive wds_key and output path
+                    wds_key = base
+                    out_dir = args.images_root / class_label
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                    filename = f"{wds_key.replace('/', '_')}.png"
+                    out_img_path = out_dir / filename
 
-        rows.append(
-            {
-                "image_path": str(out_img_path),
-                "wds_key": key,
-                "class_label": cls,
-            }
+                    with tf.extractfile(img_member) as imf:
+                        if imf is None:
+                            continue
+                        try:
+                            img = Image.open(io.BytesIO(imf.read())).convert("RGB")
+                        except Exception:
+                            continue
+
+                    img.save(out_img_path, format="PNG")
+
+                    writer.writerow([out_img_path.as_posix(), wds_key, class_label])
+                    per_class_counts[class_label] = current + 1
+                    written_rows += 1
+
+    if written_rows == 0:
+        raise RuntimeError(
+            f"No candidate patches were written to {args.out_csv}. "
+            "Check that shards contain the expected keys."
         )
-        class_counts[cls] = cnt + 1
 
-    if not rows:
-        log.warning(
-            "No candidate patches collected; nothing to write "
-            f"(total_seen={total_seen}, class_counts={class_counts})."
-        )
-        return
-
-    with args.out_csv.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["image_path", "wds_key", "class_label"])
-        writer.writeheader()
-        for r in rows:
-            writer.writerow(r)
-
-    log.info(
-        f"Wrote {len(rows)} candidate rows to {args.out_csv} "
-        f"(per-class counts: {class_counts})"
-    )
-
-    total_elapsed = time.time() - t_start
-    log.info(
-        f"[SUMMARY] concept_candidates_rcc: rows={len(rows)}, "
-        f"classes={list(class_counts.keys())}, "
-        f"total_elapsed={total_elapsed/60:.1f} min"
+    print(
+        f"[OK] concept_candidates CSV written to {args.out_csv} "
+        f"({written_rows} rows, classes={len(per_class_counts)})"
     )
 
 

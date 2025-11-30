@@ -1,0 +1,104 @@
+version: 1
+name: "rcc_histology_10_core_concepts"
+
+concepts:
+  - id: 1
+    name: "Clear cytoplasm (ccRCC)"
+    short_name: "clear_cytoplasm"
+    group: "ccRCC"
+    primary_class: "ccRCC"
+    prompt: >
+      Identify viable renal tumour cells with abundant optically clear or glassy cytoplasm and sharp cell borders,
+      usually forming nests or alveoli. Exclude adipocytes and stromal fat, benign tubules, foamy macrophages and
+      artefactual clearing. If these specific tumour cells are not clearly present, treat the concept as absent.
+
+  - id: 2
+    name: "Delicate branching capillary network (ccRCC)"
+    short_name: "delicate_capillary_network"
+    group: "ccRCC"
+    primary_class: "ccRCC"
+    prompt: >
+      Identify a delicate, thin-walled, branching capillary network investing nests or alveoli of tumour cells,
+      creating a fine chicken-wire vascular pattern typical of clear cell RCC. Exclude thick fibrous septa and large
+      muscular vessels. If this fine capillary meshwork is not obvious, treat the concept as absent.
+
+  - id: 3
+    name: "Papillary fronds with fibrovascular cores (pRCC)"
+    short_name: "papillary_fronds"
+    group: "pRCC"
+    primary_class: "pRCC"
+    prompt: >
+      Identify true papillary fronds: finger-like projections with central fibrovascular cores containing loose stroma
+      and vessels, lined by one or more layers of tumour cells. Exclude folded flat epithelium, simple tubules and
+      solid nests. If you only see flat or tubular epithelium without clear fibrovascular cores, treat the concept as absent.
+
+  - id: 4
+    name: "Foamy macrophages in papillary cores (pRCC)"
+    short_name: "foamy_macrophages"
+    group: "pRCC"
+    primary_class: "pRCC"
+    prompt: >
+      Identify clusters or sheets of foamy macrophages with finely vacuolated cytoplasm and small dense nuclei within
+      papillary fibrovascular cores or lumina. Do not call clear tumour cells, necrotic debris or artefactual vacuoles
+      foamy macrophages. If macrophages are sparse or ambiguous, err on absent/equivocal.
+
+  - id: 5
+    name: "Perinuclear halos (chRCC)"
+    short_name: "perinuclear_halos"
+    group: "chRCC"
+    primary_class: "CHROMO"
+    prompt: >
+      Identify solid sheets or nests of tumour cells with distinct perinuclear clearing or halos surrounding the nucleus
+      within pale to eosinophilic cytoplasm, typical of chromophobe RCC. Exclude random vacuoles, degenerative change
+      and mucin. If halos are not a consistent, repeated pattern, treat the concept as absent.
+
+  - id: 6
+    name: "Plant-cell-like borders (chRCC)"
+    short_name: "plant_cell_borders"
+    group: "chRCC"
+    primary_class: "CHROMO"
+    prompt: >
+      Identify tumour cells with thick, sharply delineated polygonal cell borders creating a plant-cell or mosaic
+      appearance in sheets of chromophobe RCC. Exclude indistinct thin borders of clear cell RCC or ordinary tubular
+      epithelium. If borders are not clearly thick and polygonal, treat the concept as absent.
+
+  - id: 7
+    name: "Oncocytic cytoplasm (oncocytoma)"
+    short_name: "oncocytic_cytoplasm"
+    group: "Oncocytoma"
+    primary_class: "ONCO"
+    prompt: >
+      Identify tumour cells with abundant, dense, finely granular, deeply eosinophilic cytoplasm (oncocytes) and round,
+      centrally placed nuclei with smooth membranes, typical of renal oncocytoma. Exclude chromophobe-like cells with
+      obvious perinuclear halos. If the cytoplasm is not densely granular and eosinophilic, treat the concept as absent.
+
+  - id: 8
+    name: "Archipelagenous architecture in oedematous stroma (oncocytoma)"
+    short_name: "archipelagenous_architecture"
+    group: "Oncocytoma"
+    primary_class: "ONCO"
+    prompt: >
+      Identify round or oval nests and islands of oncocytic tumour cells scattered in loose, oedematous or myxoid stroma,
+      producing an archipelagenous or archipelago-like pattern. Exclude true papillary projections and densely packed solid
+      sheets without intervening stroma. If the islands in loose stroma are not clear, treat the concept as absent.
+
+  - id: 9
+    name: "Coagulative tumour necrosis"
+    short_name: "coagulative_necrosis"
+    group: "Necrosis"
+    primary_class: null
+    prompt: >
+      Identify areas of coagulative tumour necrosis characterised by ghost outlines of tumour cells with loss of nuclei,
+      increased eosinophilia and granular debris, usually sharply demarcated from viable tumour. Exclude simple haemorrhage,
+      cyst contents, autolysis and cautery artefact. If the changes are subtle or purely haemorrhagic, treat the concept as absent.
+
+  - id: 10
+    name: "Sarcomatoid / rhabdoid dedifferentiation"
+    short_name: "sarcomatoid_rhabdoid_dedifferentiation"
+    group: "Dedifferentiation"
+    primary_class: null
+    prompt: >
+      Identify high-grade dedifferentiation within renal cell carcinoma composed of malignant spindle cells in fascicles
+      (sarcomatoid) and/or rhabdoid cells with eccentric nuclei, prominent nucleoli and dense eosinophilic cytoplasmic
+      inclusions. Exclude benign stromal spindle cells and inflammatory infiltrates. If definite sarcomatoid or rhabdoid
+      morphology is not obvious, treat the concept as absent.

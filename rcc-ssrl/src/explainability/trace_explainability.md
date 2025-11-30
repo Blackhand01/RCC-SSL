@@ -525,10 +525,15 @@ selection:
 concepts:
   # default, sovrascrivibile via env CONCEPT_BANK_CSV
   meta_csv: "/home/mla_group_01/rcc-ssrl/src/explainability/concept/ontology/concepts_rcc_debug.csv"
+
+  # mappatura colonne concept bank
   concept_name_col: "concept_name"
   key_col: "wds_key"
   group_col: "group"
   class_col: "class_label"
+  present_col: "present"
+  confidence_col: "confidence"
+  rationale_col: "rationale"
 
   similarity: "cosine"
   topk_per_patch: 5
@@ -546,46 +551,90 @@ concept/ontology/build_concept_bank.py codice <<
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Build concept bank for RCC histology using a VLM.
+Dump grezzo delle risposte VLM per tutte le coppie (patch, concept).
 
 Input:
-- Ontology YAML with RCC concepts.
-- CSV of candidate patches with columns:
-    image_path, wds_key, class_label
-  (produced automatically by build_concept_candidates.py)
-
-- VLM server (e.g. LLaVA-Med) answering concept-level questions in JSON.
+- Ontology YAML con i concetti (name, group, primary_class, prompt)
+- CSV di candidate patches: image_path, wds_key, class_label
+- Modello HF locale (LLaVA-Med) via VLMClientHF
 
 Output:
-- concepts_rcc_debug.csv with columns:
-    concept_name, wds_key, group, class_label
-
-This file is pointed to by concepts.meta_csv in config_concept.yaml.
+- concepts_rcc_*.csv con colonne:
+    concept_name, wds_key, group, class_label, user_question, assistant_answer
+  (tutte le risposte del VLM, senza filtri/soglie, con prompt ripulito)
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
-import json
 import random
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import yaml
 
-from explainability.concept.ontology.vlm_client import VLMClient  # backend HTTP esistente
-from explainability.concept.ontology.vlm_client_hf import VLMClientHF  # nuovo backend HF locale
+
+# ----------------------------------------------------------------------
+# Helpers
+# ----------------------------------------------------------------------
+def _normalize_whitespace(s: str) -> str:
+    """Collassa spazi / newline multipli in un'unica riga pulita."""
+    return " ".join(str(s).split())
 
 
+# ----------------------------------------------------------------------
+# Ontology loading + validation
+# ----------------------------------------------------------------------
 def load_ontology(path: str | Path) -> List[Dict[str, Any]]:
-    data = yaml.safe_load(open(path, "r"))
-    return data["concepts"]
+    """Load ontology YAML e valida i campi minimi per ciascun concept."""
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Ontology YAML not found: {path}")
+
+    with path.open("r") as f:
+        data = yaml.safe_load(f)
+
+    if not isinstance(data, dict) or "concepts" not in data:
+        raise ValueError(f"Ontology YAML must contain a 'concepts' list: {path}")
+
+    concepts_raw = data["concepts"]
+    if not isinstance(concepts_raw, list) or not concepts_raw:
+        raise ValueError(f"'concepts' must be a non-empty list in {path}")
+
+    concepts: List[Dict[str, Any]] = []
+    for idx, c in enumerate(concepts_raw):
+        if not isinstance(c, dict):
+            raise ValueError(f"Concept #{idx} is not a dict in {path}")
+
+        name = str(c.get("name", "")).strip()
+        prompt = str(c.get("prompt", "")).strip()
+
+        if not name:
+            raise ValueError(f"Concept #{idx} in {path} has empty 'name'")
+        if not prompt:
+            raise ValueError(f"Concept '{name}' in {path} has empty 'prompt'")
+
+        concepts.append(
+            {
+                "name": name,
+                "prompt": prompt,
+                "group": c.get("group"),
+                "primary_class": c.get("primary_class"),
+            }
+        )
+
+    return concepts
 
 
-def main(argv: List[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Build RCC concept bank via VLM.")
+# ----------------------------------------------------------------------
+# Main
+# ----------------------------------------------------------------------
+def main(argv: Optional[List[str]] = None) -> None:
+    parser = argparse.ArgumentParser(
+        description="Dump raw VLM outputs for RCC concept bank."
+    )
     parser.add_argument("--ontology", required=True, help="Ontology YAML path")
     parser.add_argument(
         "--images-csv",
@@ -593,34 +642,19 @@ def main(argv: List[str] | None = None) -> None:
         help="CSV with columns: image_path,wds_key,class_label",
     )
     parser.add_argument(
-        "--controller",
-        required=False,
-        help="VLM controller URL (e.g. http://localhost:10000) – usato SOLO se backend=http",
-    )
-    parser.add_argument(
         "--model-name",
+        type=str,
         default="Eren-Senoglu/llava-med-v1.5-mistral-7b-hf",
-        help="Nome del modello VLM. "
-             "Se backend=hf: id Hugging Face (es. Eren-Senoglu/llava-med-v1.5-mistral-7b-hf); "
-             "se backend=http: nome registrato sul server (es. llava-med-v1.5-mistral-7b).",
-    )
-    parser.add_argument(
-        "--backend",
-        choices=["http", "hf"],
-        default="hf",
-        help="Tipo di backend VLM: 'hf' = modello locale via Hugging Face (no HTTP), "
-             "'http' = controller/worker HTTP (pipeline vecchia).",
+        help=(
+            "HF model id or local path for the VLM "
+            "(e.g. 'Eren-Senoglu/llava-med-v1.5-mistral-7b-hf' or a local directory). "
+            "If you launch via run_full_xai.sh, this is overridden by VLM_MODEL_PATH."
+        ),
     )
     parser.add_argument(
         "--out-csv",
         required=True,
-        help="Output CSV path for concept bank (concepts_rcc_debug.csv)",
-    )
-    parser.add_argument(
-        "--presence-threshold",
-        type=float,
-        default=0.6,
-        help="Minimal confidence to accept concept as present",
+        help="Output CSV path for concept bank (concepts_rcc_*.csv)",
     )
     parser.add_argument(
         "--max-images",
@@ -630,38 +664,57 @@ def main(argv: List[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
+    # Ontology
     concepts = load_ontology(args.ontology)
 
-    # Scegli il backend in base al flag --backend
-    if args.backend == "hf":
-        # modello locale via HuggingFace, NESSUN controller HTTP
-        vlm = VLMClientHF(
-            model_name=args.model_name,
-            device=None,        # auto: cuda se disponibile, altrimenti cpu
-            dtype="float16",    # va bene con A40
-            debug=False,        # o True se vuoi log verbosi
-        )
-    else:
-        # backend http vecchio: richiede --controller
-        if not args.controller:
-            raise RuntimeError(
-                "HTTP backend selected but --controller is None. "
-                "Pass --controller http://host:port oppure usa --backend hf."
-            )
-        vlm = VLMClient(args.controller, args.model_name)
+    # VLM client
+    try:
+        from explainability.concept.ontology.vlm_client_hf import VLMClientHF
+    except Exception as exc:  # pragma: no cover - dependency guard
+        raise RuntimeError(
+            "HF backend requested but transformers/torch dependencies are missing. "
+            "Install them in the same venv used for explainability."
+        ) from exc
 
-    # Read candidate patches
+    vlm = VLMClientHF(args.model_name)
+
+    # ------------------------------------------------------------------
+    # Read candidate patches + validation
+    # ------------------------------------------------------------------
+    images_csv_path = Path(args.images_csv)
+    if not images_csv_path.is_file():
+        raise FileNotFoundError(f"Images CSV not found: {images_csv_path}")
+
     rows: List[Dict[str, str]] = []
-    with open(args.images_csv) as f:
+    with images_csv_path.open() as f:
         reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames or []
+        required_cols = {"image_path", "wds_key", "class_label"}
+        missing = required_cols - set(fieldnames)
+        if missing:
+            raise ValueError(
+                f"Images CSV {images_csv_path} is missing required columns: {sorted(missing)}"
+            )
+
         for r in reader:
-            if not r.get("image_path") or not r.get("wds_key"):
+            image_path = (r.get("image_path") or "").strip()
+            wds_key = (r.get("wds_key") or "").strip()
+            class_label = (r.get("class_label") or "").strip()
+
+            if not image_path or not wds_key or not class_label:
                 continue
-            rows.append(r)
+
+            rows.append(
+                {
+                    "image_path": image_path,
+                    "wds_key": wds_key,
+                    "class_label": class_label,
+                }
+            )
 
     if not rows:
         raise RuntimeError(
-            f"Concept bank: no candidate patches in {args.images_csv}. "
+            f"Concept bank: no valid candidate patches in {images_csv_path}. "
             "Stage 0a (build_concept_candidates) probably failed or produced an empty CSV."
         )
 
@@ -674,113 +727,139 @@ def main(argv: List[str] | None = None) -> None:
     out_path = Path(args.out_csv)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    out_f = open(out_path, "w", newline="")
-    writer = csv.writer(out_f)
-    writer.writerow(["concept_name", "wds_key", "group", "class_label"])
-
     t_start = time.time()
     total_rows = len(rows)
     total_concepts = len(concepts)
     total_planned_queries = total_rows * total_concepts
     print(
-        f"[INFO] Concept bank: candidates={total_rows}, concepts={total_concepts}, "
-        f"max_queries={total_planned_queries}, presence_threshold={args.presence_threshold}"
+        f"[INFO] Concept bank RAW: candidates={total_rows}, concepts={total_concepts}, "
+        f"max_queries={total_planned_queries}, model_name={args.model_name}"
     )
 
-    accepted = 0
     total_queries = 0
+    written_rows = 0
+    skipped_empty_answer = 0
     log_every = 200  # stampa ogni N query
 
-    for r_idx, r in enumerate(rows):
-        img = r["image_path"]
-        key = r["wds_key"]
-        cls = r.get("class_label", "")
+    # ------------------------------------------------------------------
+    # Write output CSV
+    # ------------------------------------------------------------------
+    with out_path.open("w", newline="") as out_f:
+        writer = csv.writer(out_f)
+        writer.writerow(
+            [
+                "concept_name",
+                "wds_key",
+                "group",
+                "class_label",
+                "user_question",
+                "assistant_answer",
+            ]
+        )
 
-        for c_idx, c in enumerate(concepts):
-            cname = c["name"]
-            group = c.get("group")
-            base_prompt = c["prompt"]
+        for r_idx, r in enumerate(rows):
+            img_path = r["image_path"]
+            key = r["wds_key"]
+            patch_class = r.get("class_label", "")
 
-            t0 = time.time()
-            try:
-                ans = vlm.ask_concept(img, cname, base_prompt)
-            except RuntimeError as e:
-                # Tipicamente: error_code != 0 dal worker (es. problemi interni llava).
-                total_queries += 1
+            for c_idx, c in enumerate(concepts):
+                concept_name = c["name"]
+                concept_group = c.get("group")
+                concept_prompt = c["prompt"]
+
+                # user_question costruita in modo deterministico (non prendiamo il prompt echiato dal modello)
+                user_question = _normalize_whitespace(
+                    f"For this RCC patch, is the concept '{concept_name}' present? "
+                    f"Definition: {concept_prompt}"
+                )
+
+                t0 = time.time()
+                try:
+                    ans = vlm.ask_concept(img_path, concept_name, concept_prompt)
+                except RuntimeError as e:
+                    total_queries += 1
+                    dt = time.time() - t0
+                    if getattr(vlm, "debug", False):
+                        print(
+                            f"[BANK DEBUG] RuntimeError for key={key}, concept={concept_name}, "
+                            f"class={patch_class}, dt={dt:.2f}s\n{e}\n{'-'*80}"
+                        )
+                    if total_queries <= 10:
+                        print(
+                            f"[WARN] VLM error for key={key}, concept={concept_name}: {e}"
+                        )
+                    continue
+
                 dt = time.time() - t0
+                total_queries += 1
 
-                if vlm.debug:
+                if total_queries % log_every == 0:
+                    elapsed = time.time() - t_start
+                    avg_per_query = elapsed / max(1, total_queries)
+                    remaining = total_planned_queries - total_queries
+                    est_remain = remaining * avg_per_query
                     print(
-                        f"[BANK DEBUG] RuntimeError for key={key}, concept={cname}, "
-                        f"class={cls}, dt={dt:.2f}s\n{e}\n{'-'*80}"
+                        f"[PROGRESS] queries={total_queries}/{total_planned_queries} "
+                        f"({100.0*total_queries/total_planned_queries:.1f}%), "
+                        f"elapsed={elapsed/60:.1f} min, "
+                        f"avg_per_query={avg_per_query:.2f} s, "
+                        f"ETA~{est_remain/60:.1f} min"
                     )
 
-                # Log minimale anche fuori da debug per i primi casi
-                if total_queries <= 10:
-                    print(
-                        f"[WARN] VLM error for key={key}, concept={cname}: {e}"
-                    )
-                continue
+                # Risposta vuota o non nel formato atteso
+                if not ans or not isinstance(ans, dict):
+                    if total_queries <= 10:
+                        print(
+                            f"[DEBUG] Empty/invalid VLM answer (non-dict) for key={key}, "
+                            f"concept={concept_name}"
+                        )
+                    continue
 
-            dt = time.time() - t0
-            total_queries += 1
-
-            # LOG DI DEBUG: prime N risposte parse-ate, anche se poi vengono scartate
-            if vlm.debug and ans is not None and total_queries <= 20:
-                print(
-                    f"[BANK DEBUG] key={key}, concept={cname}, "
-                    f"class={cls}, dt={dt:.2f}s\n"
-                    f"{json.dumps(ans, indent=2)}\n"
-                    f"{'-'*80}"
+                # VLMClientHF ora restituisce: {"concept", "user_question", "assistant_answer"}
+                assistant_answer = _normalize_whitespace(
+                    ans.get("assistant_answer", "") or ""
+                )
+                user_question_full = _normalize_whitespace(
+                    ans.get("user_question", user_question) or ""
                 )
 
-            if total_queries % log_every == 0:
-                elapsed = time.time() - t_start
-                avg_per_query = elapsed / max(1, total_queries)
-                remaining = total_planned_queries - total_queries
-                est_remain = remaining * avg_per_query
-                print(
-                    f"[PROGRESS] queries={total_queries}/{total_planned_queries} "
-                    f"({100.0*total_queries/total_planned_queries:.1f}%), "
-                    f"elapsed={elapsed/60:.1f} min, "
-                    f"avg_per_query={avg_per_query:.2f} s, "
-                    f"ETA~{est_remain/60:.1f} min"
+                if not assistant_answer:
+                    skipped_empty_answer += 1
+                    if skipped_empty_answer <= 10:
+                        print(
+                            f"[DEBUG] Skipping empty assistant_answer for key={key}, "
+                            f"concept={concept_name}"
+                        )
+                    continue
+
+                writer.writerow(
+                    [
+                        concept_name,
+                        key,
+                        concept_group,
+                        patch_class,
+                        user_question_full,
+                        assistant_answer,
+                    ]
                 )
+                written_rows += 1
 
-            if not ans:
-                # debug minimale
-                if total_queries <= 10:
-                    print(
-                        f"[DEBUG] Empty/invalid VLM answer for key={key}, "
-                        f"concept={cname}"
-                    )
-                continue
-
-            present = bool(ans.get("present", False))
-            try:
-                confidence = float(ans.get("confidence", 0.0))
-            except Exception:
-                confidence = 0.0
-
-            if present and confidence >= args.presence_threshold:
-                writer.writerow([cname, key, group, cls])
-                accepted += 1
-
-    out_f.close()
     total_elapsed = time.time() - t_start
     print(
-        f"[SUMMARY] Concept bank: accepted={accepted}, "
-        f"queries={total_queries}, "
+        f"[SUMMARY] Concept bank RAW dump: "
+        f"candidates={total_rows}, concepts={total_concepts}, "
+        f"queries={total_queries}, written_rows={written_rows}, "
+        f"skipped_empty_answer={skipped_empty_answer}, "
         f"elapsed={total_elapsed/60:.1f} min"
     )
 
-    if accepted == 0:
+    if written_rows == 0:
         raise RuntimeError(
-            "Concept bank is empty (no accepted concept/key pairs). "
-            "Cause probabili: modello VLM non raggiungibile / non caricato, "
-            "risposte non parse-abili come JSON, oppure tutte le decisioni present=False "
-            f"(backend={args.backend}, model_name={args.model_name})."
+            f"No valid rows written to concept bank CSV {out_path}. "
+            "Check VLM responses and ontology/prompts."
         )
+
+    print(f"[OK] Concept bank written to {out_path}")
 
 
 if __name__ == "__main__":
@@ -789,45 +868,38 @@ if __name__ == "__main__":
 
 concept/ontology/build_concept_candidates.py codice <<
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-Build concept candidate CSV for RCC concepts directly from TRAIN WebDataset.
+Build RCC concept candidate CSV from a WebDataset split.
 
-Dataset-level (project-level), NOT experiment-level.
+Given a train WebDataset (shard-*.tar) with entries like:
+  <wds_key>.img.jpg
+  <wds_key>.meta.json   (must contain class_label)
 
-Input:
-- train_dir: root of WebDataset train split
-- pattern: glob for shards (e.g. 'shard-*.tar')
-- image_key: e.g. 'img.jpg;jpg;jpeg;png'
-- meta_key: e.g. 'meta.json;json'
+This script:
+  - extracts up to N patches per class into PNGs under --images-root/<class_label>/
+  - writes a CSV with columns: image_path, wds_key, class_label
 
-Output:
-- concept_candidates_rcc.csv with columns:
-    image_path, wds_key, class_label
-
-Additionally exports PNG crops to an images_root directory so the VLM
-can read them from filesystem.
-
-NOTE:
-- This is STAGE 0, dataset-level, independent from a specific experiment.
-- run_full_xai.sh will call this with default paths for the RCC project.
+No VLM calls happen here: this is Stage 0a (dataset-level candidates). Stage 0b
+will consume the CSV to query the VLM and build the concept bank.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
+import tarfile
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Sequence
 
-import webdataset as wds
 from PIL import Image
 
-from explainability.common.eval_utils import setup_logger, set_seed
 
-
-def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+# ----------------------------------------------------------------------
+# CLI
+# ----------------------------------------------------------------------
+def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Build RCC concept candidate CSV from TRAIN WebDataset."
     )
@@ -870,136 +942,133 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument(
         "--max-patches-per-class",
         type=int,
-        default=20, # 2000
-        help="Maximum number of candidate patches per class_label.",
+        default=2000,
+        help="Maximum number of candidate patches per class_label (default: 2000).",
     )
     p.add_argument(
         "--seed",
         type=int,
         default=1337,
-        help="Random seed (used mostly for shuffle).",
+        help="Random seed (currently unused, kept for compatibility).",
     )
-    return p.parse_args(argv)
+    return p.parse_args()
 
 
-def _parse_meta(meta_raw) -> Dict:
-    if isinstance(meta_raw, dict):
-        return meta_raw
-    if isinstance(meta_raw, (bytes, bytearray)):
+def _suffixes(raw: str) -> List[str]:
+    """Return list of suffixes with leading dot, splitting on ';'."""
+    out: List[str] = []
+    for part in raw.split(";"):
+        part = part.strip()
+        if not part:
+            continue
+        out.append(part if part.startswith(".") else f".{part}")
+    return out
+
+
+def _find_meta_member(tf: tarfile.TarFile, base: str, meta_suffixes: Sequence[str]) -> tarfile.TarInfo | None:
+    for suf in meta_suffixes:
+        candidate = f"{base}{suf}"
         try:
-            return json.loads(meta_raw.decode("utf-8"))
-        except Exception:
-            return {}
-    if isinstance(meta_raw, str):
-        try:
-            return json.loads(meta_raw)
-        except Exception:
-            return {}
-    return {}
+            return tf.getmember(candidate)
+        except KeyError:
+            continue
+    return None
 
 
-def main(argv: Optional[List[str]] = None) -> None:
-    args = parse_args(argv)
-    log = setup_logger("build_concept_candidates_train")
-    set_seed(args.seed)
+def _iter_image_members(tf: tarfile.TarFile, image_suffixes: Sequence[str]) -> Iterable[tarfile.TarInfo]:
+    for member in tf.getmembers():
+        for suf in image_suffixes:
+            if member.name.endswith(suf):
+                yield member
+                break
 
-    shard_glob = str(args.train_dir / args.pattern)
-    log.info(f"Reading train shards from: {shard_glob}")
 
-    shards = list(Path(args.train_dir).glob(args.pattern))
+# ----------------------------------------------------------------------
+# Main logic
+# ----------------------------------------------------------------------
+def main() -> None:
+    args = parse_args()
+
+    shards = sorted(args.train_dir.glob(args.pattern))
     if not shards:
-        raise FileNotFoundError(f"No shards found matching {shard_glob}")
+        raise FileNotFoundError(f"No shards found under {args.train_dir} matching {args.pattern}")
 
-    log.info(f"Found {len(shards)} shards.")
-
-    ds = (
-        wds.WebDataset(
-            [str(s) for s in shards],
-            shardshuffle=True,
-            handler=wds.warn_and_continue,
-        )
-        .shuffle(10000)
-        .decode("pil")
-        .to_tuple(args.image_key, args.meta_key, "__key__", handler=wds.warn_and_continue)
-    )
+    image_suffixes = _suffixes(args.image_key)
+    meta_suffixes = _suffixes(args.meta_key)
 
     args.images_root.mkdir(parents=True, exist_ok=True)
     args.out_csv.parent.mkdir(parents=True, exist_ok=True)
 
-    import time
-    t_start = time.time()
-    log_every = 200  # stampa log ogni N esempi
+    per_class_counts: Dict[str, int] = {}
+    written_rows = 0
 
-    total_seen = 0
-    rows: List[Dict[str, str]] = []
-    class_counts: Dict[str, int] = {}
+    with args.out_csv.open("w", newline="") as out_f:
+        writer = csv.writer(out_f)
+        writer.writerow(["image_path", "wds_key", "class_label"])
 
-    for img, meta_raw, key in ds:
-        total_seen += 1
-        if total_seen % log_every == 0:
-            elapsed = time.time() - t_start
-            eps = elapsed / max(1, total_seen)
-            msg = (
-                f"[PROGRESS] seen={total_seen} examples, "
-                f"class_counts={class_counts}, "
-                f"elapsed={elapsed/60:.1f} min, "
-                f"~{eps:.3f} s/example"
-            )
-            log.info(msg)
+        for shard in shards:
+            print(f"[INFO] Processing shard {shard.name}")
+            with tarfile.open(shard) as tf:
+                for img_member in _iter_image_members(tf, image_suffixes):
+                    # strip the image suffix to get base key
+                    for suf in image_suffixes:
+                        if img_member.name.endswith(suf):
+                            base = img_member.name[: -len(suf)]
+                            break
+                    else:
+                        continue
 
-        meta = _parse_meta(meta_raw)
-        cls = str(meta.get("class_label", "")).strip()
-        if not cls:
-            continue
+                    meta_member = _find_meta_member(tf, base, meta_suffixes)
+                    if meta_member is None:
+                        continue
 
-        cnt = class_counts.get(cls, 0)
-        if cnt >= args.max_patches_per_class:
-            continue  # already enough for this class
+                    with tf.extractfile(meta_member) as mf:
+                        if mf is None:
+                            continue
+                        try:
+                            meta = json.load(mf)
+                        except Exception:
+                            continue
 
-        safe_key = key.replace("/", "_")
-        class_dir = args.images_root / cls
-        class_dir.mkdir(parents=True, exist_ok=True)
+                    class_label = str(meta.get("class_label", "")).strip()
+                    if not class_label:
+                        continue
 
-        out_img_path = class_dir / f"{safe_key}.png"
+                    # enforce per-class cap
+                    current = per_class_counts.get(class_label, 0)
+                    if args.max_patches_per_class > 0 and current >= args.max_patches_per_class:
+                        continue
 
-        if isinstance(img, Image.Image):
-            pil_img = img.convert("RGB")
-        else:
-            pil_img = Image.fromarray(img)
-        pil_img.save(out_img_path)
+                    # derive wds_key and output path
+                    wds_key = base
+                    out_dir = args.images_root / class_label
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                    filename = f"{wds_key.replace('/', '_')}.png"
+                    out_img_path = out_dir / filename
 
-        rows.append(
-            {
-                "image_path": str(out_img_path),
-                "wds_key": key,
-                "class_label": cls,
-            }
+                    with tf.extractfile(img_member) as imf:
+                        if imf is None:
+                            continue
+                        try:
+                            img = Image.open(io.BytesIO(imf.read())).convert("RGB")
+                        except Exception:
+                            continue
+
+                    img.save(out_img_path, format="PNG")
+
+                    writer.writerow([out_img_path.as_posix(), wds_key, class_label])
+                    per_class_counts[class_label] = current + 1
+                    written_rows += 1
+
+    if written_rows == 0:
+        raise RuntimeError(
+            f"No candidate patches were written to {args.out_csv}. "
+            "Check that shards contain the expected keys."
         )
-        class_counts[cls] = cnt + 1
 
-    if not rows:
-        log.warning(
-            "No candidate patches collected; nothing to write "
-            f"(total_seen={total_seen}, class_counts={class_counts})."
-        )
-        return
-
-    with args.out_csv.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["image_path", "wds_key", "class_label"])
-        writer.writeheader()
-        for r in rows:
-            writer.writerow(r)
-
-    log.info(
-        f"Wrote {len(rows)} candidate rows to {args.out_csv} "
-        f"(per-class counts: {class_counts})"
-    )
-
-    total_elapsed = time.time() - t_start
-    log.info(
-        f"[SUMMARY] concept_candidates_rcc: rows={len(rows)}, "
-        f"classes={list(class_counts.keys())}, "
-        f"total_elapsed={total_elapsed/60:.1f} min"
+    print(
+        f"[OK] concept_candidates CSV written to {args.out_csv} "
+        f"({written_rows} rows, classes={len(per_class_counts)})"
     )
 
 
@@ -1007,165 +1076,263 @@ if __name__ == "__main__":
     main()
 >>
 
-concept/ontology/debug_llava.py codice <<
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Debug script to test VLM client HTTP calls directly.
-Run this locally with one image to verify the worker is responding correctly.
-"""
-
-import base64
-import json
-import os
-from pathlib import Path
-
-import requests
-
-CONTROLLER_URL = os.getenv("CONTROLLER_URL", "http://localhost:10000")
-MODEL_NAME = "llava-med-v1.5-mistral-7b"
-
-def to_b64(image_path: Path) -> str:
-    """Convert image to base64 string."""
-    with open(image_path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
-
-def test_llava_call(image_path: Path, concept_name: str, base_prompt: str):
-    """Test a single VLM call and print raw response."""
-    image_b64 = to_b64(image_path)
-
-    prompt = f"""<image>
-You are a board-certified renal pathologist.
-
-Analyse the attached histology patch.
-
-Concept: {concept_name}
-Question: {base_prompt}
-
-Respond ONLY with a single line containing a valid JSON object with the following keys:
-- "concept": string
-- "present": boolean (true or false)
-- "confidence": float between 0 and 1
-- "rationale": string (max 20 words)
-
-Example:
-{{"concept": "Clear cytoplasm (ccRCC)", "present": true, "confidence": 0.73, "rationale": "Concise reason"}}
-
-Now return ONLY the JSON object, with no additional text before or after."""
-
-    payload = {
-        "model": MODEL_NAME,
-        "prompt": prompt,
-        "images": [image_b64],
-        "temperature": 0.2,
-        "max_new_tokens": 128,
-        # mai None: evita crash del worker su KeywordsStoppingCriteria
-        "stop": "###",
-    }
-
-    print(f"Testing with image: {image_path}")
-    print(f"Concept: {concept_name}")
-    print(f"Sending request to: {CONTROLLER_URL}/worker_generate_stream")
-
-    try:
-        r = requests.post(f"{CONTROLLER_URL}/worker_generate_stream", json=payload, stream=True, timeout=120)
-        print(f"STATUS: {r.status_code}")
-
-        if r.status_code != 200:
-            print(f"ERROR RESPONSE: {r.text}")
-            return
-
-        text = ""
-        for chunk in r.iter_lines(delimiter=b"\0"):
-            if chunk:
-                try:
-                    data = json.loads(chunk.decode())
-                    text = data.get("text", "")
-                except json.JSONDecodeError:
-                    continue
-
-        print(f"TEXT FIELD (first 400 chars): {repr(text[:400])}")
-
-        # Try to parse as JSON
-        try:
-            parsed = json.loads(text.strip())
-            print("PARSED JSON:", json.dumps(parsed, indent=2))
-        except json.JSONDecodeError as e:
-            print(f"JSON PARSE ERROR: {e}")
-
-    except Exception as e:
-        print(f"HTTP ERROR: {e}")
-
-if __name__ == "__main__":
-    # Use first available image from concept candidates
-    images_root = Path("concept_candidates_images")
-    if not images_root.exists():
-        print(f"Images directory {images_root} not found. Run build_concept_candidates.py first.")
-        exit(1)
-
-    # Find first image
-    image_files = list(images_root.rglob("*.png"))
-    if not image_files:
-        print("No PNG images found in concept_candidates_images/")
-        exit(1)
-
-    test_image = image_files[0]
-    concept_name = "Clear cytoplasm (ccRCC)"
-    base_prompt = "Identify viable renal tumour cells with abundant optically clear or glassy cytoplasm and sharp cell borders, in keeping with clear cell renal cell carcinoma. Exclude adipocytes, stromal fat, artefactual perinuclear clearing, and foamy macrophages."
-
-    test_llava_call(test_image, concept_name, base_prompt)
->>
-
 concept/ontology/__init__.py codice <<
 # empty – marks "ontology" as a package
 >>
 
 concept/ontology/ontology_rcc_debug.yaml codice <<
-version: 1
-name: "rcc_histology_debug_4_concepts"
+version: 3
+name: "rcc_histology_4_concepts_core"
 
 concepts:
   - id: 1
     name: "Clear cytoplasm (ccRCC)"
-    short_name: "clear_cytoplasm_ccrcc"
+    short_name: "clear_cytoplasm"
     group: "ccRCC"
     primary_class: "ccRCC"
     prompt: >
-      Identify viable renal tumour cells with abundant optically clear or glassy
-      cytoplasm and sharp cell borders, in keeping with clear cell renal cell carcinoma.
-      Exclude adipocytes, stromal fat, artefactual perinuclear clearing, and foamy
-      macrophages.
+      Viable renal tumour cells with abundant optically clear or glassy cytoplasm and sharp cell borders,
+      usually forming nests or alveoli typical of clear cell renal cell carcinoma.
+      Exclude adipocytes and stromal fat, artefactual perinuclear clearing, and sheets of foamy macrophages.
+>>
+
+concept/ontology/ontology_rcc_v1.yaml codice <<
+version: 1
+name: "rcc_histology_10_core_concepts"
+
+concepts:
+  - id: 1
+    name: "Clear cytoplasm (ccRCC)"
+    short_name: "clear_cytoplasm"
+    group: "ccRCC"
+    primary_class: "ccRCC"
+    prompt: >
+      Identify viable renal tumour cells with abundant optically clear or glassy cytoplasm and sharp cell borders,
+      usually forming nests or alveoli. Exclude adipocytes and stromal fat, benign tubules, foamy macrophages and
+      artefactual clearing. If these specific tumour cells are not clearly present, treat the concept as absent.
 
   - id: 2
+    name: "Delicate branching capillary network (ccRCC)"
+    short_name: "delicate_capillary_network"
+    group: "ccRCC"
+    primary_class: "ccRCC"
+    prompt: >
+      Identify a delicate, thin-walled, branching capillary network investing nests or alveoli of tumour cells,
+      creating a fine chicken-wire vascular pattern typical of clear cell RCC. Exclude thick fibrous septa and large
+      muscular vessels. If this fine capillary meshwork is not obvious, treat the concept as absent.
+
+  - id: 3
     name: "Papillary fronds with fibrovascular cores (pRCC)"
-    short_name: "papillary_fronds_prcc"
+    short_name: "papillary_fronds"
     group: "pRCC"
     primary_class: "pRCC"
     prompt: >
-      Identify true papillary fronds: finger-like projections with central fibrovascular
-      cores containing loose stroma and vessels, lined by tumour cells, in keeping with
-      papillary renal cell carcinoma. Exclude folded flat epithelium and simple tubules.
+      Identify true papillary fronds: finger-like projections with central fibrovascular cores containing loose stroma
+      and vessels, lined by one or more layers of tumour cells. Exclude folded flat epithelium, simple tubules and
+      solid nests. If you only see flat or tubular epithelium without clear fibrovascular cores, treat the concept as absent.
 
-  - id: 3
+  - id: 4
+    name: "Foamy macrophages in papillary cores (pRCC)"
+    short_name: "foamy_macrophages"
+    group: "pRCC"
+    primary_class: "pRCC"
+    prompt: >
+      Identify clusters or sheets of foamy macrophages with finely vacuolated cytoplasm and small dense nuclei within
+      papillary fibrovascular cores or lumina. Do not call clear tumour cells, necrotic debris or artefactual vacuoles
+      foamy macrophages. If macrophages are sparse or ambiguous, err on absent/equivocal.
+
+  - id: 5
     name: "Perinuclear halos (chRCC)"
-    short_name: "perinuclear_halos_chrcc"
+    short_name: "perinuclear_halos"
     group: "chRCC"
     primary_class: "CHROMO"
     prompt: >
-      Identify tumour cells arranged in sheets or nests showing distinct perinuclear
-      clearing or halos within pale to eosinophilic cytoplasm, typical of chromophobe
-      renal cell carcinoma. Exclude artefactual vacuoles and mucin.
+      Identify solid sheets or nests of tumour cells with distinct perinuclear clearing or halos surrounding the nucleus
+      within pale to eosinophilic cytoplasm, typical of chromophobe RCC. Exclude random vacuoles, degenerative change
+      and mucin. If halos are not a consistent, repeated pattern, treat the concept as absent.
 
-  - id: 4
+  - id: 6
+    name: "Plant-cell-like borders (chRCC)"
+    short_name: "plant_cell_borders"
+    group: "chRCC"
+    primary_class: "CHROMO"
+    prompt: >
+      Identify tumour cells with thick, sharply delineated polygonal cell borders creating a plant-cell or mosaic
+      appearance in sheets of chromophobe RCC. Exclude indistinct thin borders of clear cell RCC or ordinary tubular
+      epithelium. If borders are not clearly thick and polygonal, treat the concept as absent.
+
+  - id: 7
     name: "Oncocytic cytoplasm (oncocytoma)"
-    short_name: "oncocytic_cytoplasm_onco"
+    short_name: "oncocytic_cytoplasm"
     group: "Oncocytoma"
     primary_class: "ONCO"
     prompt: >
-      Identify tumour cells with abundant, dense, finely granular, deeply eosinophilic
-      cytoplasm (oncocytes) and round centrally placed nuclei with smooth membranes,
-      typical of renal oncocytoma. Exclude chromophobe-like cells with obvious
-      perinuclear halos.
+      Identify tumour cells with abundant, dense, finely granular, deeply eosinophilic cytoplasm (oncocytes) and round,
+      centrally placed nuclei with smooth membranes, typical of renal oncocytoma. Exclude chromophobe-like cells with
+      obvious perinuclear halos. If the cytoplasm is not densely granular and eosinophilic, treat the concept as absent.
+
+  - id: 8
+    name: "Archipelagenous architecture in oedematous stroma (oncocytoma)"
+    short_name: "archipelagenous_architecture"
+    group: "Oncocytoma"
+    primary_class: "ONCO"
+    prompt: >
+      Identify round or oval nests and islands of oncocytic tumour cells scattered in loose, oedematous or myxoid stroma,
+      producing an archipelagenous or archipelago-like pattern. Exclude true papillary projections and densely packed solid
+      sheets without intervening stroma. If the islands in loose stroma are not clear, treat the concept as absent.
+
+  - id: 9
+    name: "Coagulative tumour necrosis"
+    short_name: "coagulative_necrosis"
+    group: "Necrosis"
+    primary_class: null
+    prompt: >
+      Identify areas of coagulative tumour necrosis characterised by ghost outlines of tumour cells with loss of nuclei,
+      increased eosinophilia and granular debris, usually sharply demarcated from viable tumour. Exclude simple haemorrhage,
+      cyst contents, autolysis and cautery artefact. If the changes are subtle or purely haemorrhagic, treat the concept as absent.
+
+  - id: 10
+    name: "Sarcomatoid / rhabdoid dedifferentiation"
+    short_name: "sarcomatoid_rhabdoid_dedifferentiation"
+    group: "Dedifferentiation"
+    primary_class: null
+    prompt: >
+      Identify high-grade dedifferentiation within renal cell carcinoma composed of malignant spindle cells in fascicles
+      (sarcomatoid) and/or rhabdoid cells with eccentric nuclei, prominent nucleoli and dense eosinophilic cytoplasmic
+      inclusions. Exclude benign stromal spindle cells and inflammatory infiltrates. If definite sarcomatoid or rhabdoid
+      morphology is not obvious, treat the concept as absent.
+>>
+
+concept/ontology/ontology_rcc_v2.yaml codice <<
+version: 2
+name: "rcc_histology_18_concepts_v2"
+
+concepts:
+  - id: 1
+    name: "Clear cytoplasm (ccRCC)"
+    short_name: "clear_cytoplasm"
+    group: "ccRCC"
+    primary_class: "ccRCC"
+    prompt: "Identify viable renal tumour cells with abundant optically clear or glassy cytoplasm and sharp cell borders, usually forming nests or alveoli. Exclude adipocytes and stromal fat, artefactual perinuclear clearing, and foamy macrophages."
+
+  - id: 2
+    name: "Delicate branching capillary network (ccRCC)"
+    short_name: "delicate_capillary_network"
+    group: "ccRCC"
+    primary_class: "ccRCC"
+    prompt: "Identify a delicate, thin-walled branching capillary network intimately investing nests or alveoli of tumour cells, creating a fine chicken-wire vascular pattern typical of clear cell RCC. Exclude thick fibrous septa, large muscular vessels, and non-tumour parenchymal vessels."
+
+  - id: 3
+    name: "Alveolar/nested architecture (ccRCC)"
+    short_name: "alveolar_nested_architecture"
+    group: "ccRCC"
+    primary_class: "ccRCC"
+    prompt: "Identify alveolar, acinar, or nested arrangements of tumour cells separated by delicate vasculature or thin fibrous septa, with open lumina or sinusoid-like spaces between nests. Exclude papillary fronds with fibrovascular cores and flat tubules."
+
+  - id: 4
+    name: "Cytoplasmic vacuolization (ccRCC)"
+    short_name: "cytoplasmic_vacuolization"
+    group: "ccRCC"
+    primary_class: "ccRCC"
+    prompt: "Identify viable tumour cells with multiple, sharply defined intracytoplasmic vacuoles within clear or eosinophilic cytoplasm, giving a bubbly appearance in the setting of clear cell RCC. Exclude foamy macrophages, mucin pools, and obvious fixation artefacts."
+
+  - id: 5
+    name: "Papillary fronds with fibrovascular cores (pRCC)"
+    short_name: "papillary_fronds"
+    group: "pRCC"
+    primary_class: "pRCC"
+    prompt: "Identify true papillary fronds: finger-like projections into spaces with central fibrovascular cores containing loose stroma and vessels, lined by one or more layers of tumour cells. Exclude folded flat epithelium, simple tubules, and solid nests."
+
+  - id: 6
+    name: "Foamy macrophages in papillary cores (pRCC)"
+    short_name: "foamy_macrophages"
+    group: "pRCC"
+    primary_class: "pRCC"
+    prompt: "Identify clusters or sheets of foamy macrophages with finely vacuolated cytoplasm and small dense nuclei located within papillary fibrovascular cores or lumina. Do not misinterpret clear tumour cells, necrotic debris, or artefactual vacuolation as foamy macrophages."
+
+  - id: 7
+    name: "Psammoma bodies (pRCC)"
+    short_name: "psammoma_bodies"
+    group: "pRCC"
+    primary_class: "pRCC"
+    prompt: "Identify round, concentrically laminated basophilic calcifications (psammoma bodies) within papillary cores or tumour stroma. Exclude coarse dystrophic calcification, bone formation, and foreign material."
+
+  - id: 8
+    name: "Hobnail nuclei / pseudostratification (pRCC)"
+    short_name: "hobnail_nuclei"
+    group: "pRCC"
+    primary_class: "pRCC"
+    prompt: "Identify hobnail tumour cells with apically protruding, hyperchromatic nuclei bulging into lumina, or crowded pseudostratified nuclei along papillary surfaces, often with nuclear atypia. Exclude evenly spaced single-layer cuboidal epithelium and benign reactive changes."
+
+  - id: 9
+    name: "Perinuclear halos (chRCC)"
+    short_name: "perinuclear_halos"
+    group: "chRCC"
+    primary_class: "CHROMO"
+    prompt: "Identify solid sheets or nests of tumour cells showing distinct perinuclear clearing or halos surrounding the nucleus within pale to eosinophilic cytoplasm, in keeping with chromophobe RCC. Exclude artefactual vacuoles, degenerative ballooning, and mucin."
+
+  - id: 10
+    name: "Raisinoid nuclei (chRCC)"
+    short_name: "raisinoid_nuclei"
+    group: "chRCC"
+    primary_class: "CHROMO"
+    prompt: "Identify tumour cells with irregular, wrinkled (raisinoid) nuclear membranes, hyperchromasia, and irregular nuclear contours typical of chromophobe RCC. Exclude smooth, round nuclei of oncocytoma and low-grade clear cell RCC."
+
+  - id: 11
+    name: "Plant-cell-like borders (chRCC)"
+    short_name: "plant_cell_borders"
+    group: "chRCC"
+    primary_class: "CHROMO"
+    prompt: "Identify tumour cells with thick, sharply delineated polygonal cell borders that create a plant-cell or mosaic appearance in sheets of chromophobe RCC. Exclude indistinct or very thin borders of clear cell RCC or ordinary tubular epithelium."
+
+  - id: 12
+    name: "Pale-to-eosinophilic granular cytoplasm (chRCC)"
+    short_name: "pale_eosinophilic_cytoplasm"
+    group: "chRCC"
+    primary_class: "CHROMO"
+    prompt: "Identify cytoplasm that is pale to lightly eosinophilic, finely granular or reticulated in chromophobe RCC cells, often combined with perinuclear halos and plant-cell-like borders. Exclude the uniformly dense, deeply eosinophilic granular cytoplasm of oncocytic tumours."
+
+  - id: 13
+    name: "Oncocytic cytoplasm (oncocytoma)"
+    short_name: "oncocytic_cytoplasm"
+    group: "Oncocytoma"
+    primary_class: "ONCO"
+    prompt: "Identify tumour cells with abundant, dense, finely granular, deeply eosinophilic cytoplasm (oncocytes) and round, centrally placed nuclei with smooth membranes, typically in renal oncocytoma. Exclude chromophobe-like cells with prominent perinuclear halos or reticulated cytoplasm."
+
+  - id: 14
+    name: "Archipelagenous architecture in oedematous stroma (oncocytoma)"
+    short_name: "archipelagenous_architecture"
+    group: "Oncocytoma"
+    primary_class: "ONCO"
+    prompt: "Identify round or oval nests and islands of oncocytic tumour cells scattered in loose, oedematous or myxoid stroma, producing an archipelagenous or archipelago-like pattern. Exclude true papillary projections and densely packed solid sheets without intervening stroma."
+
+  - id: 15
+    name: "Central fibrous scar / stellate fibrosis (oncocytoma)"
+    short_name: "central_fibrous_scar"
+    group: "Oncocytoma"
+    primary_class: "ONCO"
+    prompt: "Identify dense, hyalinised, stellate fibrous tissue within or near the centre of an oncocytic tumour, often with radiating fibrous bands and thick-walled vessels. Exclude peripheral fibrous capsule, nonspecific peritumoural fibrosis, and scar outside the tumour."
+
+  - id: 16
+    name: "ISUP nucleolar grade"
+    short_name: "isup_nucleolar_grade"
+    group: "Grading"
+    primary_class: null
+    prompt: "Assess nucleolar prominence in viable tumour cells according to ISUP criteria: grade 1 with inconspicuous or small nucleoli at high power, grade 2 with clearly visible nucleoli at 400x but not at 100x, grade 3 with prominent nucleoli visible at 100x, and grade 4 in the presence of extreme nuclear pleomorphism, tumour giant cells, sarcomatoid or rhabdoid morphology. Ignore crushed areas, necrosis, and non-tumour tissue."
+
+  - id: 17
+    name: "Coagulative tumour necrosis"
+    short_name: "coagulative_necrosis"
+    group: "Necrosis"
+    primary_class: null
+    prompt: "Identify areas of coagulative tumour necrosis characterised by ghost outlines of tumour cells with loss of nuclei, increased eosinophilia, and granular debris, usually sharply demarcated from viable tumour. Exclude simple haemorrhage, cyst contents, autolysis, and cautery artefact."
+
+  - id: 18
+    name: "Sarcomatoid / rhabdoid dedifferentiation"
+    short_name: "sarcomatoid_rhabdoid_dedifferentiation"
+    group: "Dedifferentiation"
+    primary_class: null
+    prompt: "Identify foci of high-grade dedifferentiation within renal cell carcinoma composed of malignant spindle cells in fascicles (sarcomatoid change) and/or rhabdoid cells with eccentric nuclei, prominent nucleoli, and dense eosinophilic cytoplasmic inclusions. Any definite sarcomatoid or rhabdoid component should be marked, and should not be confused with benign stromal spindle cells or inflammatory infiltrates."
 >>
 
 concept/ontology/vlm_client_hf.py codice <<
@@ -1174,10 +1341,13 @@ concept/ontology/vlm_client_hf.py codice <<
 """
 Client locale (no HTTP) per LLaVA-Med via Hugging Face.
 
-- Carica il modello da Hugging Face (es. Eren-Senoglu/llava-med-v1.5-mistral-7b-hf).
-- Usa AutoProcessor per gestire testo + immagine.
-- Espone ask_concept(image_path, concept_name, base_prompt) con stesso contratto di VLMClient HTTP:
-  ritorna dict {"concept", "present", "confidence", "rationale"} oppure None.
+Contratto:
+- dato (image_path, concept_name, base_prompt) costruisce un prompt completo
+  per il VLM (user_question) e ottiene una risposta testuale (assistant_answer).
+- Ritorna un dict con:
+    - concept
+    - user_question  (prompt completo, lato "utente" - esattamente cio che va al modello)
+    - assistant_answer (testo generato dal modello)
 """
 
 from __future__ import annotations
@@ -1189,13 +1359,11 @@ from typing import Any, Dict, Optional
 
 import torch
 from PIL import Image
-from transformers import AutoModelForVision2Seq, AutoProcessor
+from transformers import AutoModelForImageTextToText, AutoProcessor
 
 
 class VLMClientHF:
-    """
-    LLaVA-Med locale via Hugging Face (no controller/worker HTTP).
-    """
+    """LLaVA-Med locale via Hugging Face (no controller/worker HTTP)."""
 
     def __init__(
         self,
@@ -1211,9 +1379,9 @@ class VLMClientHF:
         self.device = device
 
         if dtype == "bfloat16":
-            torch_dtype = torch.bfloat16
+            model_dtype = torch.bfloat16
         else:
-            torch_dtype = torch.float16
+            model_dtype = torch.float16
 
         # debug esplicito > env > default False
         if debug is None:
@@ -1222,83 +1390,111 @@ class VLMClientHF:
             self.debug = bool(debug)
 
         if self.debug:
-            print(f"[VLM-HF DEBUG] Loading model '{self.model_name}' on {self.device} dtype={torch_dtype}")
+            print(
+                f"[VLM-HF DEBUG] Loading model '{self.model_name}' "
+                f"on {self.device} dtype={model_dtype}"
+            )
 
-        # AutoProcessor/AutoModel per LLaVA-HF (llava-med-v1.5-mistral-7b-hf)
-        self.processor = AutoProcessor.from_pretrained(self.model_name)
-        self.model = AutoModelForVision2Seq.from_pretrained(
-            self.model_name,
-            torch_dtype=torch_dtype,
-            device_map="auto" if self.device == "cuda" else None,
-        )
+        try:
+            self.processor = AutoProcessor.from_pretrained(
+                self.model_name,
+                use_fast=True,
+                trust_remote_code=True,
+            )
+        except ValueError as exc:
+            raise RuntimeError(
+                "AutoProcessor failed to load the HF checkpoint. "
+                "If the model type is not recognized (e.g., llava_mistral), "
+                "upgrade transformers or install with trust_remote_code support."
+            ) from exc
+
+        try:
+            self.model = AutoModelForImageTextToText.from_pretrained(
+                self.model_name,
+                dtype=model_dtype,
+                device_map="auto" if self.device == "cuda" else None,
+                trust_remote_code=True,
+            )
+        except ValueError as exc:
+            raise RuntimeError(
+                "AutoModelForImageTextToText failed to load the HF checkpoint. "
+                "If you see 'model type llava_mistral not recognized', upgrade transformers "
+                "or install from source, and ensure trust_remote_code is allowed."
+            ) from exc
         self.model.eval()
 
+        # Alcuni checkpoint HF (es. llava-med-v1.5-mistral-7b-hf) non popolano patch_size nel processor:
+        # serve per espandere il token <image> in processing_llava.py. Recuperalo dalla vision_config se manca.
+        if getattr(self.processor, "patch_size", None) is None:
+            vision_cfg = getattr(self.model.config, "vision_config", None)
+            patch_size = getattr(vision_cfg, "patch_size", None) if vision_cfg else None
+            patch_size = patch_size or getattr(
+                self.processor.image_processor, "patch_size", None
+            )
+            if patch_size is None:
+                patch_size = 14  # fallback ragionevole per ViT-L/14
+                if self.debug:
+                    print(
+                        "[VLM-HF DEBUG] patch_size non trovato nel processor; uso fallback 14"
+                    )
+            self.processor.patch_size = patch_size
+
     # ------------------------------------------------------------------
-    # Helpers
+    # Prompt helper
     # ------------------------------------------------------------------
-    @staticmethod
-    def _extract_json(text: str) -> Optional[Dict[str, Any]]:
-        """
-        Estrai un oggetto JSON da una stringa arbitraria (stessa logica del client HTTP).
-        """
-        text = text.strip()
-
-        # Tentativo diretto
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-
-        # Cerca blocco {...} più esterno
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            candidate = text[start : end + 1]
-            try:
-                return json.loads(candidate)
-            except json.JSONDecodeError:
-                pass
-
-        # Regex fallback
-        import re
-
-        json_pattern = r'\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]*\}'
-        matches = re.findall(json_pattern, text)
-        for match in reversed(matches):
-            try:
-                return json.loads(match)
-            except json.JSONDecodeError:
-                continue
-
-        return None
-
     def _build_prompt(self, concept_name: str, base_prompt: str) -> str:
         """
-        Prompt per LLaVA-HF:
-        - include un token <image> per la singola immagine
-        - stile USER/ASSISTANT
-        - risposta SOLO JSON.
+        Costruisce la user_question per classificare presenza/assenza del concetto.
+
+        Se il processor supporta una chat_template, la usiamo; altrimenti
+        cadiamo sul classico pattern <image> + USER/ASSISTANT.
         """
         system = (
-            "You are a board-certified renal pathologist. "
-            "Answer succinctly and return ONLY a JSON with fields: "
-            "concept, present (true/false), confidence (0..1), rationale (<=20 words)."
+            "You are a board-certified renal pathologist, acting as a classifier "
+            "for histologic concepts in renal tumor histology images. "
+            "Your task is to decide whether a specific histologic concept is present "
+            "or absent in a single image patch. "
+            "Respond with only one of the following options: 'Present', 'Absent', or 'Uncertain'."
         )
 
-        user = (
+        user_instruction = (
             f"{system}\n\n"
             "Analyse the attached histology patch.\n"
-            f"Concept: {concept_name}\n"
-            f"Question: {base_prompt}\n"
-            'Respond ONLY with a single JSON object with keys: '
-            '"concept" (string), "present" (true/false), '
-            '"confidence" (0..1 float), "rationale" (<=20 words). '
-            'Example: {"concept": "Clear cytoplasm (ccRCC)", "present": true, '
-            '"confidence": 0.73, "rationale": "Concise reason"}'
+            f"Target concept: {concept_name}\n"
+            f"Definition of the concept:\n{base_prompt}\n\n"
+            "Your task is to decide if this specific histologic concept is present "
+            "or absent in this image patch derived from renal tumor tissue.\n"
+            "Respond with only one of the following options: 'Present', 'Absent', or 'Uncertain'."
         )
 
-        # 1 immagine -> 1 token <image>
-        prompt = f"<image>\nUSER: {user}\nASSISTANT:"
+        # Se esiste una chat template, usiamola (nuove versioni HF + Eren-Senoglu lo espongono)
+        apply_chat_template = getattr(self.processor, "apply_chat_template", None)
+        if callable(apply_chat_template):
+            try:
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image"},
+                            {"type": "text", "text": user_instruction},
+                        ],
+                    }
+                ]
+                prompt = apply_chat_template(
+                    messages,
+                    add_generation_prompt=True,
+                )
+            except Exception as exc:
+                if self.debug:
+                    print(
+                        "[VLM-HF DEBUG] apply_chat_template failed, falling back to "
+                        f"manual prompt. Error: {exc}"
+                    )
+                prompt = f"<image>\nUSER: {user_instruction}\nASSISTANT:"
+        else:
+            # Fallback in stile LLaVA classico
+            prompt = f"<image>\nUSER: {user_instruction}\nASSISTANT:"
+
         return prompt
 
     # ------------------------------------------------------------------
@@ -1313,12 +1509,11 @@ class VLMClientHF:
         max_new_tokens: int = 128,
     ) -> Optional[Dict[str, Any]]:
         """
-        Esegue una singola query (immagine + concept + domanda) al modello HF locale.
-
-        Ritorna:
-            dict normalizzato {"concept", "present", "confidence", "rationale"}
-            oppure None se il testo non è parse-abile come JSON.
+        Esegue una singola query e ritorna:
+        - user_question: prompt completo passato al modello
+        - assistant_answer: testo grezzo generato dal modello
         """
+
         image_path = Path(image_path)
         if not image_path.is_file():
             if self.debug:
@@ -1326,22 +1521,31 @@ class VLMClientHF:
             return None
 
         image = Image.open(image_path).convert("RGB")
-        prompt_str = self._build_prompt(concept_name, base_prompt)
+        user_question = self._build_prompt(concept_name, base_prompt)
 
         if self.debug:
             print(
                 f"[VLM-HF DEBUG] >>> REQUEST\n"
                 f"image={image_path}\n"
                 f"concept={concept_name}\n"
-                f"prompt_preview={prompt_str[:200]}...\n"
+                f"prompt_preview={user_question[:200]}...\n"
                 f"{'-'*60}"
             )
 
         inputs = self.processor(
-            text=[prompt_str],
+            text=[user_question],
             images=[image],
             return_tensors="pt",
         )
+
+        if self.debug:
+            pix = inputs.get("pixel_values", None)
+            ids = inputs.get("input_ids", None)
+            print(
+                "[VLM-HF DEBUG] processor outputs: "
+                f"pixel_values_shape={None if pix is None else tuple(pix.shape)}, "
+                f"input_ids_shape={None if ids is None else tuple(ids.shape)}"
+            )
 
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
@@ -1349,7 +1553,6 @@ class VLMClientHF:
             generate_kwargs: Dict[str, Any] = {
                 "max_new_tokens": int(max_new_tokens),
             }
-            # Se temperature > 0, abilita sampling
             if temperature and temperature > 0:
                 generate_kwargs.update(
                     dict(
@@ -1361,342 +1564,28 @@ class VLMClientHF:
 
             output_ids = self.model.generate(**inputs, **generate_kwargs)
 
-        # Decodifica output (completo; l'estrattore JSON filtrerà eventuale rumore)
-        text = self.processor.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+        decoded = self.processor.batch_decode(
+            output_ids, skip_special_tokens=True
+        )
+        assistant_answer = decoded[0].strip() if decoded else "Error: no answer from VLM received"
 
         if self.debug:
             print(
-                f"[VLM-HF DEBUG] <<< RAW COMPLETION for concept={concept_name}, image={image_path}\n"
-                f"{text}\n{'='*80}"
-            )
-
-        raw = self._extract_json(text)
-        if raw is None or not isinstance(raw, dict):
-            if self.debug:
-                print("[VLM-HF DEBUG] No valid JSON object found in completion.")
-            return None
-
-        # Normalizza
-        present_val = raw.get("present", False)
-        if isinstance(present_val, str):
-            present = present_val.strip().lower() in (
-                "true",
-                "yes",
-                "y",
-                "present",
-                "1",
-            )
-        else:
-            present = bool(present_val)
-
-        try:
-            confidence = float(raw.get("confidence", 0.0))
-        except Exception:
-            confidence = 0.0
-        confidence = max(0.0, min(1.0, confidence))
-
-        result: Dict[str, Any] = {
-            "concept": raw.get("concept", concept_name),
-            "present": present,
-            "confidence": confidence,
-            "rationale": raw.get("rationale", ""),
-        }
-
-        if self.debug:
-            result["raw_text"] = text
-            result["raw_prompt"] = prompt_str
-            print(f"[VLM-HF DEBUG] >>> PARSED\n{json.dumps(result, indent=2)}\n{'#'*80}")
-
-        return result
->>
-
-concept/ontology/vlm_client.py codice <<
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Simple HTTP client for a vision-language model (e.g. LLaVA-Med).
-
-It expects the model to return a JSON string with:
-{"concept": "<name>", "present": true/false, "confidence": 0..1, "rationale": "<<=20 words>"}
-"""
-
-from __future__ import annotations
-
-import base64
-import json
-import os
-from io import BytesIO
-from pathlib import Path
-from typing import Any, Dict, Optional
-
-import requests
-from PIL import Image
-
-
-class VLMClient:
-    """Minimal client for a controller+worker style VLM server."""
-
-    def __init__(
-        self,
-        controller_url: str,
-        model_name: str,
-        timeout: int = 120,
-        debug: Optional[bool] = None,
-        stop_string: Optional[str] = None,
-    ) -> None:
-        self.controller_url = controller_url.rstrip("/")
-        self.model_name = model_name
-        self.timeout = timeout
-        # llava.serve.model_worker expects a non-None `stop` string; if None is
-        # passed, KeywordsStoppingCriteria tokenization raises and the worker
-        # returns error_code=1 (server_error_msg). Use a safe default separator.
-        self.stop_string = stop_string or "###"
-
-        # debug esplicito > env > default False
-        if debug is None:
-            self.debug = os.getenv("VLM_DEBUG", "0") == "1"
-        else:
-            self.debug = bool(debug)
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _encode_image(pil_img: Image.Image) -> str:
-        buf = BytesIO()
-        pil_img.save(buf, format="PNG")
-        buf.seek(0)
-        return base64.b64encode(buf.read()).decode("utf-8")
-
-    def _build_prompt(self, concept_name: str, base_prompt: str) -> str:
-        """
-        Costruisce il prompt testuale per LLaVA-Med.
-
-        PUNTO CHIAVE: inseriamo esplicitamente un token <image> in testa,
-        così len(images) == prompt.count("<image>") e il worker non alza
-        più `ValueError: Number of images does not match number of <image> tokens`.
-        """
-        system = (
-            "You are a board-certified renal pathologist. "
-            "Answer succinctly and return a JSON with fields: "
-            "concept, present (true/false), confidence (0..1), rationale (<=20 words)."
-        )
-
-        user = (
-            f"{system}\n\n"
-            "Analyse the attached histology patch.\n"
-            f"Concept: {concept_name}\n"
-            f"Question: {base_prompt}\n"
-            'Return ONLY a JSON object with keys: concept (string), present (true/false), '
-            'confidence (0..1 float), rationale (<=20 words). '
-            'Example: {"concept": "Clear cytoplasm (ccRCC)", "present": true, "confidence": 0.73, '
-            '"rationale": "Concise reason"}'
-        )
-
-        # Formato compatibile con llava.serve.model_worker:
-        # una immagine -> un solo token <image> nel prompt.
-        return f"<image>\n{user}"
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _extract_json(text: str) -> Optional[Dict[str, Any]]:
-        """
-        Extract and parse JSON from text, trying multiple strategies.
-        Returns the parsed dict or None if no valid JSON found.
-        """
-        text = text.strip()
-
-        # Strategy 1: Direct parse
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-
-        # Strategy 2: Find outermost {...}
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            candidate = text[start:end+1]
-            try:
-                return json.loads(candidate)
-            except json.JSONDecodeError:
-                pass
-
-        # Strategy 3: Use regex to find potential JSON objects
-        import re
-        json_pattern = r'\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]*\}'
-        matches = re.findall(json_pattern, text)
-        for match in reversed(matches):  # Try longest first
-            try:
-                return json.loads(match)
-            except json.JSONDecodeError:
-                continue
-
-        return None
-
-    # ------------------------------------------------------------------
-    # Main API
-    # ------------------------------------------------------------------
-    def ask_concept(
-        self,
-        image_path: str | Path,
-        concept_name: str,
-        base_prompt: str,
-        temperature: float = 0.2,
-        max_new_tokens: int = 128,
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Invia (image, concept, question) al VLM e ritorna un dict Python
-        già normalizzato, oppure None in caso di problemi "soft".
-
-        Se il worker risponde con error_code != 0, viene alzato RuntimeError
-        (gestito dal chiamante in build_concept_bank).
-        """
-        image_path = str(image_path)
-        with Image.open(image_path) as im:
-            im = im.convert("RGB")
-            img_b64 = self._encode_image(im)
-
-        prompt_str = self._build_prompt(concept_name, base_prompt)
-
-        payload = {
-            "model": self.model_name,
-            "prompt": prompt_str,
-            "images": [img_b64],
-            "temperature": float(temperature),
-            "max_new_tokens": int(max_new_tokens),
-            # llava.serve.model_worker vuole una stringa non-None
-            "stop": self.stop_string,
-        }
-
-        if self.debug:
-            print(
-                f"[VLM DEBUG] >>> REQUEST\n"
-                f"concept={concept_name}\n"
+                f"[VLM-HF DEBUG] <<< RAW COMPLETION for concept={concept_name}, "
                 f"image={image_path}\n"
-                f"payload_keys={list(payload.keys())}\n"
-                f"prompt_preview={prompt_str[:200]}...\n"
-                f"{'-'*60}"
+                f"{assistant_answer}\n{'='*80}"
             )
 
-        # Usa l'endpoint streaming, che ritorna chunk JSON con "text"
-        url = f"{self.controller_url}/worker_generate_stream"
-        try:
-            resp = requests.post(url, json=payload, stream=True, timeout=self.timeout)
-            resp.raise_for_status()
-
-            text = ""
-            for chunk in resp.iter_lines(delimiter=b"\0"):
-                if chunk:
-                    try:
-                        data = json.loads(chunk.decode())
-                        text = data.get("text", "")
-                    except json.JSONDecodeError:
-                        continue
-        except Exception as e:
-            if self.debug:
-                print(
-                    f"[VLM DEBUG] HTTP error for concept={concept_name}, "
-                    f"image={image_path}: {e}"
-                )
-            # Errore "hard" di rete -> nessuna risposta utile
-            return None
-
-        if self.debug:
-            print(
-                f"[VLM DEBUG] <<< RAW RESPONSE\n"
-                f"status={resp.status_code}\n"
-                f"response_type={type(data)}\n"
-                f"response_keys={list(data.keys()) if isinstance(data, dict) else 'N/A'}\n"
-                f"{'-'*60}"
-            )
-
-        # Gestione esplicita di error_code dal worker/controller
-        if isinstance(data, dict) and data.get("error_code", 0) != 0:
-            msg = data.get("text", "") or data.get("message", "")
-            if self.debug:
-                print(
-                    f"[VLM DEBUG] Worker returned error_code={data.get('error_code')}: {msg}"
-                )
-            raise RuntimeError(
-                f"VLM worker error (code={data.get('error_code')}): {msg}"
-            )
-
-        # Extract text from response
-        if not isinstance(data, dict) or "text" not in data:
-            if self.debug:
-                print(
-                    f"[VLM DEBUG] Invalid response format for concept={concept_name}, "
-                    f"image={image_path}: {data}"
-                )
-            return None
-
-        full = data["text"].strip()
-
-        if self.debug:
-            print(
-                f"[VLM DEBUG] <<< RAW COMPLETION for concept={concept_name}, "
-                f"image={image_path}\n{full}\n{'='*80}"
-            )
-
-        # Alcuni modelli possono aggiungere ```json ... ```: ripulisci
-        for token in ("```json", "```JSON", "```"):
-            if token in full:
-                full = full.replace(token, "")
-        full = full.strip()
-
-        # Usa il parser robusto invece di duplicare la logica
-        raw = self._extract_json(full)
-        if raw is None:
-            if self.debug:
-                print("[VLM DEBUG] No valid JSON object found in completion.")
-            return None
-
-        if not isinstance(raw, dict):
-            if self.debug:
-                print(f"[VLM DEBUG] Parsed JSON is not a dict: {raw}")
-            return None
-
-        # Normalizza tipi e range così build_concept_bank può fidarsi
-        present_val = raw.get("present", False)
-        if isinstance(present_val, str):
-            present = present_val.strip().lower() in (
-                "true",
-                "yes",
-                "y",
-                "present",
-                "1",
-            )
-        else:
-            present = bool(present_val)
-
-        try:
-            confidence = float(raw.get("confidence", 0.0))
-        except Exception:
-            confidence = 0.0
-        confidence = max(0.0, min(1.0, confidence))
-
-        result: Dict[str, Any] = {
-            "concept": raw.get("concept", concept_name),
-            "present": present,
-            "confidence": confidence,
-            "rationale": raw.get("rationale", ""),
+        return {
+            "concept": concept_name,
+            "user_question": user_question,
+            "assistant_answer": assistant_answer,
         }
 
-        # In debug aggiungi anche il testo grezzo e il prompt originali
-        if self.debug:
-            result["raw_text"] = full
-            result["raw_prompt"] = prompt_str
 
-            print(
-                f"[VLM DEBUG] >>> PARSED\n"
-                f"{json.dumps(result, indent=2)}\n"
-                f"{'#'*80}"
-            )
-
-        return result
+if __name__ == "__main__":
+    # debug rapido
+    print(json.dumps({"status": "ok"}))
 >>
 
 concept/xai_concept.py codice <<
@@ -1723,6 +1612,7 @@ import argparse
 import csv
 import json
 import logging
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -1999,6 +1889,9 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     topk_per_patch = int(cfg["concepts"]["topk_per_patch"])
 
+    # per summary finale
+    reason_counts: Counter[str] = Counter()
+
     # Iterate over targets in a deterministic order
     produced = 0
     for global_idx, key in enumerate(sorted(target_set)):
@@ -2038,6 +1931,8 @@ def main(argv: Optional[List[str]] = None) -> None:
 
         sel_reason_list = sel_reasons.get(key, [])
         sel_reason_str = "|".join(sel_reason_list) if sel_reason_list else ""
+        for r in sel_reason_list:
+            reason_counts[r] += 1
 
         # Output dir
         out_dir = out_root / f"idx_{global_idx:07d}"
@@ -2117,6 +2012,19 @@ def main(argv: Optional[List[str]] = None) -> None:
         f"in {total_elapsed/60:.1f} min."
     )
 
+    # ----------------- VALIDAZIONE / SEGNALAZIONI -----------------
+    if produced == 0:
+        log.warning(
+            "[Concept XAI] No concept scores produced (produced=0). "
+            "Controlla concept bank / selection."
+        )
+    else:
+        log.info(f"[Concept XAI] Concepts with centroids: {len(centroids)}")
+        if reason_counts:
+            log.info("[Concept XAI] Selection reasons distribution:")
+            for r, cnt in reason_counts.items():
+                log.info(f"  - {r}: {cnt} patches")
+
 
 if __name__ == "__main__":
     main()
@@ -2167,34 +2075,14 @@ run_all_explainability.sbatch codice <<
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=24:00:00
+#SBATCH --exclude=compute-5-14,compute-5-11,compute-3-12
 
-# This job wraps the *existing* run_full_xai.sh orchestrator and runs it inside an allocation.
+# This job wraps the run_full_xai.sh orchestrator and runs it inside an allocation.
 
 set -euo pipefail
 
-# --------- user-configurable defaults (can be overridden via sbatch --export=ALL,VAR=...) ----------
-# N.B.: questi valori sono solo fallback; i reali possono essere esportati prima di chiamare sbatch.
-
-EXP_ROOT="${EXP_ROOT:-/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/exp_20251123_220420_moco_v3}"
-MODEL_NAME="${MODEL_NAME:-moco_v3_ssl_linear_best}"
-BACKBONE_NAME="${BACKBONE_NAME:-vit_small_patch16_224}"
-
-ONLY_SPATIAL="${ONLY_SPATIAL:-0}"      # 1 to enable (non ancora usato in run_full_xai.sh)
-ONLY_CONCEPT="${ONLY_CONCEPT:-0}"      # 1 to enable (non ancora usato in run_full_xai.sh)
-
-WITH_VLM_AGG="${WITH_VLM_AGG:-0}"      # legacy; non usato dall’orchestratore attuale
-MIN_VLM_CONF="${MIN_VLM_CONF:-0.7}"
-
-# venv per rcc-ssrl (train + explainability)
-VENV_PATH="${VENV_PATH:-}"
-
 echo "[INFO] Host: $(hostname)"
-echo "[INFO] EXP_ROOT=${EXP_ROOT}"
-echo "[INFO] MODEL_NAME=${MODEL_NAME}"
-echo "[INFO] BACKBONE_NAME=${BACKBONE_NAME}"
-echo "[INFO] ONLY_SPATIAL=${ONLY_SPATIAL} ONLY_CONCEPT=${ONLY_CONCEPT}"
-echo "[INFO] WITH_VLM_AGG=${WITH_VLM_AGG} MIN_VLM_CONF=${MIN_VLM_CONF}"
-echo "[INFO] VENV_PATH=${VENV_PATH}"
+echo "[INFO] xai_all wrapper: delegating configuration to run_full_xai.sh"
 
 # Orchestrator reale (esiste già)
 SCRIPT="/home/mla_group_01/rcc-ssrl/src/explainability/run_full_xai.sh"
@@ -2211,6 +2099,8 @@ SRUN_ARGS=( srun --ntasks=1 )
 
 echo "[INFO] Command: ${SRUN_ARGS[*]} $SCRIPT"
 "${SRUN_ARGS[@]}" "$SCRIPT"
+
+echo "[OK] xai_all job completed (run_full_xai.sh exited with code $?)"
 >>
 
 run_explainability.py codice <<
@@ -2219,15 +2109,25 @@ run_explainability.py codice <<
 """
 Main orchestrator to run spatial and concept explainability.
 
-Itera sulle ablation di un esperimento e per ognuna:
-- costruisce config_xai.yaml (spatial) e config_concept.yaml (concept)
-- lancia gli sbatch relativi.
+- EXP_ROOT: path a una cartella esperimento tipo:
+    .../outputs/mlruns/exp_20251109_181551_ibot-v1
 
-Comportamento:
-- Se per una certa ablation NON esiste la cartella di eval per il modello
-  (eval/<model_name>/...), quella ablation viene SKIPPATA con un warning.
-- Se esiste ma non contiene nessun run (sottocartella timestamp), viene skippata.
-- Se mancano i checkpoint SSL backbone/head, l'ablation viene skippata.
+- All'interno, ablation folder tipo:
+    exp_ibot_abl01, exp_ibot_abl02, ...
+
+- MODEL_NAME (argomento --model-name):
+    base SSL backbone name, es. "moco_v3", "dino_v3", "ibot", "i_jepa"
+
+- Da MODEL_NAME deriviamo:
+    HEAD_MODEL_NAME = MODEL_NAME + "_ssl_linear_best"
+
+  che viene usato per:
+    - cartella eval:
+        {ablation}/eval/{HEAD_MODEL_NAME}/{timestamp}/
+    - nome del modello nei config XAI:
+        cfg["model"]["name"] = HEAD_MODEL_NAME
+    - cartella XAI:
+        {ablation}/xai/{HEAD_MODEL_NAME}/{timestamp}/
 """
 
 from __future__ import annotations
@@ -2239,7 +2139,6 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
-import os
 
 import yaml
 
@@ -2254,18 +2153,24 @@ def run_sbatch(batch_file: Path, config_path: Path, log_dir: str) -> None:
         f"[SBATCH] submitting {batch_file} "
         f"with CONFIG_PATH={config_path}, LOG_DIR={log_dir}"
     )
-    subprocess.run(["sbatch", str(batch_file)], check=True)
+    res = subprocess.run(
+        ["sbatch", str(batch_file)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    job_line = (res.stdout or "").strip()
+    if job_line:
+        log.info(f"[SBATCH] submission output: {job_line}")
 
 
-def _derive_backbone_basename(model_name: str) -> str:
-    suffix = "_ssl_linear_best"
-    if model_name.endswith(suffix):
-        return model_name[: -len(suffix)]
-    return model_name
-
-
-def _find_latest_eval_run(ablation_dir: Path, model_name: str) -> Optional[Path]:
-    base = ablation_dir / "eval" / model_name
+def _find_latest_eval_run(ablation_dir: Path, eval_model_name: str) -> Optional[Path]:
+    """
+    Cerca l'ultimo run di eval sotto:
+      {ablation}/eval/{eval_model_name}/{timestamp}/
+    es: eval/ibot_ssl_linear_best/20251113_113536
+    """
+    base = ablation_dir / "eval" / eval_model_name
     if not base.is_dir():
         log.warning(f"[SKIP] Eval directory not found for {ablation_dir.name}: {base}")
         return None
@@ -2294,13 +2199,13 @@ def main(argv: List[str] | None = None) -> None:
         "--experiment-root",
         required=True,
         type=Path,
-        help="Path to root dir with ablations folders",
+        help="Path to root dir with ablations folders (exp_*).",
     )
     parser.add_argument(
         "--model-name",
         required=True,
         type=str,
-        help="Folder/model name for XAI outputs (es. moco_v3_ssl_linear_best)",
+        help="Base SSL backbone name (es. moco_v3, dino_v3, ibot, i_jepa).",
     )
     parser.add_argument(
         "--spatial-config-template",
@@ -2316,7 +2221,9 @@ def main(argv: List[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
+    )
 
     if not args.experiment_root.is_dir():
         raise FileNotFoundError(f"Experiment root not found: {args.experiment_root}")
@@ -2333,25 +2240,33 @@ def main(argv: List[str] | None = None) -> None:
         log.error(f"No ablation folders found under {args.experiment_root}")
         return
 
-    backbone_base = _derive_backbone_basename(args.model_name)
-    log.info(f"[INFO] MODEL_NAME={args.model_name}  BACKBONE_BASE={backbone_base}")
+    base_model_name = args.model_name
+    head_model_name = f"{base_model_name}_ssl_linear_best"
+
+    log.info(
+        f"[INFO] BASE_MODEL_NAME={base_model_name}  HEAD_MODEL_NAME={head_model_name}"
+    )
     log.info(f"[INFO] Found {len(ablation_folders)} ablations.")
 
-    # i template vengono letti ogni volta; per ora va bene così
+    # Root log dir: <repo>/src/logs/xai/{MODEL_NAME}/...
+    log_root = Path(__file__).resolve().parents[1] / "logs" / "xai"
 
     for ablation in ablation_folders:
         log.info("=" * 80)
         log.info(f"[ABLATION] Processing: {ablation}")
 
-        eval_run = _find_latest_eval_run(ablation, args.model_name)
+        eval_run = _find_latest_eval_run(ablation, head_model_name)
         if eval_run is None:
             log.warning(f"[ABLATION] Skipping {ablation.name}: no eval run available.")
             continue
 
-        backbone_ckpt = ablation / "checkpoints" / f"{backbone_base}__ssl_best.pt"
-        head_ckpt = ablation / "checkpoints" / f"{backbone_base}__ssl_linear_best.pt"
+        # checkpoint names: {MODEL_NAME}__ssl_best.pt, {MODEL_NAME}__ssl_linear_best.pt
+        backbone_ckpt = ablation / "checkpoints" / f"{base_model_name}__ssl_best.pt"
+        head_ckpt = ablation / "checkpoints" / f"{base_model_name}__ssl_linear_best.pt"
 
-        has_backbone = _check_checkpoint(backbone_ckpt, "ssl_backbone_ckpt", ablation.name)
+        has_backbone = _check_checkpoint(
+            backbone_ckpt, "ssl_backbone_ckpt", ablation.name
+        )
         has_head = _check_checkpoint(head_ckpt, "ssl_head_ckpt", ablation.name)
 
         if not (has_backbone and has_head):
@@ -2362,13 +2277,14 @@ def main(argv: List[str] | None = None) -> None:
 
         # ---------------------- SPATIAL CONFIG ----------------------
         spatial_config = yaml.safe_load(open(args.spatial_config_template))
-        spatial_config["experiment"]["outputs_root"] = str(ablation / "06_xai")
-        spatial_config["model"]["name"] = args.model_name
+        # outputs_root: {ablation}/xai  (NON più 06_xai/)
+        spatial_config["experiment"]["outputs_root"] = str(ablation / "xai")
+        spatial_config["model"]["name"] = head_model_name
         spatial_config["model"]["ssl_backbone_ckpt"] = str(backbone_ckpt)
         spatial_config["model"]["ssl_head_ckpt"] = str(head_ckpt)
         spatial_config["evaluation_inputs"]["eval_run_dir"] = str(eval_run)
 
-        spatial_config_path = ablation / "06_xai" / "config_xai.yaml"
+        spatial_config_path = ablation / "xai" / "config_xai.yaml"
         spatial_config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(spatial_config_path, "w") as f:
             yaml.dump(spatial_config, f)
@@ -2376,14 +2292,13 @@ def main(argv: List[str] | None = None) -> None:
 
         # ---------------------- CONCEPT CONFIG ----------------------
         concept_config = yaml.safe_load(open(args.concept_config_template))
-        concept_config["experiment"]["outputs_root"] = str(ablation / "06_xai")
-        concept_config["model"]["name"] = args.model_name
+        concept_config["experiment"]["outputs_root"] = str(ablation / "xai")
+        concept_config["model"]["name"] = head_model_name
         concept_config["model"]["ssl_backbone_ckpt"] = str(backbone_ckpt)
         concept_config["model"]["ssl_head_ckpt"] = str(head_ckpt)
         concept_config["evaluation_inputs"]["eval_run_dir"] = str(eval_run)
 
-        # se CONCEPT_BANK_CSV è definita nell'env (es. da run_full_xai.sh),
-        # forza l'uso di quel path per il concept bank
+        # Override del concept bank via env CONCEPT_BANK_CSV se presente
         concept_bank_csv_env = os.environ.get("CONCEPT_BANK_CSV")
         if concept_bank_csv_env:
             concept_config.setdefault("concepts", {})
@@ -2392,14 +2307,18 @@ def main(argv: List[str] | None = None) -> None:
                 f"[CFG] Overriding concepts.meta_csv with CONCEPT_BANK_CSV={concept_bank_csv_env}"
             )
 
-        concept_config_path = ablation / "06_xai" / "config_concept.yaml"
+        concept_config_path = ablation / "xai" / "config_concept.yaml"
         with open(concept_config_path, "w") as f:
             yaml.dump(concept_config, f)
         log.info(f"[CFG] Concept config written to {concept_config_path}")
 
+        # Log dir per questa ablation:
         datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_dir = f"/home/mla_group_01/rcc-ssrl/src/logs/xai/{backbone_base}/{ablation.name}/{datetime_str}"
-        spatial_sbatch = Path(__file__).parent / "spatial" / "xai_generate.sbatch"
+        log_dir = str(log_root / base_model_name / ablation.name / datetime_str)
+
+        spatial_sbatch = (
+            Path(__file__).parent / "spatial" / "xai_generate.sbatch"
+        )
         concept_sbatch = Path(__file__).parent / "concept" / "xai_concept.sbatch"
 
         log.info(f"[LAUNCH] Spatial XAI sbatch for {ablation.name}")
@@ -2409,7 +2328,7 @@ def main(argv: List[str] | None = None) -> None:
         run_sbatch(concept_sbatch, concept_config_path, log_dir)
 
     log.info("[DONE] run_explainability completed.")
-    log.info("       Check Slurm logs under /home/mla_group_01/rcc-ssrl/src/logs/xai/...")
+    log.info("       Check Slurm logs under logs/xai/{MODEL_NAME}/...")
 
 
 if __name__ == "__main__":
@@ -2421,177 +2340,66 @@ run_full_xai.sh codice <<
 # Orchestrate full explainability pipeline:
 # - Stage 0: global concept bank (dataset-level, only if missing)
 # - Stage 1/2: spatial + concept XAI for all ablations in an experiment
-
-# NOTE:
-#  - opzionalmente può lanciare un server LLaVA-Med locale (controller + worker)
-#    per la Stage 0b (build_concept_bank).
-#  - abilita questo comportamento esportando:
-#        START_LOCAL_VLM=1
-#        VLM_MODEL_PATH=/path/or/hf/id/of/microsoft/llava-med-v1.5-mistral-7b  # opzionale
-#  - va eseguito su un nodo con GPU (srun/sbatch), NON sul login node.
+#
+# VLM: ONLY local HF model via VLMClientHF (no HTTP server).
 
 set -euo pipefail
 
-# ------------------- defaults (override via env or args if vuoi, ma qui li teniamo fissi) -------------------
-
+# -----------------------------------------------------------------------------
+# GLOBAL CONFIG (single source of truth for explainability)
+# -----------------------------------------------------------------------------
 REPO_ROOT="/home/mla_group_01/rcc-ssrl"
 SRC_DIR="${REPO_ROOT}/src"
-LOG_DIR="${SRC_DIR}/logs/xai"
-mkdir -p "${LOG_DIR}"
-LOG_SUFFIX="${SLURM_JOB_ID:-local_$$}"
-LLAVA_CTRL_LOG="${LLAVA_CTRL_LOG:-${LOG_DIR}/llava_controller.${LOG_SUFFIX}.log}"
-LLAVA_WORKER_LOG="${LLAVA_WORKER_LOG:-${LOG_DIR}/llava_worker.${LOG_SUFFIX}.log}"
-# Worker port overrideable to avoid collisions
-VLM_WORKER_PORT="${VLM_WORKER_PORT:-40000}"
+# --- Experiment-level config (EDIT HERE) ---
+EXP_ROOT="/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/exp_20251123_220420_moco_v3"
+MODEL_NAME="moco_v3"                    # base SSL backbone name (non *_ssl_linear_best)
+BACKBONE_NAME="vit_small_patch16_224"
 
-# Dataset-level (Stage 0)
+# Python environment (usato per Stage 0 + Stage 1/2)
+VENV_PATH="/home/mla_group_01/rcc-ssrl/.venvs/xai"
+
+# Dataset-level config (concept bank)
 TRAIN_WDS_DIR="/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final/train"
+TRAIN_WDS_PATTERN="shard-*.tar"
 CANDIDATES_CSV="${SRC_DIR}/explainability/concept/ontology/concept_candidates_rcc.csv"
 CANDIDATES_IMG_ROOT="${SRC_DIR}/explainability/concept/ontology/concept_candidates_images"
 
-# default: file di debug a 4 concetti
-ONTOLOGY_YAML_DEFAULT="${SRC_DIR}/explainability/concept/ontology/ontology_rcc_debug.yaml"
-ONTOLOGY_YAML="${ONTOLOGY_YAML:-$ONTOLOGY_YAML_DEFAULT}"
+# Ontologia + concept bank usati per Stage 0 e Stage 2 
+VERS="debug"  # ontology + concept bank version (EDIT HERE)
+ONTOLOGY_YAML="${SRC_DIR}/explainability/concept/ontology/ontology_rcc_${VERS}.yaml"
+CONCEPT_BANK_CSV="${SRC_DIR}/explainability/concept/ontology/concepts_rcc_${VERS}.csv"
 
-CONCEPT_BANK_CSV_DEFAULT="${SRC_DIR}/explainability/concept/ontology/concepts_rcc_debug.csv"
-CONCEPT_BANK_CSV="${CONCEPT_BANK_CSV:-$CONCEPT_BANK_CSV_DEFAULT}"
+# VLM (LLaVA-Med) – HF ONLY
+VLM_MODEL_PATH="Eren-Senoglu/llava-med-v1.5-mistral-7b-hf"
 
-# Experiment-level (Stage 1/2)
-EXP_ROOT_DEFAULT="/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/exp_20251123_220420_moco_v3"
-MODEL_NAME_DEFAULT="moco_v3_ssl_linear_best"
-BACKBONE_NAME_DEFAULT="vit_small_patch16_224"
-
-# VLM config for concept bank
-VLM_CONTROLLER_DEFAULT="http://localhost:10000"
-VLM_MODEL_DEFAULT="Eren-Senoglu/llava-med-v1.5-mistral-7b-hf"  # HF-converted weights for local HF backend
-PRESENCE_THRESHOLD_DEFAULT="0.3"
-
-# Se START_LOCAL_VLM=1, run_full_xai lancerà un server LLaVA-Med locale
-# (controller + model_worker) prima di build_concept_bank e lo killerà alla fine.
-START_LOCAL_VLM="${START_LOCAL_VLM:-0}"
-
-# Path o HF id del modello LLaVA-Med
-VLM_MODEL_PATH_DEFAULT="microsoft/llava-med-v1.5-mistral-7b"
-VLM_MODEL_PATH="${VLM_MODEL_PATH:-$VLM_MODEL_PATH_DEFAULT}"
-VLM_WARMUP_SECONDS="${VLM_WARMUP_SECONDS:-120}"
-
-# Path al repo e al python di LLaVA-Med (override via env se necessario)
-LLAVA_REPO_ROOT_DEFAULT="/home/mla_group_01/LLaVA-Med"
-LLAVA_REPO_ROOT="${LLAVA_REPO_ROOT:-$LLAVA_REPO_ROOT_DEFAULT}"
-
-LLAVA_PYTHON_BIN_DEFAULT="/home/mla_group_01/llava-med-venv/bin/python"
-LLAVA_PYTHON_BIN="${LLAVA_PYTHON_BIN:-$LLAVA_PYTHON_BIN_DEFAULT}"
-
-# ------------------- helper: LLaVA-Med server locale -------------------
-start_local_vlm() {
-  if [[ "${START_LOCAL_VLM}" != "1" ]]; then
-    return 0
-  fi
-
-  echo "[INFO] Starting local LLaVA-Med controller on ${VLM_CONTROLLER}"
-  echo "[INFO]   LLAVA_REPO_ROOT=${LLAVA_REPO_ROOT}"
-  echo "[INFO]   LLAVA_PYTHON_BIN=${LLAVA_PYTHON_BIN}"
-
-  # Parse controller host/port from VLM_CONTROLLER (e.g., http://localhost:11000)
-  CTRL_HOST=$(echo "${VLM_CONTROLLER}" | sed -E 's#https?://([^:/]+).*#\1#')
-  CTRL_PORT=$(echo "${VLM_CONTROLLER}" | awk -F: '{print $NF}')
-  # Fallback if parsing fails
-  if [[ -z "${CTRL_HOST}" || "${CTRL_HOST}" == "${VLM_CONTROLLER}" ]]; then
-    CTRL_HOST="0.0.0.0"
-  fi
-  if ! [[ "${CTRL_PORT}" =~ ^[0-9]+$ ]]; then
-    CTRL_PORT="10000"
-  fi
-
-  if [[ ! -x "${LLAVA_PYTHON_BIN}" ]]; then
-    echo "[ERROR] LLAVA_PYTHON_BIN='${LLAVA_PYTHON_BIN}' non eseguibile; controlla il venv LLaVA-Med." >&2
-    return 1
-  fi
-
-  if [[ ! -d "${LLAVA_REPO_ROOT}" ]]; then
-    echo "[ERROR] LLAVA_REPO_ROOT='${LLAVA_REPO_ROOT}' non esiste; clona il repo LLaVA-Med lì o override via env." >&2
-    return 1
-  fi
-
-  pushd "${LLAVA_REPO_ROOT}" >/dev/null
-
-  echo "[INFO] Controller log: ${LLAVA_CTRL_LOG}"
-  echo "[INFO] Worker log: ${LLAVA_WORKER_LOG}"
-
-  VLM_DEBUG="${VLM_DEBUG:-1}" \
-  "${LLAVA_PYTHON_BIN}" -m llava.serve.controller \
-    --host "0.0.0.0" \
-    --port "${CTRL_PORT}" \
-    > "${LLAVA_CTRL_LOG}" 2>&1 &
-  VLM_CTRL_PID=$!
-  sleep 5
-
-  VLM_DEBUG="${VLM_DEBUG:-1}" \
-  "${LLAVA_PYTHON_BIN}" -m llava.serve.model_worker \
-    --host "0.0.0.0" \
-    --controller "${VLM_CONTROLLER}" \
-    --port "${VLM_WORKER_PORT}" \
-    --worker "http://127.0.0.1:${VLM_WORKER_PORT}" \
-    --model-path "${VLM_MODEL_PATH}" \
-    --multi-modal \
-    > "${LLAVA_WORKER_LOG}" 2>&1 &
-  VLM_WORKER_PID=$!
-
-  popd >/dev/null
-
-  echo "[INFO] Waiting ${VLM_WARMUP_SECONDS}s for VLM to load weights..."
-  sleep "${VLM_WARMUP_SECONDS}"
-
-  # health-check controller -> /list_models (max 5 tentativi)
-  local hc_ok=0
-  for i in {1..5}; do
-    if curl -s -X POST "${VLM_CONTROLLER}/list_models" >/dev/null 2>&1; then
-      hc_ok=1
-      break
-    fi
-    sleep 2
-  done
-  if [[ "${hc_ok}" != "1" ]]; then
-    echo "[ERROR] VLM controller health-check failed on ${VLM_CONTROLLER}. See logs: ${LLAVA_CTRL_LOG} ${LLAVA_WORKER_LOG}" >&2
-    return 1
-  fi
-}
-
-stop_local_vlm() {
-  if [[ "${START_LOCAL_VLM}" != "1" ]]; then
-    return 0
-  fi
-  echo "[INFO] Stopping local LLaVA-Med server"
-  if [[ -n "${VLM_WORKER_PID:-}" ]]; then
-    kill "${VLM_WORKER_PID}" 2>/dev/null || true
-  fi
-  if [[ -n "${VLM_CTRL_PID:-}" ]]; then
-    kill "${VLM_CTRL_PID}" 2>/dev/null || true
-  fi
-}
-
-VENV_PATH="${VENV_PATH:-}"   # opzionale: export VENV_PATH=/path/to/venv
-EXP_ROOT="${EXP_ROOT:-$EXP_ROOT_DEFAULT}"
-MODEL_NAME="${MODEL_NAME:-$MODEL_NAME_DEFAULT}"
-BACKBONE_NAME="${BACKBONE_NAME:-$BACKBONE_NAME_DEFAULT}"
-VLM_CONTROLLER="${VLM_CONTROLLER:-$VLM_CONTROLLER_DEFAULT}"
-VLM_MODEL="${VLM_MODEL:-$VLM_MODEL_DEFAULT}"
-PRESENCE_THRESHOLD="${PRESENCE_THRESHOLD:-$PRESENCE_THRESHOLD_DEFAULT}"
-
-# Flags esperimento (override con export ONLY_SPATIAL=1 etc se ti serve)
+# Flags opzionali (per futura estensione; al momento solo log)
 ONLY_SPATIAL="${ONLY_SPATIAL:-0}"
 ONLY_CONCEPT="${ONLY_CONCEPT:-0}"
 
-# ------------------- logging -------------------
+# Export env necessari downstream (sbatch XAI + run_explainability.py)
+export VENV_PATH
+export CONCEPT_BANK_CSV
+
+# -----------------------------------------------------------------------------
+# LOGGING: tutti i log per modello vanno sotto logs/xai/${MODEL_NAME}
+# -----------------------------------------------------------------------------
+LOG_ROOT="${SRC_DIR}/logs/xai"
+LOG_DIR="${LOG_ROOT}/${MODEL_NAME}"
+mkdir -p "${LOG_DIR}"
+
+LOG_SUFFIX="${SLURM_JOB_ID:-local_$$}"
 
 echo "[INFO] run_full_xai.sh starting"
 echo "[INFO] REPO_ROOT=${REPO_ROOT}"
 echo "[INFO] EXP_ROOT=${EXP_ROOT}"
 echo "[INFO] MODEL_NAME=${MODEL_NAME}"
 echo "[INFO] BACKBONE_NAME=${BACKBONE_NAME}"
-echo "[INFO] VLM_CONTROLLER=${VLM_CONTROLLER}"
-echo "[INFO] VLM_MODEL=${VLM_MODEL}"
-echo "[INFO] PRESENCE_THRESHOLD=${PRESENCE_THRESHOLD}"
+echo "[INFO] VLM_MODEL_PATH=${VLM_MODEL_PATH}"
+echo "[INFO] VENV_PATH=${VENV_PATH}"
+echo "[INFO] ONTOLOGY_YAML=${ONTOLOGY_YAML}"
+echo "[INFO] CONCEPT_BANK_CSV=${CONCEPT_BANK_CSV}"
+echo "[INFO] TRAIN_WDS_DIR=${TRAIN_WDS_DIR}"
+echo "[INFO] TRAIN_WDS_PATTERN=${TRAIN_WDS_PATTERN}"
 
 # ------------------- env -------------------
 
@@ -2614,33 +2422,39 @@ fi
 if [[ "${num_lines}" -le 1 ]]; then
   echo "[WARN] Concept bank missing or empty (lines=${num_lines}); rebuilding Stage 0."
 
+  # prima di lanciare Python, controlla che esistano i tar attesi
+  if ! compgen -G "${TRAIN_WDS_DIR}/${TRAIN_WDS_PATTERN}" > /dev/null; then
+    echo "[ERROR] No shards found under ${TRAIN_WDS_DIR}/${TRAIN_WDS_PATTERN}" >&2
+    echo "[ERROR] - Controlla che TRAIN_WDS_DIR punti alla cartella corretta" >&2
+    echo "[ERROR] - Controlla che il pattern TRAIN_WDS_PATTERN (default shard-*.tar) sia corretto" >&2
+    exit 1
+  fi
+
   # 0a) concept_candidates_rcc.csv (train WDS -> PNG + CSV)
   echo "[INFO] Stage 0a: building concept_candidates_rcc.csv"
   python3 -m explainability.concept.ontology.build_concept_candidates \
     --train-dir "${TRAIN_WDS_DIR}" \
-    --pattern "shard-*.tar" \
+    --pattern "${TRAIN_WDS_PATTERN}" \
     --image-key "img.jpg;jpg;jpeg;png" \
     --meta-key "meta.json;json" \
     --out-csv "${CANDIDATES_CSV}" \
     --images-root "${CANDIDATES_IMG_ROOT}"
 
-  # 0b) concepts_rcc_debug.csv (VLM su candidates) – HF locale, nessun HTTP
-  echo "[INFO] Stage 0b: building concepts_rcc_debug.csv via local HF LLaVA-Med (no HTTP)"
-  export VLM_DEBUG="${VLM_DEBUG:-0}"  # metti 1 se vuoi log dettagliati dal client HF
+  # 0b) concepts_rcc_*.csv (VLM HF su candidates)
+  echo "[INFO] Stage 0b: building concept bank via local HF VLM"
+  export VLM_DEBUG="${VLM_DEBUG:-1}"
 
   python3 -m explainability.concept.ontology.build_concept_bank \
     --ontology "${ONTOLOGY_YAML}" \
     --images-csv "${CANDIDATES_CSV}" \
-    --model-name "${VLM_MODEL}" \
+    --model-name "${VLM_MODEL_PATH}" \
     --out-csv "${CONCEPT_BANK_CSV}" \
-    --presence-threshold "${PRESENCE_THRESHOLD}" \
-    --max-images 100 \
-    --backend "hf"
+    --max-images 0
 
   # hard check: concept bank deve avere almeno header + 1 riga
   lines_after=$(wc -l < "${CONCEPT_BANK_CSV}")
   if [[ "${lines_after}" -le 1 ]]; then
-    echo "[ERROR] Concept bank ${CONCEPT_BANK_CSV} still empty after Stage 0 (lines=${lines_after}). Aborting."
+    echo "[ERROR] Concept bank ${CONCEPT_BANK_CSV} still empty after Stage 0 (lines=${lines_after}). Aborting." >&2
     exit 1
   fi
 else
@@ -2656,15 +2470,6 @@ ORCH_CMD=( python3 -m explainability.run_explainability
   --spatial-config-template "${SRC_DIR}/explainability/spatial/config_xai.yaml"
   --concept-config-template "${SRC_DIR}/explainability/concept/config_concept.yaml"
 )
-
-# flags optionali: se vuoi supportare solo spatial/solo concept, estendi run_explainability.py di conseguenza.
-# Al momento il tuo run_explainability.py non ha --only-spatial / --only-concept, quindi li ignoriamo.
-if [[ "${ONLY_SPATIAL}" == "1" ]]; then
-  echo "[WARN] ONLY_SPATIAL=1 set, but run_explainability.py non supporta ancora il flag; eseguo comunque full pipeline."
-fi
-if [[ "${ONLY_CONCEPT}" == "1" ]]; then
-  echo "[WARN] ONLY_CONCEPT=1 set, ma run_explainability.py non supporta ancora il flag; eseguo comunque full pipeline."
-fi
 
 echo "[INFO] Stage 1/2: running experiment-level explainability:"
 echo "[INFO]   ${ORCH_CMD[*]}"
@@ -2768,6 +2573,7 @@ import csv
 import json
 import logging
 import sys
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -3168,6 +2974,10 @@ def main(argv: Optional[List[str]] = None) -> None:
             logger.error(f"Cannot initialize Rollout: model structure error. {e}")
             use_rollout = False
 
+    # Conteggi per validazione/summary
+    method_counts: Counter[str] = Counter()
+    reason_counts: Counter[str] = Counter()
+
     for batch in loader:
         if cfg["data"]["backend"].lower() == "webdataset":
             img_t, meta_any, key = batch
@@ -3200,6 +3010,8 @@ def main(argv: Optional[List[str]] = None) -> None:
 
             sel_reason_list = sel_reasons.get(key, []) if keys is not None else []
             sel_reason_str = "|".join(sel_reason_list) if sel_reason_list else ""
+            for r in sel_reason_list:
+                reason_counts[r] += 1
         else:
             img_t, lbl = batch
             key = None
@@ -3293,6 +3105,9 @@ def main(argv: Optional[List[str]] = None) -> None:
             except Exception as e:
                 logger.warning(f"Rollout failed: {e}")
 
+        for m in used:
+            method_counts[m] += 1
+
         writer.writerow(
             [
                 global_idx,
@@ -3332,6 +3147,22 @@ def main(argv: Optional[List[str]] = None) -> None:
     logger.info(
         f"[Spatial XAI] Done. Produced {produced} cases in {total_elapsed/60:.1f} min."
     )
+
+    # ----------------- VALIDAZIONE / SEGNALAZIONI -----------------
+    if produced == 0:
+        logger.warning(
+            "[Spatial XAI] No outputs produced (produced=0). "
+            "Controlla selection config / eval artifacts."
+        )
+    else:
+        if method_counts:
+            logger.info("[Spatial XAI] Method usage:")
+            for m, cnt in method_counts.items():
+                logger.info(f"  - {m}: {cnt} patches")
+        if reason_counts:
+            logger.info("[Spatial XAI] Selection reasons distribution:")
+            for r, cnt in reason_counts.items():
+                logger.info(f"  - {r}: {cnt} patches")
 
 
 if __name__ == "__main__":

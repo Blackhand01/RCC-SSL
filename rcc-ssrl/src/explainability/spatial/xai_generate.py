@@ -21,6 +21,7 @@ import csv
 import json
 import logging
 import sys
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -421,6 +422,10 @@ def main(argv: Optional[List[str]] = None) -> None:
             logger.error(f"Cannot initialize Rollout: model structure error. {e}")
             use_rollout = False
 
+    # Conteggi per validazione/summary
+    method_counts: Counter[str] = Counter()
+    reason_counts: Counter[str] = Counter()
+
     for batch in loader:
         if cfg["data"]["backend"].lower() == "webdataset":
             img_t, meta_any, key = batch
@@ -453,6 +458,8 @@ def main(argv: Optional[List[str]] = None) -> None:
 
             sel_reason_list = sel_reasons.get(key, []) if keys is not None else []
             sel_reason_str = "|".join(sel_reason_list) if sel_reason_list else ""
+            for r in sel_reason_list:
+                reason_counts[r] += 1
         else:
             img_t, lbl = batch
             key = None
@@ -546,6 +553,9 @@ def main(argv: Optional[List[str]] = None) -> None:
             except Exception as e:
                 logger.warning(f"Rollout failed: {e}")
 
+        for m in used:
+            method_counts[m] += 1
+
         writer.writerow(
             [
                 global_idx,
@@ -585,6 +595,22 @@ def main(argv: Optional[List[str]] = None) -> None:
     logger.info(
         f"[Spatial XAI] Done. Produced {produced} cases in {total_elapsed/60:.1f} min."
     )
+
+    # ----------------- VALIDAZIONE / SEGNALAZIONI -----------------
+    if produced == 0:
+        logger.warning(
+            "[Spatial XAI] No outputs produced (produced=0). "
+            "Controlla selection config / eval artifacts."
+        )
+    else:
+        if method_counts:
+            logger.info("[Spatial XAI] Method usage:")
+            for m, cnt in method_counts.items():
+                logger.info(f"  - {m}: {cnt} patches")
+        if reason_counts:
+            logger.info("[Spatial XAI] Selection reasons distribution:")
+            for r, cnt in reason_counts.items():
+                logger.info(f"  - {r}: {cnt} patches")
 
 
 if __name__ == "__main__":

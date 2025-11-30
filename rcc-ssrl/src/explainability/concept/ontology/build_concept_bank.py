@@ -1,46 +1,90 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Build concept bank for RCC histology using a VLM.
+Dump grezzo delle risposte VLM per tutte le coppie (patch, concept).
 
 Input:
-- Ontology YAML with RCC concepts.
-- CSV of candidate patches with columns:
-    image_path, wds_key, class_label
-  (produced automatically by build_concept_candidates.py)
-
-- VLM server (e.g. LLaVA-Med) answering concept-level questions in JSON.
+- Ontology YAML con i concetti (name, group, primary_class, prompt)
+- CSV di candidate patches: image_path, wds_key, class_label
+- Modello HF locale (LLaVA-Med) via VLMClientHF
 
 Output:
-- concepts_rcc_debug.csv with columns:
-    concept_name, wds_key, group, class_label
-
-This file is pointed to by concepts.meta_csv in config_concept.yaml.
+- concepts_rcc_*.csv con colonne:
+    concept_name, wds_key, group, class_label, user_question, assistant_answer
+  (tutte le risposte del VLM, senza filtri/soglie, con prompt ripulito)
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
-import json
 import random
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import yaml
 
-from explainability.concept.ontology.vlm_client import VLMClient  # backend HTTP esistente
-from explainability.concept.ontology.vlm_client_hf import VLMClientHF  # nuovo backend HF locale
+
+# ----------------------------------------------------------------------
+# Helpers
+# ----------------------------------------------------------------------
+def _normalize_whitespace(s: str) -> str:
+    """Collassa spazi / newline multipli in un'unica riga pulita."""
+    return " ".join(str(s).split())
 
 
+# ----------------------------------------------------------------------
+# Ontology loading + validation
+# ----------------------------------------------------------------------
 def load_ontology(path: str | Path) -> List[Dict[str, Any]]:
-    data = yaml.safe_load(open(path, "r"))
-    return data["concepts"]
+    """Load ontology YAML e valida i campi minimi per ciascun concept."""
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Ontology YAML not found: {path}")
+
+    with path.open("r") as f:
+        data = yaml.safe_load(f)
+
+    if not isinstance(data, dict) or "concepts" not in data:
+        raise ValueError(f"Ontology YAML must contain a 'concepts' list: {path}")
+
+    concepts_raw = data["concepts"]
+    if not isinstance(concepts_raw, list) or not concepts_raw:
+        raise ValueError(f"'concepts' must be a non-empty list in {path}")
+
+    concepts: List[Dict[str, Any]] = []
+    for idx, c in enumerate(concepts_raw):
+        if not isinstance(c, dict):
+            raise ValueError(f"Concept #{idx} is not a dict in {path}")
+
+        name = str(c.get("name", "")).strip()
+        prompt = str(c.get("prompt", "")).strip()
+
+        if not name:
+            raise ValueError(f"Concept #{idx} in {path} has empty 'name'")
+        if not prompt:
+            raise ValueError(f"Concept '{name}' in {path} has empty 'prompt'")
+
+        concepts.append(
+            {
+                "name": name,
+                "prompt": prompt,
+                "group": c.get("group"),
+                "primary_class": c.get("primary_class"),
+            }
+        )
+
+    return concepts
 
 
-def main(argv: List[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Build RCC concept bank via VLM.")
+# ----------------------------------------------------------------------
+# Main
+# ----------------------------------------------------------------------
+def main(argv: Optional[List[str]] = None) -> None:
+    parser = argparse.ArgumentParser(
+        description="Dump raw VLM outputs for RCC concept bank."
+    )
     parser.add_argument("--ontology", required=True, help="Ontology YAML path")
     parser.add_argument(
         "--images-csv",
@@ -48,34 +92,19 @@ def main(argv: List[str] | None = None) -> None:
         help="CSV with columns: image_path,wds_key,class_label",
     )
     parser.add_argument(
-        "--controller",
-        required=False,
-        help="VLM controller URL (e.g. http://localhost:10000) – usato SOLO se backend=http",
-    )
-    parser.add_argument(
         "--model-name",
+        type=str,
         default="Eren-Senoglu/llava-med-v1.5-mistral-7b-hf",
-        help="Nome del modello VLM. "
-             "Se backend=hf: id Hugging Face (es. Eren-Senoglu/llava-med-v1.5-mistral-7b-hf); "
-             "se backend=http: nome registrato sul server (es. llava-med-v1.5-mistral-7b).",
-    )
-    parser.add_argument(
-        "--backend",
-        choices=["http", "hf"],
-        default="hf",
-        help="Tipo di backend VLM: 'hf' = modello locale via Hugging Face (no HTTP), "
-             "'http' = controller/worker HTTP (pipeline vecchia).",
+        help=(
+            "HF model id or local path for the VLM "
+            "(e.g. 'Eren-Senoglu/llava-med-v1.5-mistral-7b-hf' or a local directory). "
+            "If you launch via run_full_xai.sh, this is overridden by VLM_MODEL_PATH."
+        ),
     )
     parser.add_argument(
         "--out-csv",
         required=True,
-        help="Output CSV path for concept bank (concepts_rcc_debug.csv)",
-    )
-    parser.add_argument(
-        "--presence-threshold",
-        type=float,
-        default=0.6,
-        help="Minimal confidence to accept concept as present",
+        help="Output CSV path for concept bank (concepts_rcc_*.csv)",
     )
     parser.add_argument(
         "--max-images",
@@ -85,38 +114,57 @@ def main(argv: List[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
+    # Ontology
     concepts = load_ontology(args.ontology)
 
-    # Scegli il backend in base al flag --backend
-    if args.backend == "hf":
-        # modello locale via HuggingFace, NESSUN controller HTTP
-        vlm = VLMClientHF(
-            model_name=args.model_name,
-            device=None,        # auto: cuda se disponibile, altrimenti cpu
-            dtype="float16",    # va bene con A40
-            debug=False,        # o True se vuoi log verbosi
-        )
-    else:
-        # backend http vecchio: richiede --controller
-        if not args.controller:
-            raise RuntimeError(
-                "HTTP backend selected but --controller is None. "
-                "Pass --controller http://host:port oppure usa --backend hf."
-            )
-        vlm = VLMClient(args.controller, args.model_name)
+    # VLM client
+    try:
+        from explainability.concept.ontology.vlm_client_hf import VLMClientHF
+    except Exception as exc:  # pragma: no cover - dependency guard
+        raise RuntimeError(
+            "HF backend requested but transformers/torch dependencies are missing. "
+            "Install them in the same venv used for explainability."
+        ) from exc
 
-    # Read candidate patches
+    vlm = VLMClientHF(args.model_name)
+
+    # ------------------------------------------------------------------
+    # Read candidate patches + validation
+    # ------------------------------------------------------------------
+    images_csv_path = Path(args.images_csv)
+    if not images_csv_path.is_file():
+        raise FileNotFoundError(f"Images CSV not found: {images_csv_path}")
+
     rows: List[Dict[str, str]] = []
-    with open(args.images_csv) as f:
+    with images_csv_path.open() as f:
         reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames or []
+        required_cols = {"image_path", "wds_key", "class_label"}
+        missing = required_cols - set(fieldnames)
+        if missing:
+            raise ValueError(
+                f"Images CSV {images_csv_path} is missing required columns: {sorted(missing)}"
+            )
+
         for r in reader:
-            if not r.get("image_path") or not r.get("wds_key"):
+            image_path = (r.get("image_path") or "").strip()
+            wds_key = (r.get("wds_key") or "").strip()
+            class_label = (r.get("class_label") or "").strip()
+
+            if not image_path or not wds_key or not class_label:
                 continue
-            rows.append(r)
+
+            rows.append(
+                {
+                    "image_path": image_path,
+                    "wds_key": wds_key,
+                    "class_label": class_label,
+                }
+            )
 
     if not rows:
         raise RuntimeError(
-            f"Concept bank: no candidate patches in {args.images_csv}. "
+            f"Concept bank: no valid candidate patches in {images_csv_path}. "
             "Stage 0a (build_concept_candidates) probably failed or produced an empty CSV."
         )
 
@@ -129,113 +177,139 @@ def main(argv: List[str] | None = None) -> None:
     out_path = Path(args.out_csv)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    out_f = open(out_path, "w", newline="")
-    writer = csv.writer(out_f)
-    writer.writerow(["concept_name", "wds_key", "group", "class_label"])
-
     t_start = time.time()
     total_rows = len(rows)
     total_concepts = len(concepts)
     total_planned_queries = total_rows * total_concepts
     print(
-        f"[INFO] Concept bank: candidates={total_rows}, concepts={total_concepts}, "
-        f"max_queries={total_planned_queries}, presence_threshold={args.presence_threshold}"
+        f"[INFO] Concept bank RAW: candidates={total_rows}, concepts={total_concepts}, "
+        f"max_queries={total_planned_queries}, model_name={args.model_name}"
     )
 
-    accepted = 0
     total_queries = 0
+    written_rows = 0
+    skipped_empty_answer = 0
     log_every = 200  # stampa ogni N query
 
-    for r_idx, r in enumerate(rows):
-        img = r["image_path"]
-        key = r["wds_key"]
-        cls = r.get("class_label", "")
+    # ------------------------------------------------------------------
+    # Write output CSV
+    # ------------------------------------------------------------------
+    with out_path.open("w", newline="") as out_f:
+        writer = csv.writer(out_f)
+        writer.writerow(
+            [
+                "concept_name",
+                "wds_key",
+                "group",
+                "class_label",
+                "user_question",
+                "assistant_answer",
+            ]
+        )
 
-        for c_idx, c in enumerate(concepts):
-            cname = c["name"]
-            group = c.get("group")
-            base_prompt = c["prompt"]
+        for r_idx, r in enumerate(rows):
+            img_path = r["image_path"]
+            key = r["wds_key"]
+            patch_class = r.get("class_label", "")
 
-            t0 = time.time()
-            try:
-                ans = vlm.ask_concept(img, cname, base_prompt)
-            except RuntimeError as e:
-                # Tipicamente: error_code != 0 dal worker (es. problemi interni llava).
-                total_queries += 1
+            for c_idx, c in enumerate(concepts):
+                concept_name = c["name"]
+                concept_group = c.get("group")
+                concept_prompt = c["prompt"]
+
+                # user_question costruita in modo deterministico (non prendiamo il prompt echiato dal modello)
+                user_question = _normalize_whitespace(
+                    f"For this RCC patch, is the concept '{concept_name}' present? "
+                    f"Definition: {concept_prompt}"
+                )
+
+                t0 = time.time()
+                try:
+                    ans = vlm.ask_concept(img_path, concept_name, concept_prompt)
+                except RuntimeError as e:
+                    total_queries += 1
+                    dt = time.time() - t0
+                    if getattr(vlm, "debug", False):
+                        print(
+                            f"[BANK DEBUG] RuntimeError for key={key}, concept={concept_name}, "
+                            f"class={patch_class}, dt={dt:.2f}s\n{e}\n{'-'*80}"
+                        )
+                    if total_queries <= 10:
+                        print(
+                            f"[WARN] VLM error for key={key}, concept={concept_name}: {e}"
+                        )
+                    continue
+
                 dt = time.time() - t0
+                total_queries += 1
 
-                if vlm.debug:
+                if total_queries % log_every == 0:
+                    elapsed = time.time() - t_start
+                    avg_per_query = elapsed / max(1, total_queries)
+                    remaining = total_planned_queries - total_queries
+                    est_remain = remaining * avg_per_query
                     print(
-                        f"[BANK DEBUG] RuntimeError for key={key}, concept={cname}, "
-                        f"class={cls}, dt={dt:.2f}s\n{e}\n{'-'*80}"
+                        f"[PROGRESS] queries={total_queries}/{total_planned_queries} "
+                        f"({100.0*total_queries/total_planned_queries:.1f}%), "
+                        f"elapsed={elapsed/60:.1f} min, "
+                        f"avg_per_query={avg_per_query:.2f} s, "
+                        f"ETA~{est_remain/60:.1f} min"
                     )
 
-                # Log minimale anche fuori da debug per i primi casi
-                if total_queries <= 10:
-                    print(
-                        f"[WARN] VLM error for key={key}, concept={cname}: {e}"
-                    )
-                continue
+                # Risposta vuota o non nel formato atteso
+                if not ans or not isinstance(ans, dict):
+                    if total_queries <= 10:
+                        print(
+                            f"[DEBUG] Empty/invalid VLM answer (non-dict) for key={key}, "
+                            f"concept={concept_name}"
+                        )
+                    continue
 
-            dt = time.time() - t0
-            total_queries += 1
-
-            # LOG DI DEBUG: prime N risposte parse-ate, anche se poi vengono scartate
-            if vlm.debug and ans is not None and total_queries <= 20:
-                print(
-                    f"[BANK DEBUG] key={key}, concept={cname}, "
-                    f"class={cls}, dt={dt:.2f}s\n"
-                    f"{json.dumps(ans, indent=2)}\n"
-                    f"{'-'*80}"
+                # VLMClientHF ora restituisce: {"concept", "user_question", "assistant_answer"}
+                assistant_answer = _normalize_whitespace(
+                    ans.get("assistant_answer", "") or ""
+                )
+                user_question_full = _normalize_whitespace(
+                    ans.get("user_question", user_question) or ""
                 )
 
-            if total_queries % log_every == 0:
-                elapsed = time.time() - t_start
-                avg_per_query = elapsed / max(1, total_queries)
-                remaining = total_planned_queries - total_queries
-                est_remain = remaining * avg_per_query
-                print(
-                    f"[PROGRESS] queries={total_queries}/{total_planned_queries} "
-                    f"({100.0*total_queries/total_planned_queries:.1f}%), "
-                    f"elapsed={elapsed/60:.1f} min, "
-                    f"avg_per_query={avg_per_query:.2f} s, "
-                    f"ETA~{est_remain/60:.1f} min"
+                if not assistant_answer:
+                    skipped_empty_answer += 1
+                    if skipped_empty_answer <= 10:
+                        print(
+                            f"[DEBUG] Skipping empty assistant_answer for key={key}, "
+                            f"concept={concept_name}"
+                        )
+                    continue
+
+                writer.writerow(
+                    [
+                        concept_name,
+                        key,
+                        concept_group,
+                        patch_class,
+                        user_question_full,
+                        assistant_answer,
+                    ]
                 )
+                written_rows += 1
 
-            if not ans:
-                # debug minimale
-                if total_queries <= 10:
-                    print(
-                        f"[DEBUG] Empty/invalid VLM answer for key={key}, "
-                        f"concept={cname}"
-                    )
-                continue
-
-            present = bool(ans.get("present", False))
-            try:
-                confidence = float(ans.get("confidence", 0.0))
-            except Exception:
-                confidence = 0.0
-
-            if present and confidence >= args.presence_threshold:
-                writer.writerow([cname, key, group, cls])
-                accepted += 1
-
-    out_f.close()
     total_elapsed = time.time() - t_start
     print(
-        f"[SUMMARY] Concept bank: accepted={accepted}, "
-        f"queries={total_queries}, "
+        f"[SUMMARY] Concept bank RAW dump: "
+        f"candidates={total_rows}, concepts={total_concepts}, "
+        f"queries={total_queries}, written_rows={written_rows}, "
+        f"skipped_empty_answer={skipped_empty_answer}, "
         f"elapsed={total_elapsed/60:.1f} min"
     )
 
-    if accepted == 0:
+    if written_rows == 0:
         raise RuntimeError(
-            "Concept bank is empty (no accepted concept/key pairs). "
-            "Cause probabili: modello VLM non raggiungibile / non caricato, "
-            "risposte non parse-abili come JSON, oppure tutte le decisioni present=False "
-            f"(backend={args.backend}, model_name={args.model_name})."
+            f"No valid rows written to concept bank CSV {out_path}. "
+            "Check VLM responses and ontology/prompts."
         )
+
+    print(f"[OK] Concept bank written to {out_path}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,129 @@
+version: 2
+name: "rcc_histology_18_concepts_v2"
+
+concepts:
+  - id: 1
+    name: "Clear cytoplasm (ccRCC)"
+    short_name: "clear_cytoplasm"
+    group: "ccRCC"
+    primary_class: "ccRCC"
+    prompt: "Identify viable renal tumour cells with abundant optically clear or glassy cytoplasm and sharp cell borders, usually forming nests or alveoli. Exclude adipocytes and stromal fat, artefactual perinuclear clearing, and foamy macrophages."
+
+  - id: 2
+    name: "Delicate branching capillary network (ccRCC)"
+    short_name: "delicate_capillary_network"
+    group: "ccRCC"
+    primary_class: "ccRCC"
+    prompt: "Identify a delicate, thin-walled branching capillary network intimately investing nests or alveoli of tumour cells, creating a fine chicken-wire vascular pattern typical of clear cell RCC. Exclude thick fibrous septa, large muscular vessels, and non-tumour parenchymal vessels."
+
+  - id: 3
+    name: "Alveolar/nested architecture (ccRCC)"
+    short_name: "alveolar_nested_architecture"
+    group: "ccRCC"
+    primary_class: "ccRCC"
+    prompt: "Identify alveolar, acinar, or nested arrangements of tumour cells separated by delicate vasculature or thin fibrous septa, with open lumina or sinusoid-like spaces between nests. Exclude papillary fronds with fibrovascular cores and flat tubules."
+
+  - id: 4
+    name: "Cytoplasmic vacuolization (ccRCC)"
+    short_name: "cytoplasmic_vacuolization"
+    group: "ccRCC"
+    primary_class: "ccRCC"
+    prompt: "Identify viable tumour cells with multiple, sharply defined intracytoplasmic vacuoles within clear or eosinophilic cytoplasm, giving a bubbly appearance in the setting of clear cell RCC. Exclude foamy macrophages, mucin pools, and obvious fixation artefacts."
+
+  - id: 5
+    name: "Papillary fronds with fibrovascular cores (pRCC)"
+    short_name: "papillary_fronds"
+    group: "pRCC"
+    primary_class: "pRCC"
+    prompt: "Identify true papillary fronds: finger-like projections into spaces with central fibrovascular cores containing loose stroma and vessels, lined by one or more layers of tumour cells. Exclude folded flat epithelium, simple tubules, and solid nests."
+
+  - id: 6
+    name: "Foamy macrophages in papillary cores (pRCC)"
+    short_name: "foamy_macrophages"
+    group: "pRCC"
+    primary_class: "pRCC"
+    prompt: "Identify clusters or sheets of foamy macrophages with finely vacuolated cytoplasm and small dense nuclei located within papillary fibrovascular cores or lumina. Do not misinterpret clear tumour cells, necrotic debris, or artefactual vacuolation as foamy macrophages."
+
+  - id: 7
+    name: "Psammoma bodies (pRCC)"
+    short_name: "psammoma_bodies"
+    group: "pRCC"
+    primary_class: "pRCC"
+    prompt: "Identify round, concentrically laminated basophilic calcifications (psammoma bodies) within papillary cores or tumour stroma. Exclude coarse dystrophic calcification, bone formation, and foreign material."
+
+  - id: 8
+    name: "Hobnail nuclei / pseudostratification (pRCC)"
+    short_name: "hobnail_nuclei"
+    group: "pRCC"
+    primary_class: "pRCC"
+    prompt: "Identify hobnail tumour cells with apically protruding, hyperchromatic nuclei bulging into lumina, or crowded pseudostratified nuclei along papillary surfaces, often with nuclear atypia. Exclude evenly spaced single-layer cuboidal epithelium and benign reactive changes."
+
+  - id: 9
+    name: "Perinuclear halos (chRCC)"
+    short_name: "perinuclear_halos"
+    group: "chRCC"
+    primary_class: "CHROMO"
+    prompt: "Identify solid sheets or nests of tumour cells showing distinct perinuclear clearing or halos surrounding the nucleus within pale to eosinophilic cytoplasm, in keeping with chromophobe RCC. Exclude artefactual vacuoles, degenerative ballooning, and mucin."
+
+  - id: 10
+    name: "Raisinoid nuclei (chRCC)"
+    short_name: "raisinoid_nuclei"
+    group: "chRCC"
+    primary_class: "CHROMO"
+    prompt: "Identify tumour cells with irregular, wrinkled (raisinoid) nuclear membranes, hyperchromasia, and irregular nuclear contours typical of chromophobe RCC. Exclude smooth, round nuclei of oncocytoma and low-grade clear cell RCC."
+
+  - id: 11
+    name: "Plant-cell-like borders (chRCC)"
+    short_name: "plant_cell_borders"
+    group: "chRCC"
+    primary_class: "CHROMO"
+    prompt: "Identify tumour cells with thick, sharply delineated polygonal cell borders that create a plant-cell or mosaic appearance in sheets of chromophobe RCC. Exclude indistinct or very thin borders of clear cell RCC or ordinary tubular epithelium."
+
+  - id: 12
+    name: "Pale-to-eosinophilic granular cytoplasm (chRCC)"
+    short_name: "pale_eosinophilic_cytoplasm"
+    group: "chRCC"
+    primary_class: "CHROMO"
+    prompt: "Identify cytoplasm that is pale to lightly eosinophilic, finely granular or reticulated in chromophobe RCC cells, often combined with perinuclear halos and plant-cell-like borders. Exclude the uniformly dense, deeply eosinophilic granular cytoplasm of oncocytic tumours."
+
+  - id: 13
+    name: "Oncocytic cytoplasm (oncocytoma)"
+    short_name: "oncocytic_cytoplasm"
+    group: "Oncocytoma"
+    primary_class: "ONCO"
+    prompt: "Identify tumour cells with abundant, dense, finely granular, deeply eosinophilic cytoplasm (oncocytes) and round, centrally placed nuclei with smooth membranes, typically in renal oncocytoma. Exclude chromophobe-like cells with prominent perinuclear halos or reticulated cytoplasm."
+
+  - id: 14
+    name: "Archipelagenous architecture in oedematous stroma (oncocytoma)"
+    short_name: "archipelagenous_architecture"
+    group: "Oncocytoma"
+    primary_class: "ONCO"
+    prompt: "Identify round or oval nests and islands of oncocytic tumour cells scattered in loose, oedematous or myxoid stroma, producing an archipelagenous or archipelago-like pattern. Exclude true papillary projections and densely packed solid sheets without intervening stroma."
+
+  - id: 15
+    name: "Central fibrous scar / stellate fibrosis (oncocytoma)"
+    short_name: "central_fibrous_scar"
+    group: "Oncocytoma"
+    primary_class: "ONCO"
+    prompt: "Identify dense, hyalinised, stellate fibrous tissue within or near the centre of an oncocytic tumour, often with radiating fibrous bands and thick-walled vessels. Exclude peripheral fibrous capsule, nonspecific peritumoural fibrosis, and scar outside the tumour."
+
+  - id: 16
+    name: "ISUP nucleolar grade"
+    short_name: "isup_nucleolar_grade"
+    group: "Grading"
+    primary_class: null
+    prompt: "Assess nucleolar prominence in viable tumour cells according to ISUP criteria: grade 1 with inconspicuous or small nucleoli at high power, grade 2 with clearly visible nucleoli at 400x but not at 100x, grade 3 with prominent nucleoli visible at 100x, and grade 4 in the presence of extreme nuclear pleomorphism, tumour giant cells, sarcomatoid or rhabdoid morphology. Ignore crushed areas, necrosis, and non-tumour tissue."
+
+  - id: 17
+    name: "Coagulative tumour necrosis"
+    short_name: "coagulative_necrosis"
+    group: "Necrosis"
+    primary_class: null
+    prompt: "Identify areas of coagulative tumour necrosis characterised by ghost outlines of tumour cells with loss of nuclei, increased eosinophilia, and granular debris, usually sharply demarcated from viable tumour. Exclude simple haemorrhage, cyst contents, autolysis, and cautery artefact."
+
+  - id: 18
+    name: "Sarcomatoid / rhabdoid dedifferentiation"
+    short_name: "sarcomatoid_rhabdoid_dedifferentiation"
+    group: "Dedifferentiation"
+    primary_class: null
+    prompt: "Identify foci of high-grade dedifferentiation within renal cell carcinoma composed of malignant spindle cells in fascicles (sarcomatoid change) and/or rhabdoid cells with eccentric nuclei, prominent nucleoli, and dense eosinophilic cytoplasmic inclusions. Any definite sarcomatoid or rhabdoid component should be marked, and should not be confused with benign stromal spindle cells or inflammatory infiltrates."

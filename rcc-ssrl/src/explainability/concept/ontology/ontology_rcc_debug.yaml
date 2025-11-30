@@ -1,45 +1,13 @@
-version: 1
-name: "rcc_histology_debug_4_concepts"
+version: 3
+name: "rcc_histology_4_concepts_core"
 
 concepts:
   - id: 1
     name: "Clear cytoplasm (ccRCC)"
-    short_name: "clear_cytoplasm_ccrcc"
+    short_name: "clear_cytoplasm"
     group: "ccRCC"
     primary_class: "ccRCC"
     prompt: >
-      Identify viable renal tumour cells with abundant optically clear or glassy
-      cytoplasm and sharp cell borders, in keeping with clear cell renal cell carcinoma.
-      Exclude adipocytes, stromal fat, artefactual perinuclear clearing, and foamy
-      macrophages.
-
-  - id: 2
-    name: "Papillary fronds with fibrovascular cores (pRCC)"
-    short_name: "papillary_fronds_prcc"
-    group: "pRCC"
-    primary_class: "pRCC"
-    prompt: >
-      Identify true papillary fronds: finger-like projections with central fibrovascular
-      cores containing loose stroma and vessels, lined by tumour cells, in keeping with
-      papillary renal cell carcinoma. Exclude folded flat epithelium and simple tubules.
-
-  - id: 3
-    name: "Perinuclear halos (chRCC)"
-    short_name: "perinuclear_halos_chrcc"
-    group: "chRCC"
-    primary_class: "CHROMO"
-    prompt: >
-      Identify tumour cells arranged in sheets or nests showing distinct perinuclear
-      clearing or halos within pale to eosinophilic cytoplasm, typical of chromophobe
-      renal cell carcinoma. Exclude artefactual vacuoles and mucin.
-
-  - id: 4
-    name: "Oncocytic cytoplasm (oncocytoma)"
-    short_name: "oncocytic_cytoplasm_onco"
-    group: "Oncocytoma"
-    primary_class: "ONCO"
-    prompt: >
-      Identify tumour cells with abundant, dense, finely granular, deeply eosinophilic
-      cytoplasm (oncocytes) and round centrally placed nuclei with smooth membranes,
-      typical of renal oncocytoma. Exclude chromophobe-like cells with obvious
-      perinuclear halos.
+      Viable renal tumour cells with abundant optically clear or glassy cytoplasm and sharp cell borders,
+      usually forming nests or alveoli typical of clear cell renal cell carcinoma.
+      Exclude adipocytes and stromal fat, artefactual perinuclear clearing, and sheets of foamy macrophages.

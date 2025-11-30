@@ -21,6 +21,7 @@ import argparse
 import csv
 import json
 import logging
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -297,6 +298,9 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     topk_per_patch = int(cfg["concepts"]["topk_per_patch"])
 
+    # per summary finale
+    reason_counts: Counter[str] = Counter()
+
     # Iterate over targets in a deterministic order
     produced = 0
     for global_idx, key in enumerate(sorted(target_set)):
@@ -336,6 +340,8 @@ def main(argv: Optional[List[str]] = None) -> None:
 
         sel_reason_list = sel_reasons.get(key, [])
         sel_reason_str = "|".join(sel_reason_list) if sel_reason_list else ""
+        for r in sel_reason_list:
+            reason_counts[r] += 1
 
         # Output dir
         out_dir = out_root / f"idx_{global_idx:07d}"
@@ -414,6 +420,19 @@ def main(argv: Optional[List[str]] = None) -> None:
         f"[Concept XAI] Done. Produced {produced} patches with concept scores "
         f"in {total_elapsed/60:.1f} min."
     )
+
+    # ----------------- VALIDAZIONE / SEGNALAZIONI -----------------
+    if produced == 0:
+        log.warning(
+            "[Concept XAI] No concept scores produced (produced=0). "
+            "Controlla concept bank / selection."
+        )
+    else:
+        log.info(f"[Concept XAI] Concepts with centroids: {len(centroids)}")
+        if reason_counts:
+            log.info("[Concept XAI] Selection reasons distribution:")
+            for r, cnt in reason_counts.items():
+                log.info(f"  - {r}: {cnt} patches")
 
 
 if __name__ == "__main__":

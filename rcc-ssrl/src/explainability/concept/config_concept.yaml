@@ -43,10 +43,15 @@ selection:
 concepts:
   # default, sovrascrivibile via env CONCEPT_BANK_CSV
   meta_csv: "/home/mla_group_01/rcc-ssrl/src/explainability/concept/ontology/concepts_rcc_debug.csv"
+
+  # mappatura colonne concept bank
   concept_name_col: "concept_name"
   key_col: "wds_key"
   group_col: "group"
   class_col: "class_label"
+  present_col: "present"
+  confidence_col: "confidence"
+  rationale_col: "rationale"
 
   similarity: "cosine"
   topk_per_patch: 5

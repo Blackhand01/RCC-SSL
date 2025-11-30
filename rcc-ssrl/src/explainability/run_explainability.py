@@ -3,15 +3,25 @@
 """
 Main orchestrator to run spatial and concept explainability.
 
-Itera sulle ablation di un esperimento e per ognuna:
-- costruisce config_xai.yaml (spatial) e config_concept.yaml (concept)
-- lancia gli sbatch relativi.
+- EXP_ROOT: path a una cartella esperimento tipo:
+    .../outputs/mlruns/exp_20251109_181551_ibot-v1
 
-Comportamento:
-- Se per una certa ablation NON esiste la cartella di eval per il modello
-  (eval/<model_name>/...), quella ablation viene SKIPPATA con un warning.
-- Se esiste ma non contiene nessun run (sottocartella timestamp), viene skippata.
-- Se mancano i checkpoint SSL backbone/head, l'ablation viene skippata.
+- All'interno, ablation folder tipo:
+    exp_ibot_abl01, exp_ibot_abl02, ...
+
+- MODEL_NAME (argomento --model-name):
+    base SSL backbone name, es. "moco_v3", "dino_v3", "ibot", "i_jepa"
+
+- Da MODEL_NAME deriviamo:
+    HEAD_MODEL_NAME = MODEL_NAME + "_ssl_linear_best"
+
+  che viene usato per:
+    - cartella eval:
+        {ablation}/eval/{HEAD_MODEL_NAME}/{timestamp}/
+    - nome del modello nei config XAI:
+        cfg["model"]["name"] = HEAD_MODEL_NAME
+    - cartella XAI:
+        {ablation}/xai/{HEAD_MODEL_NAME}/{timestamp}/
 """
 
 from __future__ import annotations
@@ -23,7 +33,6 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
-import os
 
 import yaml
 
@@ -38,18 +47,24 @@ def run_sbatch(batch_file: Path, config_path: Path, log_dir: str) -> None:
         f"[SBATCH] submitting {batch_file} "
         f"with CONFIG_PATH={config_path}, LOG_DIR={log_dir}"
     )
-    subprocess.run(["sbatch", str(batch_file)], check=True)
+    res = subprocess.run(
+        ["sbatch", str(batch_file)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    job_line = (res.stdout or "").strip()
+    if job_line:
+        log.info(f"[SBATCH] submission output: {job_line}")
 
 
-def _derive_backbone_basename(model_name: str) -> str:
-    suffix = "_ssl_linear_best"
-    if model_name.endswith(suffix):
-        return model_name[: -len(suffix)]
-    return model_name
-
-
-def _find_latest_eval_run(ablation_dir: Path, model_name: str) -> Optional[Path]:
-    base = ablation_dir / "eval" / model_name
+def _find_latest_eval_run(ablation_dir: Path, eval_model_name: str) -> Optional[Path]:
+    """
+    Cerca l'ultimo run di eval sotto:
+      {ablation}/eval/{eval_model_name}/{timestamp}/
+    es: eval/ibot_ssl_linear_best/20251113_113536
+    """
+    base = ablation_dir / "eval" / eval_model_name
     if not base.is_dir():
         log.warning(f"[SKIP] Eval directory not found for {ablation_dir.name}: {base}")
         return None
@@ -78,13 +93,13 @@ def main(argv: List[str] | None = None) -> None:
         "--experiment-root",
         required=True,
         type=Path,
-        help="Path to root dir with ablations folders",
+        help="Path to root dir with ablations folders (exp_*).",
     )
     parser.add_argument(
         "--model-name",
         required=True,
         type=str,
-        help="Folder/model name for XAI outputs (es. moco_v3_ssl_linear_best)",
+        help="Base SSL backbone name (es. moco_v3, dino_v3, ibot, i_jepa).",
     )
     parser.add_argument(
         "--spatial-config-template",
@@ -100,7 +115,9 @@ def main(argv: List[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
+    )
 
     if not args.experiment_root.is_dir():
         raise FileNotFoundError(f"Experiment root not found: {args.experiment_root}")
@@ -117,25 +134,33 @@ def main(argv: List[str] | None = None) -> None:
         log.error(f"No ablation folders found under {args.experiment_root}")
         return
 
-    backbone_base = _derive_backbone_basename(args.model_name)
-    log.info(f"[INFO] MODEL_NAME={args.model_name}  BACKBONE_BASE={backbone_base}")
+    base_model_name = args.model_name
+    head_model_name = f"{base_model_name}_ssl_linear_best"
+
+    log.info(
+        f"[INFO] BASE_MODEL_NAME={base_model_name}  HEAD_MODEL_NAME={head_model_name}"
+    )
     log.info(f"[INFO] Found {len(ablation_folders)} ablations.")
 
-    # i template vengono letti ogni volta; per ora va bene così
+    # Root log dir: <repo>/src/logs/xai/{MODEL_NAME}/...
+    log_root = Path(__file__).resolve().parents[1] / "logs" / "xai"
 
     for ablation in ablation_folders:
         log.info("=" * 80)
         log.info(f"[ABLATION] Processing: {ablation}")
 
-        eval_run = _find_latest_eval_run(ablation, args.model_name)
+        eval_run = _find_latest_eval_run(ablation, head_model_name)
         if eval_run is None:
             log.warning(f"[ABLATION] Skipping {ablation.name}: no eval run available.")
             continue
 
-        backbone_ckpt = ablation / "checkpoints" / f"{backbone_base}__ssl_best.pt"
-        head_ckpt = ablation / "checkpoints" / f"{backbone_base}__ssl_linear_best.pt"
+        # checkpoint names: {MODEL_NAME}__ssl_best.pt, {MODEL_NAME}__ssl_linear_best.pt
+        backbone_ckpt = ablation / "checkpoints" / f"{base_model_name}__ssl_best.pt"
+        head_ckpt = ablation / "checkpoints" / f"{base_model_name}__ssl_linear_best.pt"
 
-        has_backbone = _check_checkpoint(backbone_ckpt, "ssl_backbone_ckpt", ablation.name)
+        has_backbone = _check_checkpoint(
+            backbone_ckpt, "ssl_backbone_ckpt", ablation.name
+        )
         has_head = _check_checkpoint(head_ckpt, "ssl_head_ckpt", ablation.name)
 
         if not (has_backbone and has_head):
@@ -146,13 +171,14 @@ def main(argv: List[str] | None = None) -> None:
 
         # ---------------------- SPATIAL CONFIG ----------------------
         spatial_config = yaml.safe_load(open(args.spatial_config_template))
-        spatial_config["experiment"]["outputs_root"] = str(ablation / "06_xai")
-        spatial_config["model"]["name"] = args.model_name
+        # outputs_root: {ablation}/xai  (NON più 06_xai/)
+        spatial_config["experiment"]["outputs_root"] = str(ablation / "xai")
+        spatial_config["model"]["name"] = head_model_name
         spatial_config["model"]["ssl_backbone_ckpt"] = str(backbone_ckpt)
         spatial_config["model"]["ssl_head_ckpt"] = str(head_ckpt)
         spatial_config["evaluation_inputs"]["eval_run_dir"] = str(eval_run)
 
-        spatial_config_path = ablation / "06_xai" / "config_xai.yaml"
+        spatial_config_path = ablation / "xai" / "config_xai.yaml"
         spatial_config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(spatial_config_path, "w") as f:
             yaml.dump(spatial_config, f)
@@ -160,14 +186,13 @@ def main(argv: List[str] | None = None) -> None:
 
         # ---------------------- CONCEPT CONFIG ----------------------
         concept_config = yaml.safe_load(open(args.concept_config_template))
-        concept_config["experiment"]["outputs_root"] = str(ablation / "06_xai")
-        concept_config["model"]["name"] = args.model_name
+        concept_config["experiment"]["outputs_root"] = str(ablation / "xai")
+        concept_config["model"]["name"] = head_model_name
         concept_config["model"]["ssl_backbone_ckpt"] = str(backbone_ckpt)
         concept_config["model"]["ssl_head_ckpt"] = str(head_ckpt)
         concept_config["evaluation_inputs"]["eval_run_dir"] = str(eval_run)
 
-        # se CONCEPT_BANK_CSV è definita nell'env (es. da run_full_xai.sh),
-        # forza l'uso di quel path per il concept bank
+        # Override del concept bank via env CONCEPT_BANK_CSV se presente
         concept_bank_csv_env = os.environ.get("CONCEPT_BANK_CSV")
         if concept_bank_csv_env:
             concept_config.setdefault("concepts", {})
@@ -176,14 +201,18 @@ def main(argv: List[str] | None = None) -> None:
                 f"[CFG] Overriding concepts.meta_csv with CONCEPT_BANK_CSV={concept_bank_csv_env}"
             )
 
-        concept_config_path = ablation / "06_xai" / "config_concept.yaml"
+        concept_config_path = ablation / "xai" / "config_concept.yaml"
         with open(concept_config_path, "w") as f:
             yaml.dump(concept_config, f)
         log.info(f"[CFG] Concept config written to {concept_config_path}")
 
+        # Log dir per questa ablation:
         datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_dir = f"/home/mla_group_01/rcc-ssrl/src/logs/xai/{backbone_base}/{ablation.name}/{datetime_str}"
-        spatial_sbatch = Path(__file__).parent / "spatial" / "xai_generate.sbatch"
+        log_dir = str(log_root / base_model_name / ablation.name / datetime_str)
+
+        spatial_sbatch = (
+            Path(__file__).parent / "spatial" / "xai_generate.sbatch"
+        )
         concept_sbatch = Path(__file__).parent / "concept" / "xai_concept.sbatch"
 
         log.info(f"[LAUNCH] Spatial XAI sbatch for {ablation.name}")
@@ -193,7 +222,7 @@ def main(argv: List[str] | None = None) -> None:
         run_sbatch(concept_sbatch, concept_config_path, log_dir)
 
     log.info("[DONE] run_explainability completed.")
-    log.info("       Check Slurm logs under /home/mla_group_01/rcc-ssrl/src/logs/xai/...")
+    log.info("       Check Slurm logs under logs/xai/{MODEL_NAME}/...")
 
 
 if __name__ == "__main__":
