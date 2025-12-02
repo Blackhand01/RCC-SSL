@@ -73,7 +73,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--max-patches-per-class",
         type=int,
-        default=2000,
+        default=500, 
         help="Maximum number of candidate patches per class_label (default: 2000).",
     )
     p.add_argument(

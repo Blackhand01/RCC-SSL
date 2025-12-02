@@ -525,15 +525,17 @@ selection:
 concepts:
   # default, sovrascrivibile via env CONCEPT_BANK_CSV
   meta_csv: "/home/mla_group_01/rcc-ssrl/src/explainability/concept/ontology/concepts_rcc_debug.csv"
+  # Nota: per Stage 2 XAI usare un concept bank generato in modalità "concept".
+  # Se usi un CSV prodotto con --vlm-mode describe (label tipicamente Unknown),
+  # disattiva il filtro sulle label impostando vlm_label_col: null.
 
   # mappatura colonne concept bank
   concept_name_col: "concept_name"
   key_col: "wds_key"
   group_col: "group"
   class_col: "class_label"
-  present_col: "present"
-  confidence_col: "confidence"
-  rationale_col: "rationale"
+  vlm_label_col: "vlm_label"        # optional; if present, only rows with vlm_label == vlm_positive_label are used
+  vlm_positive_label: "Present"
 
   similarity: "cosine"
   topk_per_patch: 5
@@ -547,21 +549,217 @@ concept/__init__.py codice <<
 # empty – marks "concept" as a package
 >>
 
+concept/ontology/analyze_vlm_log.py codice <<
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+from __future__ import annotations
+
+import argparse
+import json
+import re
+from collections import Counter, defaultdict
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+
+# Regex per blocchi REQUEST/RESPONSE
+BLOCK_RE = re.compile(
+    r"""
+    \[VLM-HF\]\s+>>> \s+REQUEST\s*\n
+    concept=(?P<concept>.+?)\n
+    image=(?P<image>.+?)\n
+    question_text[^\n]*\n
+    -+\n
+    \[VLM-HF\]\s+<<< \s+RESPONSE\s+concept=.*?\n
+    raw='(?P<raw>.*?)'\n
+    parsed_label=(?P<label>\w+)
+    """,
+    re.DOTALL | re.VERBOSE,
+)
+
+# Regex per DEBUG "Skipping empty assistant_answer"
+EMPTY_DEBUG_RE = re.compile(
+    r"""
+    \[DEBUG\]\s+Skipping\s+empty\s+assistant_answer\s+for\s+key=
+    (?P<key>[^,]+),
+    \s*concept=(?P<concept>.+)
+    """,
+    re.VERBOSE,
+)
+
+
+@dataclass
+class VLMRecord:
+    concept: str
+    image: str
+    raw: str
+    label: str
+
+
+def parse_log_text(text: str) -> Tuple[List[VLMRecord], Counter]:
+    """Parsa il log e restituisce (records, empty_answer_per_concept)."""
+    records: List[VLMRecord] = []
+
+    for m in BLOCK_RE.finditer(text):
+        concept = m.group("concept").strip()
+        image = m.group("image").strip()
+        raw = (m.group("raw") or "").strip()
+        label = m.group("label").strip()
+        records.append(VLMRecord(concept=concept, image=image, raw=raw, label=label))
+
+    empty_counts: Counter = Counter()
+    for m in EMPTY_DEBUG_RE.finditer(text):
+        concept = m.group("concept").strip()
+        empty_counts[concept] += 1
+
+    return records, empty_counts
+
+
+def compute_stats(records: List[VLMRecord], empty_counts: Counter) -> Dict[str, object]:
+    global_labels = Counter()
+    concept_stats: Dict[str, Counter] = defaultdict(Counter)
+
+    suspicious_unknown = 0  # Unknown ma testo suggerisce Present/Absent
+
+    for r in records:
+        global_labels[r.label] += 1
+        c = concept_stats[r.concept]
+
+        c["total"] += 1
+        c[f"label_{r.label}"] += 1
+
+        text = r.raw.lower()
+
+        # Pattern di "non vedo l'immagine"
+        if "image is not provided" in text or "cannot view the image" in text or "cannot make a decision" in text:
+            c["no_image_msg"] += 1
+
+        # Unknown ma con "present"/"absent" nella frase -> probabile parser rotto
+        if r.label == "Unknown":
+            if "present in the image" in text or "specific concept is present" in text:
+                c["unknown_but_sounds_present"] += 1
+                suspicious_unknown += 1
+            if "absent in the image" in text or "concept is absent" in text:
+                c["unknown_but_sounds_absent"] += 1
+                suspicious_unknown += 1
+
+    # Includi anche i contatori di risposte vuote
+    for concept, n_empty in empty_counts.items():
+        concept_stats[concept]["empty_raw_debug"] += n_empty
+
+    # Costruisci output strutturato
+    stats = {
+        "n_records": len(records),
+        "global_label_counts": global_labels,
+        "n_concepts": len(concept_stats),
+        "suspicious_unknown_count": suspicious_unknown,
+        "per_concept": {},
+    }
+
+    # Convert Counter in dict serializzabili
+    per_concept_serializable: Dict[str, Dict[str, int]] = {}
+    for concept, cnt in concept_stats.items():
+        per_concept_serializable[concept] = dict(cnt)
+
+    stats["per_concept"] = per_concept_serializable
+    return stats
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Analizza log VLM-HF (Stage 0 concept bank) e stampa statistiche."
+    )
+    parser.add_argument("logfile", type=str, help="Path al file di log da analizzare")
+    parser.add_argument(
+        "--top",
+        type=int,
+        default=0,
+        help="Se >0, mostra solo i top-N concetti per numero di record",
+    )
+    args = parser.parse_args()
+
+    path = Path(args.logfile)
+    if not path.is_file():
+        raise SystemExit(f"Log file non trovato: {path}")
+
+    text = path.read_text(encoding="utf-8", errors="ignore")
+
+    records, empty_counts = parse_log_text(text)
+    stats = compute_stats(records, empty_counts)
+
+    print(f"# Record totali: {stats['n_records']}")
+    print(f"# Concetti unici: {stats['n_concepts']}")
+    print("# Distribuzione globale delle label:")
+    for label, count in stats["global_label_counts"].items():
+        print(f"  {label:8s}: {count}")
+
+    print(f"# Unknown sospette (testo suggerisce present/absent): {stats['suspicious_unknown_count']}")
+
+    # Stampa per concetto (ordinato per numero di record)
+    per_concept = stats["per_concept"]
+    sorted_concepts = sorted(
+        per_concept.items(),
+        key=lambda kv: kv[1].get("total", 0),
+        reverse=True,
+    )
+
+    if args.top > 0:
+        sorted_concepts = sorted_concepts[: args.top]
+
+    print("\n# Statistiche per concetto:")
+    for concept, cnt in sorted_concepts:
+        total = cnt.get("total", 0)
+        if total == 0:
+            continue
+        lp = cnt.get("label_Present", 0)
+        la = cnt.get("label_Absent", 0)
+        lu = cnt.get("label_Unknown", 0)
+        no_img = cnt.get("no_image_msg", 0)
+        empty_raw = cnt.get("empty_raw_debug", 0)
+        unk_pres = cnt.get("unknown_but_sounds_present", 0)
+        unk_abs = cnt.get("unknown_but_sounds_absent", 0)
+
+        print(f"- {concept}")
+        print(f"    total          : {total}")
+        print(f"    Present        : {lp}")
+        print(f"    Absent         : {la}")
+        print(f"    Unknown        : {lu}")
+        print(f"    'no_image' msg : {no_img}")
+        print(f"    empty_raw      : {empty_raw}")
+        print(f"    Unknown→Present: {unk_pres}")
+        print(f"    Unknown→Absent : {unk_abs}")
+
+
+if __name__ == "__main__":
+    main()
+>>
+
 concept/ontology/build_concept_bank.py codice <<
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Dump grezzo delle risposte VLM per tutte le coppie (patch, concept).
+Stage 0b: costruzione "concept bank" RCC usando LLaVA-Med v1.5 (HF).
 
 Input:
-- Ontology YAML con i concetti (name, group, primary_class, prompt)
-- CSV di candidate patches: image_path, wds_key, class_label
-- Modello HF locale (LLaVA-Med) via VLMClientHF
+- Ontology YAML con la lista di concetti (name, group, primary_class, prompt).
+- CSV di candidate patches:
+    image_path,wds_key,class_label
+  generato da build_concept_candidates.py (Stage 0a).
 
 Output:
 - concepts_rcc_*.csv con colonne:
-    concept_name, wds_key, group, class_label, user_question, assistant_answer
-  (tutte le risposte del VLM, senza filtri/soglie, con prompt ripulito)
+    concept_name, wds_key, group, class_label,
+    vlm_label, user_question, assistant_answer
+
+DOVE:
+- vlm_label in {Present, Absent, Uncertain, Unknown}
+- user_question = testo dell'istruzione (senza template interno del modello)
+- assistant_answer = testo grezzo generato dal modello
+
+Nota: questo e ancora un dump "raw". Sta a te decidere se filtrare
+a posteriori solo i patch con vlm_label == "Present" prima di calcolare
+i centroidi concetto -> features.
 """
 
 from __future__ import annotations
@@ -575,20 +773,28 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from explainability.concept.ontology.vlm_client_hf import VLMClientHF
 
-# ----------------------------------------------------------------------
-# Helpers
-# ----------------------------------------------------------------------
+
 def _normalize_whitespace(s: str) -> str:
-    """Collassa spazi / newline multipli in un'unica riga pulita."""
     return " ".join(str(s).split())
 
 
 # ----------------------------------------------------------------------
-# Ontology loading + validation
+# Ontology
 # ----------------------------------------------------------------------
 def load_ontology(path: str | Path) -> List[Dict[str, Any]]:
-    """Load ontology YAML e valida i campi minimi per ciascun concept."""
+    """
+    Carica l'ontologia RCC (versione 1/2/debug) e valida i campi minimi.
+
+    Richiede per ogni concept:
+      - name (string)
+      - prompt (string)
+    Usa anche facoltativamente:
+      - group
+      - primary_class
+      - short_name
+    """
     path = Path(path)
     if not path.is_file():
         raise FileNotFoundError(f"Ontology YAML not found: {path}")
@@ -599,43 +805,47 @@ def load_ontology(path: str | Path) -> List[Dict[str, Any]]:
     if not isinstance(data, dict) or "concepts" not in data:
         raise ValueError(f"Ontology YAML must contain a 'concepts' list: {path}")
 
-    concepts_raw = data["concepts"]
-    if not isinstance(concepts_raw, list) or not concepts_raw:
+    raw_concepts = data["concepts"]
+    if not isinstance(raw_concepts, list) or not raw_concepts:
         raise ValueError(f"'concepts' must be a non-empty list in {path}")
 
-    concepts: List[Dict[str, Any]] = []
-    for idx, c in enumerate(concepts_raw):
+    out: List[Dict[str, Any]] = []
+    for idx, c in enumerate(raw_concepts):
         if not isinstance(c, dict):
             raise ValueError(f"Concept #{idx} is not a dict in {path}")
 
         name = str(c.get("name", "")).strip()
         prompt = str(c.get("prompt", "")).strip()
-
         if not name:
             raise ValueError(f"Concept #{idx} in {path} has empty 'name'")
         if not prompt:
             raise ValueError(f"Concept '{name}' in {path} has empty 'prompt'")
 
-        concepts.append(
+        out.append(
             {
                 "name": name,
                 "prompt": prompt,
                 "group": c.get("group"),
                 "primary_class": c.get("primary_class"),
+                "short_name": c.get("short_name"),
             }
         )
 
-    return concepts
+    return out
 
 
 # ----------------------------------------------------------------------
-# Main
+# CLI + main
 # ----------------------------------------------------------------------
 def main(argv: Optional[List[str]] = None) -> None:
     parser = argparse.ArgumentParser(
-        description="Dump raw VLM outputs for RCC concept bank."
+        description="Build RCC concept bank via LLaVA-Med v1.5 (HF)."
     )
-    parser.add_argument("--ontology", required=True, help="Ontology YAML path")
+    parser.add_argument(
+        "--ontology",
+        required=True,
+        help="Ontology YAML path (e.g. ontology_rcc_v2.yaml)",
+    )
     parser.add_argument(
         "--images-csv",
         required=True,
@@ -644,11 +854,21 @@ def main(argv: Optional[List[str]] = None) -> None:
     parser.add_argument(
         "--model-name",
         type=str,
-        default="Eren-Senoglu/llava-med-v1.5-mistral-7b-hf",
+        default="chaoyinshe/llava-med-v1.5-mistral-7b-hf",
         help=(
             "HF model id or local path for the VLM "
-            "(e.g. 'Eren-Senoglu/llava-med-v1.5-mistral-7b-hf' or a local directory). "
-            "If you launch via run_full_xai.sh, this is overridden by VLM_MODEL_PATH."
+            "(default: microsoft/llava-med-v1.5-mistral-7b)."
+        ),
+    )
+    parser.add_argument(
+        "--vlm-mode",
+        type=str,
+        default="concept",
+        choices=["concept", "describe"],
+        help=(
+            "Prompting mode for the VLM. "
+            "'concept' = Present/Absent/Uncertain classifier; "
+            "'describe' = free-form image description."
         ),
     )
     parser.add_argument(
@@ -662,25 +882,24 @@ def main(argv: Optional[List[str]] = None) -> None:
         default=0,
         help="If > 0, limit the number of candidate patches processed (debug).",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=1337,
+        help="Random seed for subsampling (if max-images > 0).",
+    )
     args = parser.parse_args(argv)
 
-    # Ontology
+    # 1) Ontologia
     concepts = load_ontology(args.ontology)
 
-    # VLM client
-    try:
-        from explainability.concept.ontology.vlm_client_hf import VLMClientHF
-    except Exception as exc:  # pragma: no cover - dependency guard
-        raise RuntimeError(
-            "HF backend requested but transformers/torch dependencies are missing. "
-            "Install them in the same venv used for explainability."
-        ) from exc
+    # 2) VLM client (HF)
+    vlm = VLMClientHF(
+        args.model_name,
+        mode=args.vlm_mode,
+    )
 
-    vlm = VLMClientHF(args.model_name)
-
-    # ------------------------------------------------------------------
-    # Read candidate patches + validation
-    # ------------------------------------------------------------------
+    # 3) Candidate patches: image_path, wds_key, class_label
     images_csv_path = Path(args.images_csv)
     if not images_csv_path.is_file():
         raise FileNotFoundError(f"Images CSV not found: {images_csv_path}")
@@ -688,22 +907,20 @@ def main(argv: Optional[List[str]] = None) -> None:
     rows: List[Dict[str, str]] = []
     with images_csv_path.open() as f:
         reader = csv.DictReader(f)
-        fieldnames = reader.fieldnames or []
-        required_cols = {"image_path", "wds_key", "class_label"}
-        missing = required_cols - set(fieldnames)
+        fields = reader.fieldnames or []
+        required = {"image_path", "wds_key", "class_label"}
+        missing = required - set(fields)
         if missing:
             raise ValueError(
-                f"Images CSV {images_csv_path} is missing required columns: {sorted(missing)}"
+                f"Images CSV {images_csv_path} missing required columns: {sorted(missing)}"
             )
 
         for r in reader:
             image_path = (r.get("image_path") or "").strip()
             wds_key = (r.get("wds_key") or "").strip()
             class_label = (r.get("class_label") or "").strip()
-
             if not image_path or not wds_key or not class_label:
                 continue
-
             rows.append(
                 {
                     "image_path": image_path,
@@ -714,36 +931,38 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     if not rows:
         raise RuntimeError(
-            f"Concept bank: no valid candidate patches in {images_csv_path}. "
+            f"No valid candidate patches in {images_csv_path}. "
             "Stage 0a (build_concept_candidates) probably failed or produced an empty CSV."
         )
 
-    # Debug mode: limit number of patches (e.g. 100) to reduce queries
+    # Subsample opzionale per debug
     if args.max_images and args.max_images > 0:
-        rng = random.Random(1337)
+        rng = random.Random(args.seed)
         rng.shuffle(rows)
         rows = rows[: args.max_images]
 
     out_path = Path(args.out_csv)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    t_start = time.time()
-    total_rows = len(rows)
-    total_concepts = len(concepts)
-    total_planned_queries = total_rows * total_concepts
+    n_patches = len(rows)
+    n_concepts = len(concepts)
+    if vlm.mode == "describe":
+        total_planned = n_patches
+    else:
+        total_planned = n_patches * n_concepts
+
     print(
-        f"[INFO] Concept bank RAW: candidates={total_rows}, concepts={total_concepts}, "
-        f"max_queries={total_planned_queries}, model_name={args.model_name}"
+        f"[INFO] Concept bank RAW: candidates={n_patches}, concepts={n_concepts}, "
+        f"max_queries={total_planned}, model_name={args.model_name}"
     )
 
     total_queries = 0
     written_rows = 0
-    skipped_empty_answer = 0
+    skipped_empty = 0
+
+    t0_global = time.time()
     log_every = 200  # stampa ogni N query
 
-    # ------------------------------------------------------------------
-    # Write output CSV
-    # ------------------------------------------------------------------
     with out_path.open("w", newline="") as out_f:
         writer = csv.writer(out_f)
         writer.writerow(
@@ -752,83 +971,94 @@ def main(argv: Optional[List[str]] = None) -> None:
                 "wds_key",
                 "group",
                 "class_label",
+                "vlm_label",
                 "user_question",
                 "assistant_answer",
             ]
         )
 
-        for r_idx, r in enumerate(rows):
+        for r in rows:
             img_path = r["image_path"]
             key = r["wds_key"]
-            patch_class = r.get("class_label", "")
+            patch_class = r["class_label"]
 
-            for c_idx, c in enumerate(concepts):
-                concept_name = c["name"]
-                concept_group = c.get("group")
-                concept_prompt = c["prompt"]
+            if vlm.mode == "describe":
+                concepts_iter = [None]
+            else:
+                concepts_iter = concepts
 
-                # user_question costruita in modo deterministico (non prendiamo il prompt echiato dal modello)
-                user_question = _normalize_whitespace(
-                    f"For this RCC patch, is the concept '{concept_name}' present? "
-                    f"Definition: {concept_prompt}"
-                )
+            for c in concepts_iter:
+                if vlm.mode == "describe":
+                    concept_name = "image_description"
+                    concept_group = None
+                    concept_prompt = ""
+                else:
+                    concept_name = c["name"]
+                    concept_group = c.get("group")
+                    concept_prompt = c["prompt"]
 
                 t0 = time.time()
                 try:
-                    ans = vlm.ask_concept(img_path, concept_name, concept_prompt)
+                    if vlm.mode == "describe":
+                        ans = vlm.ask_concept(
+                            img_path,
+                            concept_name,
+                            concept_prompt,
+                            temperature=0.7,
+                            max_new_tokens=256,
+                        )
+                    else:
+                        ans = vlm.ask_concept(
+                            img_path,
+                            concept_name,
+                            concept_prompt,
+                        )
                 except RuntimeError as e:
                     total_queries += 1
                     dt = time.time() - t0
-                    if getattr(vlm, "debug", False):
-                        print(
-                            f"[BANK DEBUG] RuntimeError for key={key}, concept={concept_name}, "
-                            f"class={patch_class}, dt={dt:.2f}s\n{e}\n{'-'*80}"
-                        )
-                    if total_queries <= 10:
-                        print(
-                            f"[WARN] VLM error for key={key}, concept={concept_name}: {e}"
-                        )
+                    print(
+                        f"[WARN] VLM runtime error for key={key}, "
+                        f"concept={concept_name}, dt={dt:.2f}s: {e}"
+                    )
                     continue
 
                 dt = time.time() - t0
                 total_queries += 1
 
-                if total_queries % log_every == 0:
-                    elapsed = time.time() - t_start
-                    avg_per_query = elapsed / max(1, total_queries)
-                    remaining = total_planned_queries - total_queries
-                    est_remain = remaining * avg_per_query
+                if total_queries % log_every == 0 or total_queries == 1:
+                    elapsed = time.time() - t0_global
+                    avg = elapsed / max(1, total_queries)
+                    remaining = total_planned - total_queries
+                    eta_min = (remaining * avg) / 60.0
                     print(
-                        f"[PROGRESS] queries={total_queries}/{total_planned_queries} "
-                        f"({100.0*total_queries/total_planned_queries:.1f}%), "
+                        f"[PROGRESS] queries={total_queries}/{total_planned} "
+                        f"({100.0*total_queries/total_planned:.1f}%), "
                         f"elapsed={elapsed/60:.1f} min, "
-                        f"avg_per_query={avg_per_query:.2f} s, "
-                        f"ETA~{est_remain/60:.1f} min"
+                        f"avg={avg:.2f} s/query, "
+                        f"ETA~{eta_min:.1f} min"
                     )
 
-                # Risposta vuota o non nel formato atteso
                 if not ans or not isinstance(ans, dict):
-                    if total_queries <= 10:
+                    skipped_empty += 1
+                    if skipped_empty <= 10:
                         print(
-                            f"[DEBUG] Empty/invalid VLM answer (non-dict) for key={key}, "
-                            f"concept={concept_name}"
+                            f"[DEBUG] Empty/invalid VLM answer for "
+                            f"key={key}, concept={concept_name}"
                         )
                     continue
 
-                # VLMClientHF ora restituisce: {"concept", "user_question", "assistant_answer"}
-                assistant_answer = _normalize_whitespace(
-                    ans.get("assistant_answer", "") or ""
-                )
-                user_question_full = _normalize_whitespace(
-                    ans.get("user_question", user_question) or ""
-                )
+                raw = (ans.get("raw_response") or "").strip()
+                question_text = ans.get("question_text") or ""
+                vlm_label = ans.get("parsed_label") or "Unknown"
 
-                if not assistant_answer:
-                    skipped_empty_answer += 1
-                    if skipped_empty_answer <= 10:
+                # In 'describe' mode the parser will usually emit 'Unknown' because
+                # we no longer force a single-word categorical answer.
+                if not raw:
+                    skipped_empty += 1
+                    if skipped_empty <= 10:
                         print(
-                            f"[DEBUG] Skipping empty assistant_answer for key={key}, "
-                            f"concept={concept_name}"
+                            f"[DEBUG] Skipping empty assistant_answer for "
+                            f"key={key}, concept={concept_name}"
                         )
                     continue
 
@@ -838,19 +1068,20 @@ def main(argv: Optional[List[str]] = None) -> None:
                         key,
                         concept_group,
                         patch_class,
-                        user_question_full,
-                        assistant_answer,
+                        vlm_label,
+                        _normalize_whitespace(question_text),
+                        _normalize_whitespace(raw),
                     ]
                 )
                 written_rows += 1
 
-    total_elapsed = time.time() - t_start
+    elapsed_total = time.time() - t0_global
     print(
         f"[SUMMARY] Concept bank RAW dump: "
-        f"candidates={total_rows}, concepts={total_concepts}, "
+        f"candidates={n_patches}, concepts={n_concepts}, "
         f"queries={total_queries}, written_rows={written_rows}, "
-        f"skipped_empty_answer={skipped_empty_answer}, "
-        f"elapsed={total_elapsed/60:.1f} min"
+        f"skipped_empty_answer={skipped_empty}, "
+        f"elapsed={elapsed_total/60:.1f} min"
     )
 
     if written_rows == 0:
@@ -860,7 +1091,6 @@ def main(argv: Optional[List[str]] = None) -> None:
         )
 
     print(f"[OK] Concept bank written to {out_path}")
-
 
 if __name__ == "__main__":
     main()
@@ -942,7 +1172,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--max-patches-per-class",
         type=int,
-        default=2000,
+        default=100, 
         help="Maximum number of candidate patches per class_label (default: 2000).",
     )
     p.add_argument(
@@ -1339,51 +1569,86 @@ concept/ontology/vlm_client_hf.py codice <<
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Client locale (no HTTP) per LLaVA-Med via Hugging Face.
+Client locale per LLaVA-Med v1.5 (o modelli compatibili) via Hugging Face.
 
-Contratto:
-- dato (image_path, concept_name, base_prompt) costruisce un prompt completo
-  per il VLM (user_question) e ottiene una risposta testuale (assistant_answer).
-- Ritorna un dict con:
-    - concept
-    - user_question  (prompt completo, lato "utente" - esattamente cio che va al modello)
-    - assistant_answer (testo generato dal modello)
+- Usa l'interfaccia "image-text-to-text" standard:
+  * messages (role/content) + apply_chat_template
+  * AutoProcessor + LlavaForConditionalGeneration
+
+- Contratto esterno compatibile col vecchio VLMClientHF:
+    VLMClientHF(model_name, device=None, dtype="bfloat16", debug=None)
+    .ask_concept(image_path, concept_name, base_prompt, temperature, max_new_tokens)
+
+- NOTA: per coerenza con LLaVA-Med, la lingua dell'istruzione e inglese.
+  Il default usa il checkpoint HF compatibile: chaoyinshe/llava-med-v1.5-mistral-7b-hf
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 from PIL import Image
-from transformers import AutoModelForImageTextToText, AutoProcessor
+from transformers import AutoProcessor, LlavaForConditionalGeneration
+
+
+ImageLike = Union[str, Path, Image.Image]
+
+
+@dataclass
+class ConceptResponse:
+    concept: str
+    question_text: str
+    messages: List[Dict[str, Any]]
+    raw_response: str
+    parsed_label: str  # "Present" / "Absent" / "Uncertain" / "Unknown"
 
 
 class VLMClientHF:
-    """LLaVA-Med locale via Hugging Face (no controller/worker HTTP)."""
+    """
+    Client per modelli LLaVA-like in formato HF "image-text-to-text".
+
+    Default: chaoyinshe/llava-med-v1.5-mistral-7b-hf (HF compatibile)
+    """
 
     def __init__(
         self,
-        model_name: str,
+        model_name: str = "chaoyinshe/llava-med-v1.5-mistral-7b-hf",
         device: Optional[str] = None,
-        dtype: str = "float16",
+        dtype: str = "bfloat16",
         debug: Optional[bool] = None,
+        mode: str = "describe",
     ) -> None:
         self.model_name = model_name
+        # Respect the default 'describe' when mode is None/empty.
+        mode = (mode or "describe").lower()
+        if mode not in {"concept", "describe"}:
+            raise ValueError(
+                f"Unsupported VLM mode: {mode!r} (expected 'concept' or 'describe')"
+            )
+        self.mode = mode
 
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
 
-        if dtype == "bfloat16":
-            model_dtype = torch.bfloat16
+        # Dtype: BF16 consigliato per llava-med su GPU A40; FP32 su CPU
+        if self.device == "cuda":
+            if dtype.lower() == "float16":
+                model_dtype = torch.float16
+            elif dtype.lower() == "bfloat16":
+                model_dtype = torch.bfloat16
+            else:
+                model_dtype = torch.float32
         else:
-            model_dtype = torch.float16
+            model_dtype = torch.float32
 
-        # debug esplicito > env > default False
+        # Debug: env VLM_DEBUG=1 abilita logging verboso
         if debug is None:
             self.debug = os.getenv("VLM_DEBUG", "0") == "1"
         else:
@@ -1391,201 +1656,296 @@ class VLMClientHF:
 
         if self.debug:
             print(
-                f"[VLM-HF DEBUG] Loading model '{self.model_name}' "
-                f"on {self.device} dtype={model_dtype}"
+                f"[VLM-HF] Loading model '{self.model_name}' "
+                f"on device={self.device}, dtype={model_dtype} "
+                "(LlavaForConditionalGeneration)"
             )
 
+        # Processor + modello con supporto multimodale (LlavaForConditionalGeneration)
         try:
-            self.processor = AutoProcessor.from_pretrained(
-                self.model_name,
-                use_fast=True,
-                trust_remote_code=True,
-            )
-        except ValueError as exc:
+            self.processor = AutoProcessor.from_pretrained(self.model_name)
+        except Exception as exc:
             raise RuntimeError(
-                "AutoProcessor failed to load the HF checkpoint. "
-                "If the model type is not recognized (e.g., llava_mistral), "
-                "upgrade transformers or install with trust_remote_code support."
+                f"Failed to load AutoProcessor for {self.model_name}. "
+                "Upgrade 'transformers' to a version that supports llava_mistral."
             ) from exc
 
         try:
-            self.model = AutoModelForImageTextToText.from_pretrained(
+            self.model = LlavaForConditionalGeneration.from_pretrained(
                 self.model_name,
-                dtype=model_dtype,
-                device_map="auto" if self.device == "cuda" else None,
-                trust_remote_code=True,
-            )
-        except ValueError as exc:
+                torch_dtype=model_dtype,
+                device_map=None,  # singola GPU/CPU; spostiamo noi su device
+            ).to(self.device)
+        except Exception as exc:
             raise RuntimeError(
-                "AutoModelForImageTextToText failed to load the HF checkpoint. "
-                "If you see 'model type llava_mistral not recognized', upgrade transformers "
-                "or install from source, and ensure trust_remote_code is allowed."
+                f"Failed to load LlavaForConditionalGeneration for {self.model_name}. "
+                "Upgrade 'transformers' and ensure support for model type llava_mistral."
             ) from exc
+
         self.model.eval()
 
-        # Alcuni checkpoint HF (es. llava-med-v1.5-mistral-7b-hf) non popolano patch_size nel processor:
-        # serve per espandere il token <image> in processing_llava.py. Recuperalo dalla vision_config se manca.
+        # Fallback patch_size se mancante (vecchie versioni transformers)
         if getattr(self.processor, "patch_size", None) is None:
             vision_cfg = getattr(self.model.config, "vision_config", None)
-            patch_size = getattr(vision_cfg, "patch_size", None) if vision_cfg else None
+            patch_size = getattr(vision_cfg, "patch_size", None)
             patch_size = patch_size or getattr(
-                self.processor.image_processor, "patch_size", None
+                getattr(self.processor, "image_processor", None), "patch_size", None
             )
             if patch_size is None:
-                patch_size = 14  # fallback ragionevole per ViT-L/14
+                patch_size = 14
                 if self.debug:
                     print(
-                        "[VLM-HF DEBUG] patch_size non trovato nel processor; uso fallback 14"
+                        "[VLM-HF] 'patch_size' not found; using fallback 14 "
+                        "(ViT-L/14-compatible)."
                     )
             self.processor.patch_size = patch_size
 
     # ------------------------------------------------------------------
-    # Prompt helper
+    # Prompt building
     # ------------------------------------------------------------------
-    def _build_prompt(self, concept_name: str, base_prompt: str) -> str:
+    def _build_question_text(self, concept_name: str, base_prompt: str) -> str:
         """
-        Costruisce la user_question per classificare presenza/assenza del concetto.
+        Testo dell'istruzione lato utente.
 
-        Se il processor supporta una chat_template, la usiamo; altrimenti
-        cadiamo sul classico pattern <image> + USER/ASSISTANT.
+        - In mode 'concept': classificatore Present/Absent/Uncertain (comportamento attuale).
+        - In mode 'describe': descrizione libera, senza label categoriche.
         """
-        system = (
-            "You are a board-certified renal pathologist, acting as a classifier "
-            "for histologic concepts in renal tumor histology images. "
-            "Your task is to decide whether a specific histologic concept is present "
-            "or absent in a single image patch. "
-            "Respond with only one of the following options: 'Present', 'Absent', or 'Uncertain'."
-        )
-
-        user_instruction = (
-            f"{system}\n\n"
-            "Analyse the attached histology patch.\n"
+        if self.mode == "describe":
+            return (
+                "Carefully examine the attached patch."
+                "Which histologic concepts you can clearly identify?"
+                "Write a concise but information-dense answer."
+            )
+                
+        return (
+            "You are a board-certified renal pathologist acting as a classifier "
+            "for histologic concepts in renal tissue histology patches.\n\n"
             f"Target concept: {concept_name}\n"
             f"Definition of the concept:\n{base_prompt}\n\n"
-            "Your task is to decide if this specific histologic concept is present "
-            "or absent in this image patch derived from renal tumor tissue.\n"
-            "Respond with only one of the following options: 'Present', 'Absent', or 'Uncertain'."
+            "Task: Look only at the attached histology patch and decide whether "
+            "THIS specific concept is uncertain or present or absent in the image.\n"
+            "Respond with First line ONE SINGLE WORD only, choosing strictly among:\n"
+            "  - Present\n"
+            "  - Absent\n"
+            "  - Uncertain\n"
+            "Second line: Add explanations.\n"
         )
 
-        # Se esiste una chat template, usiamola (nuove versioni HF + Eren-Senoglu lo espongono)
-        apply_chat_template = getattr(self.processor, "apply_chat_template", None)
-        if callable(apply_chat_template):
-            try:
-                messages = [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "image"},
-                            {"type": "text", "text": user_instruction},
-                        ],
-                    }
-                ]
-                prompt = apply_chat_template(
-                    messages,
-                    add_generation_prompt=True,
-                )
-            except Exception as exc:
-                if self.debug:
-                    print(
-                        "[VLM-HF DEBUG] apply_chat_template failed, falling back to "
-                        f"manual prompt. Error: {exc}"
-                    )
-                prompt = f"<image>\nUSER: {user_instruction}\nASSISTANT:"
-        else:
-            # Fallback in stile LLaVA classico
-            prompt = f"<image>\nUSER: {user_instruction}\nASSISTANT:"
+    def _build_messages(
+        self, concept_name: str, base_prompt: str
+    ) -> tuple[List[Dict[str, Any]], str]:
+        """
+        Costruisce la conversazione nello standard HF:
+        messages = [{role: 'user', content: [{type: 'image'}, {type: 'text', ...}]}]
+        """
+        question_text = self._build_question_text(concept_name, base_prompt)
+        messages: List[Dict[str, Any]] = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image"},
+                    {"type": "text", "text": question_text},
+                ],
+            }
+        ]
+        return messages, question_text
 
-        return prompt
+    # ------------------------------------------------------------------
+    # Parsing della label
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _parse_label(raw: str) -> str:
+        """
+        Mappa la risposta in {Present, Absent, Uncertain, Unknown}
+        in modo ultra-conservativo:
+
+        - accetta solo risposte "pulite":
+            Present / Absent / Uncertain / Unknown (con o senza punteggiatura finale)
+            Yes / No -> mappate su Present / Absent
+        - qualunque output discorsivo viene marcato Unknown.
+        """
+        if not raw:
+            return "Unknown"
+
+        text = raw.strip()
+        if not text:
+            return "Unknown"
+
+        # usa solo la prima riga, per evitare prompt/templating residui
+        first_line = text.splitlines()[0].strip()
+        first_line = first_line.strip(" \"'")
+        lower = first_line.lower()
+
+        m = re.match(r"^(present|absent|uncertain|unknown)[\\.!?]*$", lower)
+        if m:
+            token = m.group(1)
+            if token == "present":
+                return "Present"
+            if token == "absent":
+                return "Absent"
+            if token == "uncertain":
+                return "Uncertain"
+            return "Unknown"
+
+        m_yn = re.match(r"^(yes|no)[\\.!?]*$", lower)
+        if m_yn:
+            return "Present" if m_yn.group(1) == "yes" else "Absent"
+
+        return "Unknown"
 
     # ------------------------------------------------------------------
     # API principale
     # ------------------------------------------------------------------
     def ask_concept(
         self,
-        image_path: str | Path,
+        image_path: ImageLike,
         concept_name: str,
         base_prompt: str,
-        temperature: float = 0.2,
-        max_new_tokens: int = 128,
+        temperature: float = 0.0,
+        max_new_tokens: int = 32,
     ) -> Optional[Dict[str, Any]]:
         """
-        Esegue una singola query e ritorna:
-        - user_question: prompt completo passato al modello
-        - assistant_answer: testo grezzo generato dal modello
+        Esegue una singola query concept-level.
+
+        NOTE:
+        - In mode 'concept' behaves as classifier.
+        - In mode 'describe' parsed_label will typically be 'Unknown'; the free-form
+          description lives in raw_response.
+
+        Ritorna un dict serializzabile (usato da build_concept_bank.py):
+        {
+          "concept": str,
+          "question_text": str,
+          "messages": [...],
+          "raw_response": str,
+          "parsed_label": str
+        }
         """
 
-        image_path = Path(image_path)
-        if not image_path.is_file():
-            if self.debug:
-                print(f"[VLM-HF DEBUG] Image not found: {image_path}")
-            return None
+        # Carica immagine
+        if isinstance(image_path, (str, Path)):
+            image_path = Path(image_path)
+            if not image_path.is_file():
+                if self.debug:
+                    print(f"[VLM-HF] Image not found: {image_path}")
+                return None
+            image = Image.open(image_path).convert("RGB")
+        elif isinstance(image_path, Image.Image):
+            image = image_path.convert("RGB")
+        else:
+            raise TypeError(f"Unsupported image_path type: {type(image_path)}")
 
-        image = Image.open(image_path).convert("RGB")
-        user_question = self._build_prompt(concept_name, base_prompt)
+        messages, question_text = self._build_messages(concept_name, base_prompt)
 
         if self.debug:
             print(
-                f"[VLM-HF DEBUG] >>> REQUEST\n"
-                f"image={image_path}\n"
+                f"[VLM-HF] >>> REQUEST\n"
                 f"concept={concept_name}\n"
-                f"prompt_preview={user_question[:200]}...\n"
+                f"image={image_path}\n"
+                f"question_text (full)={question_text!r}\n"
                 f"{'-'*60}"
             )
 
+        # Applichiamo il chat template del modello (standard LLaVA / HF)
+        prompt: str
+        processor_has_template = getattr(self.processor, "chat_template", None) not in (
+            None,
+            "",
+        )
+
+        if hasattr(self.processor, "apply_chat_template") and processor_has_template:
+            prompt = self.processor.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+            )
+        else:
+            tok = getattr(self.processor, "tokenizer", None)
+            tok_has_template = (
+                tok is not None
+                and getattr(tok, "chat_template", None) not in (None, "")
+                and hasattr(tok, "apply_chat_template")
+            )
+
+            if tok_has_template:
+                prompt = tok.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+            else:
+                # Fallback minimale stile USER/ASSISTANT con immagine
+                if self.debug:
+                    print(
+                        "[VLM-HF] No chat_template on processor/tokenizer; "
+                        "falling back to manual single-turn prompt."
+                    )
+
+                user_text_parts = []
+                for m in messages:
+                    if m.get("role") != "user":
+                        continue
+                    for item in m.get("content", []):
+                        if item.get("type") == "text":
+                            user_text_parts.append(item.get("text", ""))
+
+                user_text = "\n".join(user_text_parts)
+                prompt = f"USER: <image>\n{user_text}\nASSISTANT:"
+
         inputs = self.processor(
-            text=[user_question],
+            text=prompt,
             images=[image],
             return_tensors="pt",
-        )
+        ).to(self.device)
 
-        if self.debug:
-            pix = inputs.get("pixel_values", None)
-            ids = inputs.get("input_ids", None)
-            print(
-                "[VLM-HF DEBUG] processor outputs: "
-                f"pixel_values_shape={None if pix is None else tuple(pix.shape)}, "
-                f"input_ids_shape={None if ids is None else tuple(ids.shape)}"
+        input_ids = inputs["input_ids"]
+        prompt_len = input_ids.shape[1]
+
+        gen_kwargs: Dict[str, Any] = {
+            "max_new_tokens": int(max_new_tokens),
+        }
+        if temperature and temperature > 0.0:
+            gen_kwargs.update(
+                dict(
+                    do_sample=True,
+                    temperature=float(temperature),
+                    top_p=0.9,
+                )
             )
-
-        inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
         with torch.no_grad():
-            generate_kwargs: Dict[str, Any] = {
-                "max_new_tokens": int(max_new_tokens),
-            }
-            if temperature and temperature > 0:
-                generate_kwargs.update(
-                    dict(
-                        do_sample=True,
-                        temperature=float(temperature),
-                        top_p=0.9,
-                    )
-                )
+            generated_ids = self.model.generate(
+                **inputs,
+                **gen_kwargs,
+            )
 
-            output_ids = self.model.generate(**inputs, **generate_kwargs)
+        gen_ids = generated_ids[:, prompt_len:]
 
         decoded = self.processor.batch_decode(
-            output_ids, skip_special_tokens=True
+            gen_ids, skip_special_tokens=True
         )
-        assistant_answer = decoded[0].strip() if decoded else "Error: no answer from VLM received"
+        raw = decoded[0].strip() if decoded else ""
+
+        label = self._parse_label(raw)
 
         if self.debug:
             print(
-                f"[VLM-HF DEBUG] <<< RAW COMPLETION for concept={concept_name}, "
-                f"image={image_path}\n"
-                f"{assistant_answer}\n{'='*80}"
+                f"[VLM-HF] <<< RESPONSE concept={concept_name}\n"
+                f"raw={raw!r}\nparsed_label={label}\n{'='*80}"
             )
 
+        # Dict serializzabile (messages -> JSON piu avanti)
         return {
             "concept": concept_name,
-            "user_question": user_question,
-            "assistant_answer": assistant_answer,
+            "question_text": question_text,
+            "messages": messages,
+            "raw_response": raw,
+            "parsed_label": label,
         }
 
 
 if __name__ == "__main__":
-    # debug rapido
-    print(json.dumps({"status": "ok"}))
+    # Smoke test minimale (solo per debug ambienti, non per produzione)
+    print(json.dumps({"status": "vlm_client_hf_ok"}))
 >>
 
 concept/xai_concept.py codice <<
@@ -1648,26 +2008,58 @@ def load_concept_bank(cfg_concepts: Dict[str, Any], log: logging.Logger):
     key_col = cfg_concepts["key_col"]
     group_col = cfg_concepts.get("group_col")
     class_col = cfg_concepts.get("class_col")
+    label_col_cfg = cfg_concepts.get("vlm_label_col")
+    positive_label = (cfg_concepts.get("vlm_positive_label") or "Present").strip()
+    label_col = label_col_cfg.strip() if isinstance(label_col_cfg, str) else None
 
     concept_to_keys: Dict[str, List[str]] = {}
     concept_meta: Dict[str, Dict[str, Any]] = {}
     concept_keys: Set[str] = set()
+    total_rows = 0
+    filtered_by_label = 0
 
     with open(meta_csv) as f:
         reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames or []
+        # Label filtering is applied only if explicitly configured.
+        use_label_filter = False
+        if label_col:
+            use_label_filter = True
+
+        if use_label_filter and label_col not in fieldnames:
+            log.warning(
+                f"Concept bank: requested label column '{label_col}' not found; "
+                "disabling VLM-based filtering."
+            )
+            use_label_filter = False
+
         for row in reader:
-            cname = row[name_col]
-            key = row[key_col]
+            total_rows += 1
+            cname = row.get(name_col)
+            key = row.get(key_col)
             if not cname or not key:
                 continue
+
+            if use_label_filter:
+                label_val = (row.get(label_col) or "").strip()
+                if not label_val or label_val.lower() != positive_label.lower():
+                    filtered_by_label += 1
+                    continue
+
             concept_to_keys.setdefault(cname, []).append(key)
             concept_keys.add(key)
             if cname not in concept_meta:
                 concept_meta[cname] = {
-                    "group": row.get(group_col) if group_col in (reader.fieldnames or []) else None,
-                    "class_label": row.get(class_col) if class_col in (reader.fieldnames or []) else None,
+                    "group": row.get(group_col) if group_col in fieldnames else None,
+                    "class_label": row.get(class_col) if class_col in fieldnames else None,
                 }
 
+    if use_label_filter:
+        kept = total_rows - filtered_by_label
+        log.info(
+            f"Concept bank filter: kept {kept}/{total_rows} rows with "
+            f"{label_col} == '{positive_label}'."
+        )
     log.info(
         f"Loaded concept bank: {len(concept_to_keys)} concepts, {len(concept_keys)} unique keys."
     )
@@ -2365,12 +2757,12 @@ CANDIDATES_CSV="${SRC_DIR}/explainability/concept/ontology/concept_candidates_rc
 CANDIDATES_IMG_ROOT="${SRC_DIR}/explainability/concept/ontology/concept_candidates_images"
 
 # Ontologia + concept bank usati per Stage 0 e Stage 2 
-VERS="debug"  # ontology + concept bank version (EDIT HERE)
+VERS="v1"  # ontology + concept bank version (EDIT HERE)
 ONTOLOGY_YAML="${SRC_DIR}/explainability/concept/ontology/ontology_rcc_${VERS}.yaml"
 CONCEPT_BANK_CSV="${SRC_DIR}/explainability/concept/ontology/concepts_rcc_${VERS}.csv"
 
-# VLM (LLaVA-Med) – HF ONLY
-VLM_MODEL_PATH="Eren-Senoglu/llava-med-v1.5-mistral-7b-hf"
+# VLM (LLaVA-Med) – HF ONLY (checkpoint HF-compatibile, no trust_remote_code)
+VLM_MODEL_PATH="chaoyinshe/llava-med-v1.5-mistral-7b-hf"
 
 # Flags opzionali (per futura estensione; al momento solo log)
 ONLY_SPATIAL="${ONLY_SPATIAL:-0}"
@@ -2448,6 +2840,7 @@ if [[ "${num_lines}" -le 1 ]]; then
     --ontology "${ONTOLOGY_YAML}" \
     --images-csv "${CANDIDATES_CSV}" \
     --model-name "${VLM_MODEL_PATH}" \
+    --vlm-mode describe \
     --out-csv "${CONCEPT_BANK_CSV}" \
     --max-images 0
 

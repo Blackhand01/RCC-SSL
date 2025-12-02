@@ -1,0 +1,2 @@
+job_id	job_name	model	yaml_path	run_name	exp_group	slurm_log
+996071	trJabl50	i_jepa	/home/mla_group_01/rcc-ssrl/src/training/configs/ablations/i_jepa/exp_i_jepa_abl50.yaml	trJabl50	exp_20251201_222209_i_jepa	/home/mla_group_01/rcc-ssrl/src/logs/i_jepa/trJabl50_996071.out

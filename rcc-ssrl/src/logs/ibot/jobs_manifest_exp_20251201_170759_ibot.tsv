@@ -1,0 +1,2 @@
+job_id	job_name	model	yaml_path	run_name	exp_group	slurm_log
+995595	trBabl08	ibot	/home/mla_group_01/rcc-ssrl/src/training/configs/ablations/ibot/exp_ibot_abl08.yaml	trBabl08	exp_20251201_170759_ibot	/home/mla_group_01/rcc-ssrl/src/logs/ibot/trBabl08_995595.out

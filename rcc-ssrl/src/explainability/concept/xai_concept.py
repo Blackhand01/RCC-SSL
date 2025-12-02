@@ -57,26 +57,58 @@ def load_concept_bank(cfg_concepts: Dict[str, Any], log: logging.Logger):
     key_col = cfg_concepts["key_col"]
     group_col = cfg_concepts.get("group_col")
     class_col = cfg_concepts.get("class_col")
+    label_col_cfg = cfg_concepts.get("vlm_label_col")
+    positive_label = (cfg_concepts.get("vlm_positive_label") or "Present").strip()
+    label_col = label_col_cfg.strip() if isinstance(label_col_cfg, str) else None
 
     concept_to_keys: Dict[str, List[str]] = {}
     concept_meta: Dict[str, Dict[str, Any]] = {}
     concept_keys: Set[str] = set()
+    total_rows = 0
+    filtered_by_label = 0
 
     with open(meta_csv) as f:
         reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames or []
+        # Label filtering is applied only if explicitly configured.
+        use_label_filter = False
+        if label_col:
+            use_label_filter = True
+
+        if use_label_filter and label_col not in fieldnames:
+            log.warning(
+                f"Concept bank: requested label column '{label_col}' not found; "
+                "disabling VLM-based filtering."
+            )
+            use_label_filter = False
+
         for row in reader:
-            cname = row[name_col]
-            key = row[key_col]
+            total_rows += 1
+            cname = row.get(name_col)
+            key = row.get(key_col)
             if not cname or not key:
                 continue
+
+            if use_label_filter:
+                label_val = (row.get(label_col) or "").strip()
+                if not label_val or label_val.lower() != positive_label.lower():
+                    filtered_by_label += 1
+                    continue
+
             concept_to_keys.setdefault(cname, []).append(key)
             concept_keys.add(key)
             if cname not in concept_meta:
                 concept_meta[cname] = {
-                    "group": row.get(group_col) if group_col in (reader.fieldnames or []) else None,
-                    "class_label": row.get(class_col) if class_col in (reader.fieldnames or []) else None,
+                    "group": row.get(group_col) if group_col in fieldnames else None,
+                    "class_label": row.get(class_col) if class_col in fieldnames else None,
                 }
 
+    if use_label_filter:
+        kept = total_rows - filtered_by_label
+        log.info(
+            f"Concept bank filter: kept {kept}/{total_rows} rows with "
+            f"{label_col} == '{positive_label}'."
+        )
     log.info(
         f"Loaded concept bank: {len(concept_to_keys)} concepts, {len(concept_keys)} unique keys."
     )

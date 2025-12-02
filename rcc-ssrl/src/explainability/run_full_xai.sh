@@ -27,12 +27,12 @@ CANDIDATES_CSV="${SRC_DIR}/explainability/concept/ontology/concept_candidates_rc
 CANDIDATES_IMG_ROOT="${SRC_DIR}/explainability/concept/ontology/concept_candidates_images"
 
 # Ontologia + concept bank usati per Stage 0 e Stage 2 
-VERS="debug"  # ontology + concept bank version (EDIT HERE)
+VERS="v1"  # ontology + concept bank version (EDIT HERE)
 ONTOLOGY_YAML="${SRC_DIR}/explainability/concept/ontology/ontology_rcc_${VERS}.yaml"
 CONCEPT_BANK_CSV="${SRC_DIR}/explainability/concept/ontology/concepts_rcc_${VERS}.csv"
 
-# VLM (LLaVA-Med) – HF ONLY
-VLM_MODEL_PATH="Eren-Senoglu/llava-med-v1.5-mistral-7b-hf"
+# VLM (LLaVA-Med) – HF ONLY (checkpoint HF-compatibile, no trust_remote_code)
+VLM_MODEL_PATH="chaoyinshe/llava-med-v1.5-mistral-7b-hf"
 
 # Flags opzionali (per futura estensione; al momento solo log)
 ONLY_SPATIAL="${ONLY_SPATIAL:-0}"
@@ -110,6 +110,7 @@ if [[ "${num_lines}" -le 1 ]]; then
     --ontology "${ONTOLOGY_YAML}" \
     --images-csv "${CANDIDATES_CSV}" \
     --model-name "${VLM_MODEL_PATH}" \
+    --vlm-mode describe \
     --out-csv "${CONCEPT_BANK_CSV}" \
     --max-images 0
 

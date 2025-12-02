@@ -1,0 +1,2 @@
+job_id	job_name	model	yaml_path	run_name	exp_group	slurm_log
+995593	trDabl46	dino_v3	/home/mla_group_01/rcc-ssrl/src/training/configs/ablations/dino_v3/exp_dino_v3_abl46.yaml	trDabl46	exp_20251201_170454_dino_v3	/home/mla_group_01/rcc-ssrl/src/logs/dino_v3/trDabl46_995593.out

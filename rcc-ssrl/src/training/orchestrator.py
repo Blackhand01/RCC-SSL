@@ -293,7 +293,7 @@ class Orchestrator:
         # best_loss = float("inf")
         # best_epoch = -1
         # best_state = None
-        ssl_cfg = self.cfg["train"]["ssl"]
+        #ssl_cfg = self.cfg["train"]["ssl"]
         ckpt_cfg = (ssl_cfg.get("checkpoint") or {})
         ckpt_metric = ckpt_cfg.get("metric", "ssl_loss")  # default = comportamento attuale
         warmup_epochs = int(ckpt_cfg.get("warmup_epochs", 0))
@@ -303,6 +303,21 @@ class Orchestrator:
         best_probe_acc = -1.0
         best_epoch = -1
         best_state = None
+        
+        probe_loaders = None
+        probe_cfg = (ssl_cfg.get("probe") or {})
+        checkpoint_probe_epochs = int(
+            ckpt_cfg.get("probe_epochs", probe_cfg.get("epochs", 5))
+        )
+        if ckpt_metric == "probe_val_acc":
+            # riusa la stessa logica degli SL loader
+            train_loader, val_loader = _with_context(
+                "build_sl_loaders_for_probe",
+                build_sl_loaders,
+                self.cfg,
+                override_transforms=self.override_transforms,
+            )
+            probe_loaders = {"train": train_loader, "val": val_loader}
 
         #----fine blocco nuovo test----
         backbone_ckpt = prefixed(self.run_dirs["checkpoints"], self.model_key, "ssl_best", "pt")
@@ -397,7 +412,55 @@ class Orchestrator:
                 best_state = safe_state_dict(model)
 
             elif ckpt_metric == "probe_val_acc":
-                raise NotImplementedError("checkpoint.metric='probe_val_acc' non è ancora implementato")
+                # valuta solo dopo il warmup, ogni eval_every epoche
+                if (epoch >= warmup_epochs) and ((epoch - warmup_epochs) % max(1, eval_every) == 0):
+                    if probe_loaders is None:
+                        raise RuntimeError("probe_val_acc selected but probe_loaders is None")
+
+                    # backbone corrente (per I-JEPA è lo student)
+                    backbone_module = model.stu if hasattr(model, "stu") else model
+
+                    # estrai feature su train / val
+                    tag = f"{self.model_key}_ep{epoch:03d}"
+                    feature_paths = save_features(
+                        backbone_module,
+                        probe_loaders,
+                        self.device,
+                        self.run_dirs["checkpoints"],
+                        tag,
+                    )
+                    Xtr = np.load(feature_paths["train_X"], allow_pickle=False)
+                    ytr = np.load(feature_paths["train_y"], allow_pickle=False)
+                    Xva = np.load(feature_paths["val_X"], allow_pickle=False)
+                    yva = np.load(feature_paths["val_y"], allow_pickle=False)
+
+                    # allena linear probe "leggero"
+                    lin_metrics, lin_ckpt = train_linear_probe_torch(
+                        Xtr,
+                        ytr,
+                        Xva,
+                        yva,
+                        n_epochs=checkpoint_probe_epochs,
+                        lr=float(probe_cfg.get("lr", 0.01)),
+                        wd=float(probe_cfg.get("weight_decay", 0.0)),
+                        batch_size=int(probe_cfg.get("batch_size", 256)),
+                        out_dirs=self.run_dirs,
+                        model_key=tag,
+                    )
+                    cur_acc = float(lin_metrics.get("val_acc", float("nan")))
+                    print(
+                        f"[{self.model_key}][epoch {epoch+1}/{epochs}] "
+                        f"probe_val_acc={cur_acc:.4f} (best={best_probe_acc:.4f})",
+                        flush=True,
+                    )
+
+                    # aggiorna best se migliora
+                    if cur_acc > best_probe_acc:
+                        best_probe_acc = cur_acc
+                        best_epoch = epoch
+                        best_state = safe_state_dict(model)
+                        # tieni traccia anche della ssl_loss relativa a quell'epoca (opzionale)
+                        best_ssl_loss = loss_epoch
 
             else:
                 raise ValueError(f"Unsupported checkpoint.metric='{ckpt_metric}'")

@@ -43,15 +43,17 @@ selection:
 concepts:
   # default, sovrascrivibile via env CONCEPT_BANK_CSV
   meta_csv: "/home/mla_group_01/rcc-ssrl/src/explainability/concept/ontology/concepts_rcc_debug.csv"
+  # Nota: per Stage 2 XAI usare un concept bank generato in modalità "concept".
+  # Se usi un CSV prodotto con --vlm-mode describe (label tipicamente Unknown),
+  # disattiva il filtro sulle label impostando vlm_label_col: null.
 
   # mappatura colonne concept bank
   concept_name_col: "concept_name"
   key_col: "wds_key"
   group_col: "group"
   class_col: "class_label"
-  present_col: "present"
-  confidence_col: "confidence"
-  rationale_col: "rationale"
+  vlm_label_col: "vlm_label"        # optional; if present, only rows with vlm_label == vlm_positive_label are used
+  vlm_positive_label: "Present"
 
   similarity: "cosine"
   topk_per_patch: 5
