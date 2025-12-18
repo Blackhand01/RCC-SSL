@@ -1,29 +1,29 @@
 {
   "version": 1,
-  "suite_name": "dino_v3_histopathology_ablations",
   "model": "dino_v3",
-  "base_config": "configs/exp_dino_v3_vit.yaml",
+  "suite_name": "dino_v3_histopathology_ablations",
+  "base_config": "src/training/configs/ablations/dino_v3/exp_dino_v3_abl_base.yaml",
   "output_dir": "src/training/configs/ablations/dino_v3",
   "exp_prefix": "exp_dino_v3_abl",
   "sbatch_script": "slurm/train_single_node.sbatch",
   "experiments": [
     {
       "id": 1,
-      "config_filename": "exp_dino_v3_abl01.yaml",
-      "name": "baseline_v1",
+      "name": "baseline_2g6l_full_losses",
       "tags": [
         "baseline",
-        "two_global",
-        "hed_jitter_on"
+        "2g6l",
+        "probe_val_acc",
+        "gram_1.0"
       ],
       "override": {
         "train": {
           "ssl": {
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
+            "checkpoint": {
+              "metric": "probe_val_acc",
+              "warmup_epochs": 2,
+              "eval_every_epochs": 1,
+              "probe_epochs": 15
             }
           }
         }
@@ -31,25 +31,21 @@
     },
     {
       "id": 2,
-      "config_filename": "exp_dino_v3_abl02.yaml",
-      "name": "temp_teacher_fixed_0.04",
+      "name": "dino_only_no_patches",
       "tags": [
-        "temperature",
-        "teacher"
+        "dino_only",
+        "no_ibot",
+        "no_gram",
+        "no_koleo"
       ],
       "override": {
         "model": {
           "ssl": {
-            "temp_teacher": 0.04
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
+            "loss_weight": 1.0,
+            "ibot_loss_weight": 0.0,
+            "koleo_loss_weight": 0.0,
+            "gram": {
+              "lambda": 0.0
             }
           }
         }
@@ -57,25 +53,27 @@
     },
     {
       "id": 3,
-      "config_filename": "exp_dino_v3_abl03.yaml",
-      "name": "temp_teacher_fixed_0.07",
+      "name": "patch_heavy_ibot_gram",
       "tags": [
-        "temperature",
-        "teacher"
+        "ibot_strong",
+        "gram_1.5",
+        "2g8l",
+        "local_scale_narrow"
       ],
       "override": {
-        "model": {
-          "ssl": {
-            "temp_teacher": 0.07
+        "data": {
+          "dino_v3": {
+            "n_local": 8,
+            "local_scale": [0.04, 0.10]
           }
         },
-        "train": {
+        "model": {
           "ssl": {
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
+            "loss_weight": 0.6,
+            "ibot_loss_weight": 1.4,
+            "gram": {
+              "lambda": 1.5,
+              "start_frac": 0.5
             }
           }
         }
@@ -83,30 +81,17 @@
     },
     {
       "id": 4,
-      "config_filename": "exp_dino_v3_abl04.yaml",
-      "name": "temp_teacher_schedule_0.04_to_0.07_wu0.1",
+      "name": "no_gram_keep_dino_ibot",
       "tags": [
-        "temperature",
-        "schedule",
-        "teacher"
+        "no_gram",
+        "ibot_on",
+        "2g6l"
       ],
       "override": {
         "model": {
           "ssl": {
-            "temp_teacher_schedule": {
-              "start": 0.04,
-              "end": 0.07,
-              "warmup_frac": 0.1
-            }
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
+            "gram": {
+              "lambda": 0.0
             }
           }
         }
@@ -114,25 +99,19 @@
     },
     {
       "id": 5,
-      "config_filename": "exp_dino_v3_abl05.yaml",
-      "name": "temp_student_fixed_0.10",
+      "name": "gram_strong_early",
       "tags": [
-        "temperature",
-        "student"
+        "gram_2.0",
+        "start_frac_0.5",
+        "2g6l"
       ],
       "override": {
         "model": {
           "ssl": {
-            "temp_student": 0.10
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
+            "gram": {
+              "lambda": 2.0,
+              "start_frac": 0.5,
+              "teacher_update_every": 5000
             }
           }
         }
@@ -140,25 +119,20 @@
     },
     {
       "id": 6,
-      "config_filename": "exp_dino_v3_abl06.yaml",
-      "name": "ema_fixed_0.996",
+      "name": "no_ibot_dino_gram_koleo",
       "tags": [
-        "ema"
+        "no_ibot",
+        "with_gram",
+        "with_koleo"
       ],
       "override": {
         "model": {
           "ssl": {
-            "ema_to_one": false
-          }
-        },
-        "train": {
-          "ssl": {
-            "ema_momentum": 0.996,
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
+            "ibot_loss_weight": 0.0,
+            "loss_weight": 1.0,
+            "koleo_loss_weight": 0.1,
+            "gram": {
+              "lambda": 1.0
             }
           }
         }
@@ -166,681 +140,68 @@
     },
     {
       "id": 7,
-      "config_filename": "exp_dino_v3_abl07.yaml",
-      "name": "ema_fixed_0.999",
+      "name": "ibot_high_dino_low",
       "tags": [
-        "ema"
+        "ibot_1.5",
+        "dino_0.7",
+        "2g6l"
       ],
       "override": {
         "model": {
           "ssl": {
-            "ema_to_one": false
-          }
-        },
-        "train": {
-          "ssl": {
-            "ema_momentum": 0.999,
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
+            "loss_weight": 0.7,
+            "ibot_loss_weight": 1.5
           }
         }
       }
     },
     {
       "id": 8,
-      "config_filename": "exp_dino_v3_abl08.yaml",
-      "name": "proj_hidden_2048",
+      "name": "prototypes_4k",
       "tags": [
-        "projector",
-        "capacity"
+        "protos_4096",
+        "head_small"
       ],
       "override": {
         "model": {
           "ssl": {
-            "hidden_dim": 2048
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
+            "head_n_prototypes": 4096,
+            "koleo_loss_weight": 0.05
           }
         }
       }
     },
     {
       "id": 9,
-      "config_filename": "exp_dino_v3_abl09.yaml",
-      "name": "proj_hidden_4096",
+      "name": "prototypes_16k",
       "tags": [
-        "projector",
-        "capacity"
+        "protos_16384",
+        "head_big"
       ],
       "override": {
         "model": {
           "ssl": {
-            "hidden_dim": 4096
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
+            "head_n_prototypes": 16384,
+            "koleo_loss_weight": 0.2
           }
         }
       }
     },
     {
       "id": 10,
-      "config_filename": "exp_dino_v3_abl10.yaml",
-      "name": "proj_outdim_512",
+      "name": "ckpt_ssl_loss_after_warmup",
       "tags": [
-        "projector",
-        "bottleneck"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "proj_dim": 512
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 11,
-      "config_filename": "exp_dino_v3_abl11.yaml",
-      "name": "views_multicrop_2g+4l_128",
-      "tags": [
-        "views",
-        "multicrop"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "use_multicrop": true
-          }
-        },
-        "data": {
-          "dino_v3": {
-            "global_size": 224,
-            "local_size": 128,
-            "n_local": 4,
-            "jitter": 0.4,
-            "global_scale": [
-              0.14,
-              1.0
-            ],
-            "local_scale": [
-              0.10,
-              0.28
-            ],
-            "blur_prob": 0.5,
-            "solarize_prob": 0.05
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 12,
-      "config_filename": "exp_dino_v3_abl12.yaml",
-      "name": "views_multicrop_2g+6l_96",
-      "tags": [
-        "views",
-        "multicrop"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "use_multicrop": true
-          }
-        },
-        "data": {
-          "dino_v3": {
-            "global_size": 224,
-            "local_size": 96,
-            "n_local": 6,
-            "jitter": 0.4,
-            "global_scale": [
-              0.14,
-              1.0
-            ],
-            "local_scale": [
-              0.05,
-              0.14
-            ],
-            "blur_prob": 0.5,
-            "solarize_prob": 0.0
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 13,
-      "config_filename": "exp_dino_v3_abl13.yaml",
-      "name": "global_scale_smin_0.08",
-      "tags": [
-        "views",
-        "scale"
-      ],
-      "override": {
-        "data": {
-          "dino_v3": {
-            "global_scale": [
-              0.08,
-              1.0
-            ]
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 14,
-      "config_filename": "exp_dino_v3_abl14.yaml",
-      "name": "blur_off",
-      "tags": [
-        "augment",
-        "blur"
-      ],
-      "override": {
-        "data": {
-          "dino_v3": {
-            "blur_prob": 0.0
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 15,
-      "config_filename": "exp_dino_v3_abl15.yaml",
-      "name": "solarize_p_0.20",
-      "tags": [
-        "augment",
-        "solarize"
-      ],
-      "override": {
-        "data": {
-          "dino_v3": {
-            "solarize_prob": 0.20
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 16,
-      "config_filename": "exp_dino_v3_abl16.yaml",
-      "name": "stain_norm_macenko",
-      "tags": [
-        "he_aug",
-        "stain_normalization"
-      ],
-      "override": {
-        "aug": {
-          "stain": {
-            "normalize": {
-              "enable": true,
-              "method": "macenko"
-            }
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 17,
-      "config_filename": "exp_dino_v3_abl17.yaml",
-      "name": "stain_norm_vahadane",
-      "tags": [
-        "he_aug",
-        "stain_normalization"
-      ],
-      "override": {
-        "aug": {
-          "stain": {
-            "normalize": {
-              "enable": true,
-              "method": "vahadane"
-            }
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 18,
-      "config_filename": "exp_dino_v3_abl18.yaml",
-      "name": "stain_jitter_off",
-      "tags": [
-        "he_aug",
-        "stain_jitter"
-      ],
-      "override": {
-        "aug": {
-          "stain": {
-            "jitter": {
-              "enable": false,
-              "mode": "HED",
-              "delta": 0.02
-            }
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 19,
-      "config_filename": "exp_dino_v3_abl19.yaml",
-      "name": "accum_steps_8",
-      "tags": [
-        "batch_effective",
-        "throughput"
+        "ckpt_ssl_loss_after_warmup",
+        "warmup5"
       ],
       "override": {
         "train": {
           "ssl": {
-            "accumulate_steps": 8,
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 20,
-      "config_filename": "exp_dino_v3_abl20.yaml",
-      "name": "accum_steps_32",
-      "tags": [
-        "batch_effective",
-        "throughput"
-      ],
-      "override": {
-        "train": {
-          "ssl": {
-            "accumulate_steps": 32,
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 21,
-      "config_filename": "exp_dino_v3_abl21.yaml",
-      "name": "combiner_vahadane_2g6l_ema0996",
-      "tags": [
-        "combiner",
-        "vahadane",
-        "multicrop",
-        "2g6l",
-        "ema0.996"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "use_multicrop": true
-          }
-        },
-        "data": {
-          "dino_v3": {
-            "global_size": 224,
-            "local_size": 96,
-            "n_local": 6,
-            "jitter": 0.4,
-            "global_scale": [
-              0.14,
-              1.0
-            ],
-            "local_scale": [
-              0.05,
-              0.14
-            ],
-            "blur_prob": 0.5,
-            "solarize_prob": 0.0
-          }
-        },
-        "aug": {
-          "stain": {
-            "normalize": {
-              "enable": true,
-              "method": "vahadane"
-            }
-          }
-        },
-        "train": {
-          "ssl": {
-            "ema_momentum": 0.996,
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 22,
-      "config_filename": "exp_dino_v3_abl22.yaml",
-      "name": "combiner_vahadane_2g8l_ema0996",
-      "tags": [
-        "combiner",
-        "vahadane",
-        "multicrop",
-        "2g8l",
-        "ema0.996"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "use_multicrop": true
-          }
-        },
-        "data": {
-          "dino_v3": {
-            "global_size": 224,
-            "local_size": 96,
-            "n_local": 8,
-            "jitter": 0.4,
-            "global_scale": [
-              0.14,
-              1.0
-            ],
-            "local_scale": [
-              0.05,
-              0.14
-            ],
-            "blur_prob": 0.5,
-            "solarize_prob": 0.0
-          }
-        },
-        "aug": {
-          "stain": {
-            "normalize": {
-              "enable": true,
-              "method": "vahadane"
-            }
-          }
-        },
-        "train": {
-          "ssl": {
-            "ema_momentum": 0.996,
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 24,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 23,
-      "config_filename": "exp_dino_v3_abl23.yaml",
-      "name": "teacher_temp_const_0p05",
-      "tags": [
-        "teacher_temp",
-        "const",
-        "0.05"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "temp_teacher": 0.05
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 24,
-      "config_filename": "exp_dino_v3_abl24.yaml",
-      "name": "teacher_temp_cosine_0p06_to_0p045_wu0p10",
-      "tags": [
-        "teacher_temp",
-        "cosine",
-        "start0.06",
-        "end0.045",
-        "warmup0.10"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "temp_teacher_schedule": {
-              "start": 0.06,
-              "end": 0.045,
-              "warmup_frac": 0.1
-            }
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 25,
-      "config_filename": "exp_dino_v3_abl25.yaml",
-      "name": "vahadane_plus_delicate_HED_jitter",
-      "tags": [
-        "vahadane",
-        "HED_jitter",
-        "delta0.01"
-      ],
-      "override": {
-        "aug": {
-          "stain": {
-            "normalize": {
-              "enable": true,
-              "method": "vahadane"
-            },
-            "jitter": {
-              "enable": true,
-              "mode": "HED",
-              "delta": 0.01
-            }
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 26,
-      "config_filename": "exp_dino_v3_abl26.yaml",
-      "name": "low_solarize_low_blur",
-      "tags": [
-        "solarize0.02",
-        "blur0.30"
-      ],
-      "override": {
-        "data": {
-          "dino_v3": {
-            "solarize_prob": 0.02,
-            "blur_prob": 0.3
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 27,
-      "config_filename": "exp_dino_v3_abl27.yaml",
-      "name": "2g6l_local_scale_0p05_0p12",
-      "tags": [
-        "multicrop",
-        "2g6l",
-        "local_scale_[0.05,0.12]"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "use_multicrop": true
-          }
-        },
-        "data": {
-          "dino_v3": {
-            "global_size": 224,
-            "local_size": 96,
-            "n_local": 6,
-            "jitter": 0.4,
-            "global_scale": [
-              0.14,
-              1.0
-            ],
-            "local_scale": [
-              0.05,
-              0.12
-            ],
-            "blur_prob": 0.3,
-            "solarize_prob": 0.02
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 18,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
+            "checkpoint": {
+              "metric": "ssl_loss_after_warmup",
+              "warmup_epochs": 5,
+              "eval_every_epochs": 1,
+              "probe_epochs": 15
             }
           }
         }

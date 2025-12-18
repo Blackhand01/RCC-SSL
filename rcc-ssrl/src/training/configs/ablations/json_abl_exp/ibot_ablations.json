@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "suite_name": "ibot_histopathology_ablations",
   "model": "ibot",
-  "base_config": "configs/exp_ibot_vit.yaml",
+  "suite_name": "ibot_histopathology_ablations",
+  "base_config": "src/training/configs/ablations/ibot/exp_ibot_abl_base.yaml",
   "output_dir": "src/training/configs/ablations/ibot",
   "exp_prefix": "exp_ibot_abl",
   "sbatch_script": "slurm/train_single_node.sbatch",
@@ -10,46 +10,17 @@
     {
       "id": 1,
       "config_filename": "exp_ibot_abl01.yaml",
-      "name": "baseline_two_global_hed_jitter_on",
-      "tags": [
-        "baseline",
-        "two_view",
-        "hed_jitter_on"
-      ],
-      "override": {
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
+      "tags": ["baseline", "rcc_ref", "mask0.1-0.5", "proto8192", "temp_s0.2_t0.07"],
+      "override": {}
     },
     {
       "id": 2,
       "config_filename": "exp_ibot_abl02.yaml",
-      "name": "mask_fixed_0.10",
-      "tags": [
-        "mask_ratio"
-      ],
+      "tags": ["proto_4096", "capacity_low"],
       "override": {
         "model": {
           "ssl": {
-            "mask_ratio": 0.1
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
+            "num_prototypes": 4096
           }
         }
       }
@@ -57,24 +28,11 @@
     {
       "id": 3,
       "config_filename": "exp_ibot_abl03.yaml",
-      "name": "mask_fixed_0.30",
-      "tags": [
-        "mask_ratio"
-      ],
+      "tags": ["proto_16384", "capacity_high"],
       "override": {
         "model": {
           "ssl": {
-            "mask_ratio": 0.3
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
+            "num_prototypes": 16384
           }
         }
       }
@@ -82,24 +40,13 @@
     {
       "id": 4,
       "config_filename": "exp_ibot_abl04.yaml",
-      "name": "mask_fixed_0.50",
-      "tags": [
-        "mask_ratio"
-      ],
+      "tags": ["mask_high", "mask0.3-0.7"],
       "override": {
         "model": {
           "ssl": {
+            "mask_ratio_min": 0.3,
+            "mask_ratio_max": 0.7,
             "mask_ratio": 0.5
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
           }
         }
       }
@@ -107,24 +54,13 @@
     {
       "id": 5,
       "config_filename": "exp_ibot_abl05.yaml",
-      "name": "mask_fixed_0.70",
-      "tags": [
-        "mask_ratio"
-      ],
+      "tags": ["mask_low", "mask0.05-0.3"],
       "override": {
         "model": {
           "ssl": {
-            "mask_ratio": 0.7
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
+            "mask_ratio_min": 0.05,
+            "mask_ratio_max": 0.3,
+            "mask_ratio": 0.2
           }
         }
       }
@@ -132,29 +68,12 @@
     {
       "id": 6,
       "config_filename": "exp_ibot_abl06.yaml",
-      "name": "mask_schedule_0.70_to_0.40_wu0.1",
-      "tags": [
-        "mask_ratio",
-        "schedule"
-      ],
+      "tags": ["temp_teacher_cold", "t_t=0.04"],
       "override": {
         "model": {
           "ssl": {
-            "mask_schedule": {
-              "start": 0.7,
-              "end": 0.4,
-              "warmup_frac": 0.1
-            }
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
+            "temp_teacher": 0.04,
+            "temp_teacher_patch": 0.04
           }
         }
       }
@@ -162,25 +81,12 @@
     {
       "id": 7,
       "config_filename": "exp_ibot_abl07.yaml",
-      "name": "temps_ts0.10_tt0.04",
-      "tags": [
-        "temperature"
-      ],
+      "tags": ["temp_teacher_warm", "t_t=0.10"],
       "override": {
         "model": {
           "ssl": {
-            "temp_student": 0.10,
-            "temp_teacher": 0.04
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
+            "temp_teacher": 0.1,
+            "temp_teacher_patch": 0.1
           }
         }
       }
@@ -188,25 +94,16 @@
     {
       "id": 8,
       "config_filename": "exp_ibot_abl08.yaml",
-      "name": "temps_ts0.20_tt0.07",
-      "tags": [
-        "temperature"
-      ],
+      "tags": ["ema_fast_teacher", "ema_base_0.99", "ema_final_0.999"],
       "override": {
-        "model": {
-          "ssl": {
-            "temp_student": 0.20,
-            "temp_teacher": 0.07
-          }
-        },
         "train": {
           "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
+            "ema_momentum": 0.99
+          }
+        },
+        "model": {
+          "ssl": {
+            "ema_momentum_final": 0.999
           }
         }
       }
@@ -214,24 +111,18 @@
     {
       "id": 9,
       "config_filename": "exp_ibot_abl09.yaml",
-      "name": "temps_ts0.07_tt0.04",
-      "tags": [
-        "temperature"
-      ],
+      "tags": ["stain_normalization", "macenko_on", "jitter_delta0.01"],
       "override": {
-        "model": {
-          "ssl": {
-            "temp_student": 0.07,
-            "temp_teacher": 0.04
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
+        "aug": {
+          "stain": {
+            "normalize": {
+              "enable": true,
+              "method": "macenko"
+            },
+            "jitter": {
+              "enable": true,
+              "mode": "HED",
+              "delta": 0.01
             }
           }
         }
@@ -240,827 +131,16 @@
     {
       "id": 10,
       "config_filename": "exp_ibot_abl10.yaml",
-      "name": "sinkhorn_iters_1",
-      "tags": [
-        "sinkhorn"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "sinkhorn": {
-              "iters": 1
-            }
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 11,
-      "config_filename": "exp_ibot_abl11.yaml",
-      "name": "sinkhorn_iters_5",
-      "tags": [
-        "sinkhorn"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "sinkhorn": {
-              "iters": 5
-            }
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 12,
-      "config_filename": "exp_ibot_abl12.yaml",
-      "name": "proto_k_1024",
-      "tags": [
-        "prototypes",
-        "capacity"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "num_prototypes": 1024
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 13,
-      "config_filename": "exp_ibot_abl13.yaml",
-      "name": "proto_k_4096",
-      "tags": [
-        "prototypes",
-        "capacity"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "num_prototypes": 4096
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 14,
-      "config_filename": "exp_ibot_abl14.yaml",
-      "name": "proto_k_8192",
-      "tags": [
-        "prototypes",
-        "capacity"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "num_prototypes": 8192
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 15,
-      "config_filename": "exp_ibot_abl15.yaml",
-      "name": "proto_k_16384",
-      "tags": [
-        "prototypes",
-        "capacity"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "num_prototypes": 16384
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 16,
-      "config_filename": "exp_ibot_abl16.yaml",
-      "name": "proto_dim_128",
-      "tags": [
-        "prototypes",
-        "bottleneck"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "prototype_dim": 128
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 17,
-      "config_filename": "exp_ibot_abl17.yaml",
-      "name": "proto_dim_512",
-      "tags": [
-        "prototypes",
-        "bottleneck"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "prototype_dim": 512
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 18,
-      "config_filename": "exp_ibot_abl18.yaml",
-      "name": "heads_shared_cls_token",
-      "tags": [
-        "heads",
-        "architecture"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "share_token_cls_heads": true
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 19,
-      "config_filename": "exp_ibot_abl19.yaml",
-      "name": "heads_separate_cls_token",
-      "tags": [
-        "heads",
-        "architecture"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "share_token_cls_heads": false
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 20,
-      "config_filename": "exp_ibot_abl20.yaml",
-      "name": "mlp_hidden_2048",
-      "tags": [
-        "mlp",
-        "capacity"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "hidden_dim": 2048
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 21,
-      "config_filename": "exp_ibot_abl21.yaml",
-      "name": "mlp_hidden_4096",
-      "tags": [
-        "mlp",
-        "capacity"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "hidden_dim": 4096
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 22,
-      "config_filename": "exp_ibot_abl22.yaml",
-      "name": "mlp_hidden_8192",
-      "tags": [
-        "mlp",
-        "capacity"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "hidden_dim": 8192
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 23,
-      "config_filename": "exp_ibot_abl23.yaml",
-      "name": "views_multicrop_2g+6l",
-      "tags": [
-        "views",
-        "multicrop"
-      ],
+      "tags": ["multicrop_on", "accum8"],
       "override": {
         "model": {
           "ssl": {
             "use_multicrop": true
           }
         },
-        "data": {
-          "webdataset": {
-            "batch_size_ssl": 32
-          },
-          "dino_v3": {
-            "global_size": 224,
-            "local_size": 96,
-            "n_local": 6,
-            "jitter": 0.4,
-            "global_scale": [
-              0.14,
-              1.0
-            ],
-            "local_scale": [
-              0.05,
-              0.14
-            ],
-            "blur_prob": 0.5,
-            "solarize_prob": 0.0
-          }
-        },
         "train": {
           "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 24,
-      "config_filename": "exp_ibot_abl24.yaml",
-      "name": "ema_fixed_0.995",
-      "tags": [
-        "ema"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "ema_to_one": false
-          }
-        },
-        "train": {
-          "ssl": {
-            "ema_momentum": 0.995,
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 25,
-      "config_filename": "exp_ibot_abl25.yaml",
-      "name": "ema_fixed_0.999",
-      "tags": [
-        "ema"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "ema_to_one": false
-          }
-        },
-        "train": {
-          "ssl": {
-            "ema_momentum": 0.999,
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 26,
-      "config_filename": "exp_ibot_abl26.yaml",
-      "name": "ema_cosine_to_1.0",
-      "tags": [
-        "ema",
-        "schedule"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "ema_to_one": true
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 27,
-      "config_filename": "exp_ibot_abl27.yaml",
-      "name": "stain_norm_macenko",
-      "tags": [
-        "he_aug",
-        "stain_normalization"
-      ],
-      "override": {
-        "aug": {
-          "stain": {
-            "normalize": {
-              "enable": true,
-              "method": "macenko"
-            }
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 28,
-      "config_filename": "exp_ibot_abl28.yaml",
-      "name": "stain_norm_vahadane",
-      "tags": [
-        "he_aug",
-        "stain_normalization"
-      ],
-      "override": {
-        "aug": {
-          "stain": {
-            "normalize": {
-              "enable": true,
-              "method": "vahadane"
-            }
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 29,
-      "config_filename": "exp_ibot_abl29.yaml",
-      "name": "stain_jitter_off",
-      "tags": [
-        "he_aug",
-        "stain_jitter"
-      ],
-      "override": {
-        "aug": {
-          "stain": {
-            "jitter": {
-              "enable": false,
-              "mode": "HED",
-              "delta": 0.02
-            }
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 30,
-      "config_filename": "exp_ibot_abl30.yaml",
-      "name": "accum_steps_8",
-      "tags": [
-        "batch_effective",
-        "throughput"
-      ],
-      "override": {
-        "train": {
-          "ssl": {
-            "accumulate_steps": 8,
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 31,
-      "config_filename": "exp_ibot_abl31.yaml",
-      "name": "accum_steps_32",
-      "tags": [
-        "batch_effective",
-        "throughput"
-      ],
-      "override": {
-        "train": {
-          "ssl": {
-            "accumulate_steps": 32,
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "probe": {
-              "epochs": 30
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 32,
-      "config_filename": "exp_ibot_abl32.yaml",
-      "name": "heads_sep__stain_jitter_off",
-      "tags": [
-        "heads",
-        "he_aug",
-        "stain_off"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "share_token_cls_heads": false
-          }
-        },
-        "aug": {
-          "stain": {
-            "jitter": {
-              "enable": false,
-              "mode": "HED",
-              "delta": 0.02
-            }
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 40
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 33,
-      "config_filename": "exp_ibot_abl33.yaml",
-      "name": "heads_sep__loss_reweight_token0.7_patch1.0",
-      "tags": [
-        "heads",
-        "loss_weights"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "share_token_cls_heads": false,
-            "loss_weights": {
-              "patch": 1.0,
-              "token": 0.7,
-              "global": 0.0
-            }
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 40
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 34,
-      "config_filename": "exp_ibot_abl34.yaml",
-      "name": "heads_sep__mask_cosine_0.5to0.7__blockwise",
-      "tags": [
-        "mask_ratio",
-        "schedule",
-        "block_mask",
-        "heads"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "share_token_cls_heads": false,
-            "mask": {
-              "ratio_start": 0.5,
-              "ratio_end": 0.7,
-              "schedule": "cosine",
-              "mode": "blockwise",
-              "block": 4
-            }
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 40
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 35,
-      "config_filename": "exp_ibot_abl35.yaml",
-      "name": "heads_sep__multicrop8_local96__macenko_norm",
-      "tags": [
-        "multicrop",
-        "local_crops",
-        "stain_norm",
-        "macenko",
-        "heads"
-      ],
-      "override": {
-        "data": {
-          "views": {
-            "global_crops": 2,
-            "local_crops": 8,
-            "local_crop_size": 96
-          }
-        },
-        "aug": {
-          "stain": {
-            "normalize": {
-              "enable": true,
-              "method": "macenko",
-              "p": 1.0
-            }
-          }
-        },
-        "model": {
-          "ssl": {
-            "share_token_cls_heads": false
-          }
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 40
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": 36,
-      "config_filename": "exp_ibot_abl36.yaml",
-      "name": "stain_off__probe_class_weights__focal1.5",
-      "tags": [
-        "he_aug",
-        "stain_off",
-        "probe_loss"
-      ],
-      "override": {
-        "aug": {
-          "stain": {
-            "jitter": {
-              "enable": false,
-              "mode": "HED",
-              "delta": 0.02
-            }
-          }
-        },
-        "probe": {
-          "optimizer": {
-            "type": "adamw",
-            "lr": 0.0005,
-            "weight_decay": 0.02
-          },
-          "loss": {
-            "type": "weighted_focal",
-            "gamma": 1.5,
-            "alpha": {
-              "ccRCC": 1.2,
-              "pRCC": 1.0,
-              "CHROMO": 0.8,
-              "ONCO": 1.5
-            }
-          },
-          "epochs": 40
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16
-          }
-        }
-      }
-    },
-    {
-      "id": 37,
-      "config_filename": "exp_ibot_abl37.yaml",
-      "name": "heads_sep__teacher_temp_warm__ema_up",
-      "tags": [
-        "teacher_temp",
-        "ema",
-        "stability",
-        "heads"
-      ],
-      "override": {
-        "model": {
-          "ssl": {
-            "share_token_cls_heads": false,
-            "teacher": {
-              "temp_start": 0.04,
-              "temp_end": 0.07,
-              "warmup_epochs": 1
-            },
-            "ema": {
-              "base": 0.996,
-              "final": 0.9995
-            }
-          }
-        },
-        "optim": {
-          "grad_clip_norm": 1.0
-        },
-        "train": {
-          "ssl": {
-            "epochs": 65,
-            "steps_per_epoch": 4450,
-            "accumulate_steps": 16,
-            "probe": {
-              "epochs": 40
-            }
+            "accumulate_steps": 8
           }
         }
       }

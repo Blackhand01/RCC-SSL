@@ -1,0 +1,726 @@
+{
+  "meta": {
+    "version": 2,
+    "name": "rcc_histology_plip_v2",
+    "global_instructions": "Text prompts are short English descriptions of high-power H&E renal tumor patches. Each concept should be visually recognizable on a 224x224 tile. Prompts are designed for PLIP (CLIP-like). This file keeps the original 32 concepts unchanged and extends them with extra concepts and prompt variants as multiple prompts per concept (no duplicate/alias concepts).",
+    "source_path": "/home/mla_group_01/rcc-ssrl/src/explainability/configs/concepts_list.yaml",
+    "n_concepts": 64
+  },
+  "concepts": [
+    {
+      "id": 1,
+      "name": "Diffuse clear cytoplasm",
+      "short_name": "ccrcc_clear_diffuse",
+      "group": "ccRCC",
+      "primary_class": "ccRCC",
+      "prompt": "A high power H&E image of clear cell renal cell carcinoma with tumor cells showing diffusely clear, optically empty cytoplasm and small round nuclei.",
+      "prompts": [
+        "A high power H&E image of clear cell renal cell carcinoma with tumor cells showing diffusely clear, optically empty cytoplasm and small round nuclei.",
+        "High power H&E of clear cell RCC: sheets of tumor cells with optically empty, lipid-like clear cytoplasm and delicate cell membranes."
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Clear cells with delicate capillaries",
+      "short_name": "ccrcc_clear_capillaries",
+      "group": "ccRCC",
+      "primary_class": "ccRCC",
+      "prompt": "A renal tumor H&E patch of clear cell renal cell carcinoma with nests of clear cells separated by a fine, delicate chicken-wire capillary network.",
+      "prompts": [
+        "A renal tumor H&E patch of clear cell renal cell carcinoma with nests of clear cells separated by a fine, delicate chicken-wire capillary network.",
+        "H&E renal tumor patch: clear cell RCC nests traversed by a fine branching capillary network, like chicken-wire vasculature."
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Alveolar or nested architecture",
+      "short_name": "ccrcc_alveolar_nested",
+      "group": "ccRCC",
+      "primary_class": "ccRCC",
+      "prompt": "An H&E image of clear cell renal cell carcinoma showing discrete alveolar or nested groups of tumor cells surrounded by thin capillaries and small clear spaces between nests.",
+      "prompts": [
+        "An H&E image of clear cell renal cell carcinoma showing discrete alveolar or nested groups of tumor cells surrounded by thin capillaries and small clear spaces between nests.",
+        "H&E renal tumor: clear cell RCC with rounded nests separated by capillary-rich septa, giving an alveolar nesting pattern."
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Mixed clear and eosinophilic cytoplasm",
+      "short_name": "ccrcc_mixed_cytoplasm",
+      "group": "ccRCC",
+      "primary_class": "ccRCC",
+      "prompt": "A renal cell carcinoma H&E patch where most tumor cells have clear cytoplasm but a substantial subset shows more eosinophilic, granular cytoplasm within the same nests.",
+      "prompts": [
+        "A renal cell carcinoma H&E patch where most tumor cells have clear cytoplasm but a substantial subset shows more eosinophilic, granular cytoplasm within the same nests."
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Solid clear cell sheets",
+      "short_name": "ccrcc_solid_clear",
+      "group": "ccRCC",
+      "primary_class": "ccRCC",
+      "prompt": "A high power H&E image of clear cell renal cell carcinoma with broad solid sheets of clear tumor cells and only sparse or inconspicuous capillaries.",
+      "prompts": [
+        "A high power H&E image of clear cell renal cell carcinoma with broad solid sheets of clear tumor cells and only sparse or inconspicuous capillaries."
+      ]
+    },
+    {
+      "id": 6,
+      "name": "Microcystic clear cell pattern",
+      "short_name": "ccrcc_microcystic",
+      "group": "ccRCC",
+      "primary_class": "ccRCC",
+      "prompt": "A renal tumor H&E patch showing clear cell renal cell carcinoma with numerous small microcystic or vacuolated spaces between clear tumor cells.",
+      "prompts": [
+        "A renal tumor H&E patch showing clear cell renal cell carcinoma with numerous small microcystic or vacuolated spaces between clear tumor cells."
+      ]
+    },
+    {
+      "id": 7,
+      "name": "Papillary fronds with fibrovascular cores",
+      "short_name": "prcc_papillary_fronds",
+      "group": "pRCC",
+      "primary_class": "pRCC",
+      "prompt": "A high power H&E image of papillary renal cell carcinoma with multiple papillary fronds, each containing a fibrovascular core lined by tumor epithelium.",
+      "prompts": [
+        "A high power H&E image of papillary renal cell carcinoma with multiple papillary fronds, each containing a fibrovascular core lined by tumor epithelium.",
+        "H&E of papillary RCC showing true papillae with fibrovascular cores, lined by neoplastic epithelium in multiple finger-like projections."
+      ]
+    },
+    {
+      "id": 8,
+      "name": "Type 1 papillary cytology",
+      "short_name": "prcc_type1",
+      "group": "pRCC",
+      "primary_class": "pRCC",
+      "prompt": "An H&E patch of papillary renal cell carcinoma type 1 with slender papillae lined by small cuboidal cells, scant pale cytoplasm and low-grade, basophilic nuclei.",
+      "prompts": [
+        "An H&E patch of papillary renal cell carcinoma type 1 with slender papillae lined by small cuboidal cells, scant pale cytoplasm and low-grade, basophilic nuclei.",
+        "H&E papillary RCC type 1: low-grade nuclei, small cuboidal cells, pale cytoplasm, papillae that look slender and delicate."
+      ]
+    },
+    {
+      "id": 9,
+      "name": "Type 2 papillary cytology",
+      "short_name": "prcc_type2",
+      "group": "pRCC",
+      "primary_class": "pRCC",
+      "prompt": "An H&E patch of papillary renal cell carcinoma type 2 with papillae lined by larger eosinophilic tumor cells, higher nuclear grade and more prominent nucleoli.",
+      "prompts": [
+        "An H&E patch of papillary renal cell carcinoma type 2 with papillae lined by larger eosinophilic tumor cells, higher nuclear grade and more prominent nucleoli.",
+        "H&E papillary RCC type 2: larger eosinophilic cells, higher nuclear grade, prominent nucleoli along papillary surfaces."
+      ]
+    },
+    {
+      "id": 10,
+      "name": "Foamy macrophages in papillary cores",
+      "short_name": "prcc_foamy_macrophages",
+      "group": "pRCC",
+      "primary_class": "pRCC",
+      "prompt": "A papillary renal cell carcinoma H&E image where numerous foamy macrophages with vacuolated cytoplasm aggregate within papillary fibrovascular cores or luminal spaces.",
+      "prompts": [
+        "A papillary renal cell carcinoma H&E image where numerous foamy macrophages with vacuolated cytoplasm aggregate within papillary fibrovascular cores or luminal spaces."
+      ]
+    },
+    {
+      "id": 11,
+      "name": "Psammoma bodies",
+      "short_name": "prcc_psammoma_bodies",
+      "group": "pRCC",
+      "primary_class": "pRCC",
+      "prompt": "A renal tumor H&E patch showing papillary structures with multiple small, round, concentrically laminated psammoma bodies scattered in papillae or stroma.",
+      "prompts": [
+        "A renal tumor H&E patch showing papillary structures with multiple small, round, concentrically laminated psammoma bodies scattered in papillae or stroma."
+      ]
+    },
+    {
+      "id": 12,
+      "name": "Tubulopapillary architecture",
+      "short_name": "prcc_tubulopapillary",
+      "group": "pRCC",
+      "primary_class": "pRCC",
+      "prompt": "An H&E image of papillary renal cell carcinoma with complex short papillae and fused tubulopapillary structures rather than long, delicate papillary fronds.",
+      "prompts": [
+        "An H&E image of papillary renal cell carcinoma with complex short papillae and fused tubulopapillary structures rather than long, delicate papillary fronds."
+      ]
+    },
+    {
+      "id": 13,
+      "name": "Hobnail nuclei along papillary lumens",
+      "short_name": "prcc_hobnail_nuclei",
+      "group": "pRCC",
+      "primary_class": "pRCC",
+      "prompt": "A papillary renal cell carcinoma H&E patch where tumor nuclei protrude into the papillary lumen, creating a hobnail or pseudostratified appearance along the luminal surface.",
+      "prompts": [
+        "A papillary renal cell carcinoma H&E patch where tumor nuclei protrude into the papillary lumen, creating a hobnail or pseudostratified appearance along the luminal surface."
+      ]
+    },
+    {
+      "id": 14,
+      "name": "Plant-cell borders",
+      "short_name": "chrcc_plant_cell_borders",
+      "group": "chRCC",
+      "primary_class": "CHROMO",
+      "prompt": "A chromophobe renal cell carcinoma H&E image showing polygonal tumor cells arranged in a mosaic with thick, sharply outlined plant-cell borders between adjacent cells.",
+      "prompts": [
+        "A chromophobe renal cell carcinoma H&E image showing polygonal tumor cells arranged in a mosaic with thick, sharply outlined plant-cell borders between adjacent cells.",
+        "H&E chromophobe RCC: mosaic of polygonal cells with thick, sharply outlined cell borders creating a plant-cell appearance."
+      ]
+    },
+    {
+      "id": 15,
+      "name": "Perinuclear halos",
+      "short_name": "chrcc_perinuclear_halos",
+      "group": "chRCC",
+      "primary_class": "CHROMO",
+      "prompt": "A chromophobe renal cell carcinoma H&E patch with many tumor cells showing a clear perinuclear halo and more eosinophilic cytoplasm toward the cell periphery.",
+      "prompts": [
+        "A chromophobe renal cell carcinoma H&E patch with many tumor cells showing a clear perinuclear halo and more eosinophilic cytoplasm toward the cell periphery.",
+        "H&E chromophobe RCC: polygonal eosinophilic cells with conspicuous perinuclear clearing (halos) and crisp cytoplasmic borders."
+      ]
+    },
+    {
+      "id": 16,
+      "name": "Pale reticulated cytoplasm",
+      "short_name": "chrcc_pale_reticulated",
+      "group": "chRCC",
+      "primary_class": "CHROMO",
+      "prompt": "An H&E image of chromophobe renal cell carcinoma where tumor cells have pale, finely reticulated eosinophilic cytoplasm, sometimes with subtle vesicular or cobweb-like texture.",
+      "prompts": [
+        "An H&E image of chromophobe renal cell carcinoma where tumor cells have pale, finely reticulated eosinophilic cytoplasm, sometimes with subtle vesicular or cobweb-like texture."
+      ]
+    },
+    {
+      "id": 17,
+      "name": "Raisinoid wrinkled nuclei",
+      "short_name": "chrcc_raisinoid_nuclei",
+      "group": "chRCC",
+      "primary_class": "CHROMO",
+      "prompt": "A chromophobe renal cell carcinoma H&E patch dominated by tumor cells with irregular, wrinkled raisinoid nuclei and relatively dense chromatin.",
+      "prompts": [
+        "A chromophobe renal cell carcinoma H&E patch dominated by tumor cells with irregular, wrinkled raisinoid nuclei and relatively dense chromatin."
+      ]
+    },
+    {
+      "id": 18,
+      "name": "Oncocytic chromophobe variant",
+      "short_name": "chrcc_oncocytic_variant",
+      "group": "chRCC",
+      "primary_class": "CHROMO",
+      "prompt": "An H&E image of chromophobe renal cell carcinoma with more dense eosinophilic cytoplasm but still showing perinuclear halos or plant-cell borders in many cells.",
+      "prompts": [
+        "An H&E image of chromophobe renal cell carcinoma with more dense eosinophilic cytoplasm but still showing perinuclear halos or plant-cell borders in many cells."
+      ]
+    },
+    {
+      "id": 19,
+      "name": "Compact oncocytic cytoplasm",
+      "short_name": "onco_oncocytic_cytoplasm",
+      "group": "Oncocytoma",
+      "primary_class": "ONCO",
+      "prompt": "A renal oncocytoma H&E patch with sheets of tumor cells having abundant, dense, finely granular, intensely eosinophilic oncocytic cytoplasm and relatively uniform round nuclei.",
+      "prompts": [
+        "A renal oncocytoma H&E patch with sheets of tumor cells having abundant, dense, finely granular, intensely eosinophilic oncocytic cytoplasm and relatively uniform round nuclei.",
+        "H&E oncocytoma: uniform tumor cells with dense granular eosinophilic cytoplasm (oncocytic), bland round nuclei, minimal pleomorphism."
+      ]
+    },
+    {
+      "id": 20,
+      "name": "Archipelagenous oncocytoma islands",
+      "short_name": "onco_archipelagenous",
+      "group": "Oncocytoma",
+      "primary_class": "ONCO",
+      "prompt": "An H&E image of renal oncocytoma showing round or oval islands of oncocytic tumor cells separated by pale, loose or myxoid stroma giving an archipelagenous pattern.",
+      "prompts": [
+        "An H&E image of renal oncocytoma showing round or oval islands of oncocytic tumor cells separated by pale, loose or myxoid stroma giving an archipelagenous pattern.",
+        "H&E renal oncocytoma: round islands of oncocytic cells separated by pale edematous or myxoid stroma, an archipelago pattern."
+      ]
+    },
+    {
+      "id": 21,
+      "name": "Central fibrous scar",
+      "short_name": "onco_central_scar",
+      "group": "Oncocytoma",
+      "primary_class": "ONCO",
+      "prompt": "A renal oncocytoma H&E patch containing dense central fibrous tissue with entrapped thick-walled vessels and surrounding nodules of oncocytic tumor cells.",
+      "prompts": [
+        "A renal oncocytoma H&E patch containing dense central fibrous tissue with entrapped thick-walled vessels and surrounding nodules of oncocytic tumor cells."
+      ]
+    },
+    {
+      "id": 22,
+      "name": "Thick-walled vessels in oncocytoma",
+      "short_name": "onco_thick_vessels",
+      "group": "Oncocytoma",
+      "primary_class": "ONCO",
+      "prompt": "An H&E image of renal oncocytoma highlighting thick-walled hyalinized vessels running between nests of oncocytic tumor cells in loose stroma.",
+      "prompts": [
+        "An H&E image of renal oncocytoma highlighting thick-walled hyalinized vessels running between nests of oncocytic tumor cells in loose stroma."
+      ]
+    },
+    {
+      "id": 23,
+      "name": "Low-grade nuclei (ISUP 1\u20132)",
+      "short_name": "grade_low_isup12",
+      "group": "Grading",
+      "primary_class": null,
+      "prompt": "A high power H&E patch of renal cell carcinoma with mostly small, uniform nuclei and inconspicuous or small nucleoli, consistent with low ISUP grade 1 or 2.",
+      "prompts": [
+        "A high power H&E patch of renal cell carcinoma with mostly small, uniform nuclei and inconspicuous or small nucleoli, consistent with low ISUP grade 1 or 2."
+      ]
+    },
+    {
+      "id": 24,
+      "name": "High-grade nuclei (ISUP 3\u20134)",
+      "short_name": "grade_high_isup34",
+      "group": "Grading",
+      "primary_class": null,
+      "prompt": "A renal cell carcinoma H&E patch with enlarged pleomorphic nuclei and prominent nucleoli easily visible at low power, compatible with high ISUP grade 3 or 4.",
+      "prompts": [
+        "A renal cell carcinoma H&E patch with enlarged pleomorphic nuclei and prominent nucleoli easily visible at low power, compatible with high ISUP grade 3 or 4."
+      ]
+    },
+    {
+      "id": 25,
+      "name": "Coagulative tumor necrosis",
+      "short_name": "necrosis_coagulative",
+      "group": "Necrosis",
+      "primary_class": null,
+      "prompt": "An H&E image of renal cell carcinoma showing a sharp transition from viable tumor to areas of coagulative necrosis with eosinophilic ghost cells and granular debris.",
+      "prompts": [
+        "An H&E image of renal cell carcinoma showing a sharp transition from viable tumor to areas of coagulative necrosis with eosinophilic ghost cells and granular debris."
+      ]
+    },
+    {
+      "id": 26,
+      "name": "Sarcomatoid spindle-cell areas",
+      "short_name": "dediff_sarcomatoid",
+      "group": "Dedifferentiation",
+      "primary_class": null,
+      "prompt": "A renal cell carcinoma H&E patch containing malignant spindle-cell fascicles with high nuclear atypia and loss of epithelial architecture, representing sarcomatoid transformation.",
+      "prompts": [
+        "A renal cell carcinoma H&E patch containing malignant spindle-cell fascicles with high nuclear atypia and loss of epithelial architecture, representing sarcomatoid transformation."
+      ]
+    },
+    {
+      "id": 27,
+      "name": "Rhabdoid tumor cells",
+      "short_name": "dediff_rhabdoid",
+      "group": "Dedifferentiation",
+      "primary_class": null,
+      "prompt": "An H&E image of renal cell carcinoma with scattered large rhabdoid cells having eccentric nuclei, prominent nucleoli and dense eosinophilic cytoplasmic inclusions.",
+      "prompts": [
+        "An H&E image of renal cell carcinoma with scattered large rhabdoid cells having eccentric nuclei, prominent nucleoli and dense eosinophilic cytoplasmic inclusions."
+      ]
+    },
+    {
+      "id": 28,
+      "name": "Tumor-associated hemorrhage",
+      "short_name": "other_hemorrhage",
+      "group": "Other",
+      "primary_class": null,
+      "prompt": "A renal tumor H&E patch showing extensive fresh or organizing hemorrhage within and around nests of carcinoma cells.",
+      "prompts": [
+        "A renal tumor H&E patch showing extensive fresh or organizing hemorrhage within and around nests of carcinoma cells."
+      ]
+    },
+    {
+      "id": 29,
+      "name": "Lymphocytic inflammatory infiltrate",
+      "short_name": "other_lymphocytes",
+      "group": "Other",
+      "primary_class": null,
+      "prompt": "An H&E image of renal cell carcinoma with a dense lymphocytic infiltrate in the tumor stroma or at the interface between tumor and surrounding kidney.",
+      "prompts": [
+        "An H&E image of renal cell carcinoma with a dense lymphocytic infiltrate in the tumor stroma or at the interface between tumor and surrounding kidney."
+      ]
+    },
+    {
+      "id": 30,
+      "name": "Thick fibrous septa",
+      "short_name": "other_fibrous_septa",
+      "group": "Other",
+      "primary_class": null,
+      "prompt": "A renal tumor H&E patch where nests or sheets of carcinoma cells are separated by broad, collagen-rich fibrous septa.",
+      "prompts": [
+        "A renal tumor H&E patch where nests or sheets of carcinoma cells are separated by broad, collagen-rich fibrous septa."
+      ]
+    },
+    {
+      "id": 31,
+      "name": "Cystic or tubular spaces with eosinophilic fluid",
+      "short_name": "other_cystic_eosinophilic",
+      "group": "Other",
+      "primary_class": null,
+      "prompt": "An H&E image of renal cell carcinoma containing cystic or tubular spaces lined by tumor cells and filled with eosinophilic or proteinaceous luminal material.",
+      "prompts": [
+        "An H&E image of renal cell carcinoma containing cystic or tubular spaces lined by tumor cells and filled with eosinophilic or proteinaceous luminal material."
+      ]
+    },
+    {
+      "id": 32,
+      "name": "Peritumoral normal kidney tissue",
+      "short_name": "other_peritumoral_kidney",
+      "group": "Other",
+      "primary_class": null,
+      "prompt": "An H&E patch showing the interface between renal cell carcinoma and adjacent non-neoplastic kidney parenchyma with preserved tubules and glomeruli.",
+      "prompts": [
+        "An H&E patch showing the interface between renal cell carcinoma and adjacent non-neoplastic kidney parenchyma with preserved tubules and glomeruli."
+      ]
+    },
+    {
+      "id": 42,
+      "name": "Tubular or acinar clear cell pattern",
+      "short_name": "ccrcc_tubular_acinar",
+      "group": "ccRCC",
+      "primary_class": "ccRCC",
+      "prompt": "H&E clear cell RCC showing tubular or acinar structures lined by clear cells, with small lumina and delicate intervening capillaries.",
+      "prompts": [
+        "H&E clear cell RCC showing tubular or acinar structures lined by clear cells, with small lumina and delicate intervening capillaries."
+      ]
+    },
+    {
+      "id": 43,
+      "name": "Macrocystic change in clear cell RCC",
+      "short_name": "ccrcc_macrocystic_change",
+      "group": "ccRCC",
+      "primary_class": "ccRCC",
+      "prompt": "H&E clear cell RCC with large cystic spaces or pseudocysts, lined by clear tumor cells and thin septa with small vessels.",
+      "prompts": [
+        "H&E clear cell RCC with large cystic spaces or pseudocysts, lined by clear tumor cells and thin septa with small vessels."
+      ]
+    },
+    {
+      "id": 45,
+      "name": "Hemosiderin-laden macrophages in papillary RCC",
+      "short_name": "prcc_hemosiderin_macrophages",
+      "group": "pRCC",
+      "primary_class": "pRCC",
+      "prompt": "H&E papillary RCC with coarse golden-brown hemosiderin pigment in macrophages within papillary cores or adjacent hemorrhagic stroma.",
+      "prompts": [
+        "H&E papillary RCC with coarse golden-brown hemosiderin pigment in macrophages within papillary cores or adjacent hemorrhagic stroma."
+      ]
+    },
+    {
+      "id": 46,
+      "name": "Hyalinized or sclerotic papillary cores",
+      "short_name": "prcc_hyalinized_cores",
+      "group": "pRCC",
+      "primary_class": "pRCC",
+      "prompt": "H&E papillary RCC showing papillae with sclerotic or hyalinized fibrovascular cores, sometimes thick and glassy beneath epithelium.",
+      "prompts": [
+        "H&E papillary RCC showing papillae with sclerotic or hyalinized fibrovascular cores, sometimes thick and glassy beneath epithelium."
+      ]
+    },
+    {
+      "id": 47,
+      "name": "Papillary RCC with crowded pseudostratified lining",
+      "short_name": "prcc_crowded_pseudostratified",
+      "group": "pRCC",
+      "primary_class": "pRCC",
+      "prompt": "H&E papillary RCC with crowded epithelial lining and nuclear pseudostratification along papillary surfaces, with true fibrovascular cores.",
+      "prompts": [
+        "H&E papillary RCC with crowded epithelial lining and nuclear pseudostratification along papillary surfaces, with true fibrovascular cores."
+      ]
+    },
+    {
+      "id": 48,
+      "name": "Chromophobe RCC solid sheets with pale eosinophilic cells",
+      "short_name": "chrcc_solid_sheets_pale",
+      "group": "chRCC",
+      "primary_class": "CHROMO",
+      "prompt": "H&E chromophobe RCC showing broad solid sheets of pale eosinophilic polygonal cells with distinct cell borders and low mitotic activity.",
+      "prompts": [
+        "H&E chromophobe RCC showing broad solid sheets of pale eosinophilic polygonal cells with distinct cell borders and low mitotic activity."
+      ]
+    },
+    {
+      "id": 49,
+      "name": "Chromophobe RCC binucleated tumor cells",
+      "short_name": "chrcc_binucleation",
+      "group": "chRCC",
+      "primary_class": "CHROMO",
+      "prompt": "H&E chromophobe RCC with frequent binucleated cells, raisinoid nuclear irregularity, and sharply outlined cell membranes.",
+      "prompts": [
+        "H&E chromophobe RCC with frequent binucleated cells, raisinoid nuclear irregularity, and sharply outlined cell membranes."
+      ]
+    },
+    {
+      "id": 50,
+      "name": "Chromophobe RCC cytoplasmic microvesicles / reticular clearing",
+      "short_name": "chrcc_microvesicular_cytoplasm",
+      "group": "chRCC",
+      "primary_class": "CHROMO",
+      "prompt": "H&E chromophobe RCC: tumor cells with pale, microvesicular or reticulated cytoplasm and perinuclear clearing, giving a finely vacuolated look.",
+      "prompts": [
+        "H&E chromophobe RCC: tumor cells with pale, microvesicular or reticulated cytoplasm and perinuclear clearing, giving a finely vacuolated look."
+      ]
+    },
+    {
+      "id": 51,
+      "name": "Oncocytoma nested / trabecular architecture",
+      "short_name": "onco_nested_trabecular",
+      "group": "Oncocytoma",
+      "primary_class": "ONCO",
+      "prompt": "H&E renal oncocytoma showing nests and trabeculae of oncocytic cells separated by delicate stroma, without prominent perinuclear halos.",
+      "prompts": [
+        "H&E renal oncocytoma showing nests and trabeculae of oncocytic cells separated by delicate stroma, without prominent perinuclear halos."
+      ]
+    },
+    {
+      "id": 52,
+      "name": "Oncocytoma tubulocystic pattern",
+      "short_name": "onco_tubulocystic",
+      "group": "Oncocytoma",
+      "primary_class": "ONCO",
+      "prompt": "H&E oncocytoma with small tubules or cystic spaces lined by oncocytic cells, with granular eosinophilic cytoplasm and bland nuclei.",
+      "prompts": [
+        "H&E oncocytoma with small tubules or cystic spaces lined by oncocytic cells, with granular eosinophilic cytoplasm and bland nuclei.",
+        "H&E oncocytoma showing a tubulocystic pattern with variably sized cysts and small tubules lined by oncocytic cells."
+      ]
+    },
+    {
+      "id": 53,
+      "name": "Oncocytoma edematous / myxoid stroma",
+      "short_name": "onco_edematous_stroma",
+      "group": "Oncocytoma",
+      "primary_class": "ONCO",
+      "prompt": "H&E renal oncocytoma with pale edematous or myxoid stroma separating nests of oncocytic cells, producing a loose stromal background.",
+      "prompts": [
+        "H&E renal oncocytoma with pale edematous or myxoid stroma separating nests of oncocytic cells, producing a loose stromal background."
+      ]
+    },
+    {
+      "id": 54,
+      "name": "Oncocytoma bland round nuclei",
+      "short_name": "onco_bland_round_nuclei",
+      "group": "Oncocytoma",
+      "primary_class": "ONCO",
+      "prompt": "H&E oncocytoma: uniform round nuclei with minimal pleomorphism in oncocytic cells, lacking raisinoid wrinkling or strong perinuclear halos.",
+      "prompts": [
+        "H&E oncocytoma: uniform round nuclei with minimal pleomorphism in oncocytic cells, lacking raisinoid wrinkling or strong perinuclear halos."
+      ]
+    },
+    {
+      "id": 55,
+      "name": "Normal renal glomerulus and Bowman space",
+      "short_name": "notumor_glomerulus_bowman",
+      "group": "NOT_TUMOR",
+      "primary_class": "NOT_TUMOR",
+      "prompt": "H&E normal kidney cortex showing a glomerular tuft with Bowman space and surrounding tubules, no atypical tumor nests.",
+      "prompts": [
+        "H&E normal kidney cortex showing a glomerular tuft with Bowman space and surrounding tubules, no atypical tumor nests."
+      ]
+    },
+    {
+      "id": 56,
+      "name": "Proximal tubules with brush border",
+      "short_name": "notumor_proximal_tubules",
+      "group": "NOT_TUMOR",
+      "primary_class": "NOT_TUMOR",
+      "prompt": "H&E normal kidney with proximal convoluted tubules: eosinophilic cytoplasm and fuzzy luminal brush borders, orderly tubular profiles.",
+      "prompts": [
+        "H&E normal kidney with proximal convoluted tubules: eosinophilic cytoplasm and fuzzy luminal brush borders, orderly tubular profiles."
+      ]
+    },
+    {
+      "id": 57,
+      "name": "Distal tubules / collecting ducts",
+      "short_name": "notumor_distal_collecting",
+      "group": "NOT_TUMOR",
+      "primary_class": "NOT_TUMOR",
+      "prompt": "H&E normal kidney with distal tubules or collecting ducts: paler cuboidal cells, cleaner lumina, and regular tubular arrangement.",
+      "prompts": [
+        "H&E normal kidney with distal tubules or collecting ducts: paler cuboidal cells, cleaner lumina, and regular tubular arrangement."
+      ]
+    },
+    {
+      "id": 58,
+      "name": "Renal medulla with collecting ducts and vasa recta",
+      "short_name": "notumor_medulla_collecting_vasa_recta",
+      "group": "NOT_TUMOR",
+      "primary_class": "NOT_TUMOR",
+      "prompt": "H&E renal medulla showing parallel collecting ducts and thin vascular channels (vasa recta), lacking tumor cell nests or papillary fronds.",
+      "prompts": [
+        "H&E renal medulla showing parallel collecting ducts and thin vascular channels (vasa recta), lacking tumor cell nests or papillary fronds."
+      ]
+    },
+    {
+      "id": 59,
+      "name": "Arteriole / small artery in kidney parenchyma",
+      "short_name": "notumor_arteriole",
+      "group": "NOT_TUMOR",
+      "primary_class": "NOT_TUMOR",
+      "prompt": "H&E kidney parenchyma containing a small artery or arteriole with a muscular wall and endothelial-lined lumen, adjacent normal tubules.",
+      "prompts": [
+        "H&E kidney parenchyma containing a small artery or arteriole with a muscular wall and endothelial-lined lumen, adjacent normal tubules."
+      ]
+    },
+    {
+      "id": 60,
+      "name": "Chronic interstitial fibrosis with tubular atrophy",
+      "short_name": "notumor_interstitial_fibrosis_atrophy",
+      "group": "NOT_TUMOR",
+      "primary_class": "NOT_TUMOR",
+      "prompt": "H&E non-neoplastic kidney showing interstitial fibrosis and atrophic tubules, with preserved overall architecture and no malignant nests.",
+      "prompts": [
+        "H&E non-neoplastic kidney showing interstitial fibrosis and atrophic tubules, with preserved overall architecture and no malignant nests."
+      ]
+    },
+    {
+      "id": 61,
+      "name": "Perirenal adipose tissue",
+      "short_name": "notumor_adipose",
+      "group": "NOT_TUMOR",
+      "primary_class": "NOT_TUMOR",
+      "prompt": "H&E showing mature adipose tissue with large clear fat vacuoles and thin septa, without clusters of atypical carcinoma cells.",
+      "prompts": [
+        "H&E showing mature adipose tissue with large clear fat vacuoles and thin septa, without clusters of atypical carcinoma cells."
+      ]
+    },
+    {
+      "id": 62,
+      "name": "Urothelium / renal pelvis-type lining (if present)",
+      "short_name": "notumor_urothelium",
+      "group": "NOT_TUMOR",
+      "primary_class": "NOT_TUMOR",
+      "prompt": "H&E showing urothelial-type lining epithelium with multiple cell layers and a smooth surface, without papillary RCC tumor fronds.",
+      "prompts": [
+        "H&E showing urothelial-type lining epithelium with multiple cell layers and a smooth surface, without papillary RCC tumor fronds."
+      ]
+    },
+    {
+      "id": 63,
+      "name": "Neutrophil-rich acute inflammation",
+      "short_name": "other_neutrophils_acute",
+      "group": "Other",
+      "primary_class": null,
+      "prompt": "H&E patch with abundant neutrophils and acute inflammatory exudate in stroma or lumina, not a specific RCC subtype feature.",
+      "prompts": [
+        "H&E patch with abundant neutrophils and acute inflammatory exudate in stroma or lumina, not a specific RCC subtype feature."
+      ]
+    },
+    {
+      "id": 64,
+      "name": "Fibrovascular scar-like stroma (non-specific)",
+      "short_name": "other_scar_like_stroma",
+      "group": "Other",
+      "primary_class": null,
+      "prompt": "H&E image with dense collagenized scar-like stroma and few cells, separating adjacent tissue elements; non-specific across diagnoses.",
+      "prompts": [
+        "H&E image with dense collagenized scar-like stroma and few cells, separating adjacent tissue elements; non-specific across diagnoses."
+      ]
+    },
+    {
+      "id": 65,
+      "name": "Hyalinized thick basement membranes (non-specific)",
+      "short_name": "other_hyaline_basement_membranes",
+      "group": "Other",
+      "primary_class": null,
+      "prompt": "H&E patch showing thick, hyalinized basement membrane-like material around tubules or small structures, not defining a subtype by itself.",
+      "prompts": [
+        "H&E patch showing thick, hyalinized basement membrane-like material around tubules or small structures, not defining a subtype by itself."
+      ]
+    },
+    {
+      "id": 66,
+      "name": "Organoid packed nests (oncocytoma)",
+      "short_name": "onco_organoid_packed_nests",
+      "group": "Oncocytoma",
+      "primary_class": "ONCO",
+      "prompt": "H&E renal oncocytoma with an organoid growth pattern of tightly packed nests of oncocytic cells and thin intervening stroma.",
+      "prompts": [
+        "H&E renal oncocytoma with an organoid growth pattern of tightly packed nests of oncocytic cells and thin intervening stroma."
+      ]
+    },
+    {
+      "id": 67,
+      "name": "Packed nests with small capillaries (oncocytoma)",
+      "short_name": "onco_nests_small_capillaries",
+      "group": "Oncocytoma",
+      "primary_class": "ONCO",
+      "prompt": "H&E oncocytoma showing tight nests of oncocytic cells with many small capillaries in the stroma between nests.",
+      "prompts": [
+        "H&E oncocytoma showing tight nests of oncocytic cells with many small capillaries in the stroma between nests."
+      ]
+    },
+    {
+      "id": 68,
+      "name": "Less dense nests in edematous stroma (oncocytoma)",
+      "short_name": "onco_sparse_nests_edematous_stroma",
+      "group": "Oncocytoma",
+      "primary_class": "ONCO",
+      "prompt": "H&E renal oncocytoma with oncocytic nests that are less densely arranged within abundant pale edematous or myxoid stroma.",
+      "prompts": [
+        "H&E renal oncocytoma with oncocytic nests that are less densely arranged within abundant pale edematous or myxoid stroma."
+      ]
+    },
+    {
+      "id": 69,
+      "name": "Peripheral rim around edematous stroma (oncocytoma)",
+      "short_name": "onco_peripheral_rim_edematous",
+      "group": "Oncocytoma",
+      "primary_class": "ONCO",
+      "prompt": "H&E oncocytoma with a peripheral rim of oncocytic tumor cells surrounding abundant pale edematous stromal tissue.",
+      "prompts": [
+        "H&E oncocytoma with a peripheral rim of oncocytic tumor cells surrounding abundant pale edematous stromal tissue."
+      ]
+    },
+    {
+      "id": 70,
+      "name": "Polygonal oncocytic cells with prominent nucleoli",
+      "short_name": "onco_polygonal_cells_prominent_nucleoli",
+      "group": "Oncocytoma",
+      "primary_class": "ONCO",
+      "prompt": "H&E oncocytoma with large polygonal cells, dense granular eosinophilic cytoplasm, round nuclei, and conspicuous nucleoli.",
+      "prompts": [
+        "H&E oncocytoma with large polygonal cells, dense granular eosinophilic cytoplasm, round nuclei, and conspicuous nucleoli."
+      ]
+    },
+    {
+      "id": 71,
+      "name": "Cystic oncocytoma pattern",
+      "short_name": "onco_cystic_pattern",
+      "group": "Oncocytoma",
+      "primary_class": "ONCO",
+      "prompt": "H&E renal oncocytoma with cystic spaces and oncocytic tumor cells forming cystic structures separated by thin septa.",
+      "prompts": [
+        "H&E renal oncocytoma with cystic spaces and oncocytic tumor cells forming cystic structures separated by thin septa."
+      ]
+    },
+    {
+      "id": 73,
+      "name": "Oncocytoma nests with round nuclei and no halos",
+      "short_name": "onco_round_nuclei_no_halos",
+      "group": "Oncocytoma",
+      "primary_class": "ONCO",
+      "prompt": "H&E renal oncocytoma with nests of oncocytic cells, predominantly round nuclei, and no obvious perinuclear halos.",
+      "prompts": [
+        "H&E renal oncocytoma with nests of oncocytic cells, predominantly round nuclei, and no obvious perinuclear halos."
+      ]
+    },
+    {
+      "id": 74,
+      "name": "Oncocytoma with uncommon binucleation and no zonal necrosis",
+      "short_name": "onco_uncommon_binucleation_no_necrosis",
+      "group": "Oncocytoma",
+      "primary_class": "ONCO",
+      "prompt": "H&E oncocytoma with nests of oncocytic cells, binucleation uncommon, and no zonal coagulative necrosis.",
+      "prompts": [
+        "H&E oncocytoma with nests of oncocytic cells, binucleation uncommon, and no zonal coagulative necrosis."
+      ]
+    },
+    {
+      "id": 75,
+      "name": "Moderately circumscribed oncocytoma nests",
+      "short_name": "onco_moderately_circumscribed_nests",
+      "group": "Oncocytoma",
+      "primary_class": "ONCO",
+      "prompt": "H&E renal oncocytoma showing a moderately circumscribed tumor composed of oncocytic nests in a clean stromal background.",
+      "prompts": [
+        "H&E renal oncocytoma showing a moderately circumscribed tumor composed of oncocytic nests in a clean stromal background."
+      ]
+    }
+  ]
+}

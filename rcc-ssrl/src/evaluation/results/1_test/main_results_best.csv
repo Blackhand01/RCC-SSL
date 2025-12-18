@@ -1,0 +1,5 @@
+model_family,run_name,ablation,patch_macro_f1,patch_bal_acc,patch_macro_auc_ovr,patch_macro_auprc,patch_min_recall_tumor,patient_macro_f1,patient_bal_acc,patient_macro_auc_ovr,patient_macro_auprc,patient_min_recall_tumor,n_patients_tumor_eval,val_probe_acc
+dino_v3,exp_dino_v3_abl03,abl03,0.615,0.632,0.883,0.643,0.486,0.786,0.893,0.920,0.898,0.571,12,0.714
+i_jepa,exp_i_jepa_abl03,abl03,0.464,0.551,0.864,0.590,0.159,,,,,,,0.671
+ibot,exp_ibot_abl04,abl04,0.529,0.596,0.919,0.704,0.040,0.612,0.714,0.967,0.943,0.000,12,0.768
+moco_v3,exp_moco_v3_abl03,abl03,0.736,0.739,0.948,0.812,0.563,0.945,0.964,0.984,0.975,0.857,12,0.798

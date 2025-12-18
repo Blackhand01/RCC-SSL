@@ -268,6 +268,11 @@ class Orchestrator:
         steps_per_epoch = max(1, int(steps_per_epoch))
         epochs = int(ssl_cfg["epochs"])
         total_steps = steps_per_epoch * epochs
+        
+        if hasattr(model, "set_total_steps"):
+            model.set_total_steps(total_steps)
+        elif hasattr(model, "total_steps"):
+            model.total_steps = total_steps
 
         # Cosine su 'unità' del programma (per SSL=steps, per SL=epochs)
         scheduler = self._build_scheduler(optimizer, total_steps)
@@ -286,6 +291,22 @@ class Orchestrator:
 
         t0_run = time.time()
 
+                # ------------------------------------------------------------------ time budget (optional)
+        # Read max runtime from env (in hours). Example: MAX_RUNTIME_HOURS=23.5
+        max_runtime_hours_env = os.environ.get("MAX_RUNTIME_HOURS", "").strip()
+        max_runtime_s: float | None = None
+        if max_runtime_hours_env:
+            try:
+                h = float(max_runtime_hours_env)
+                if h > 0:
+                    max_runtime_s = h * 3600.0
+                    if os.environ.get("RANK", "0") == "0":
+                        print(f"[time_budget] MAX_RUNTIME_HOURS={h:.2f}h (≈{max_runtime_s/3600:.2f}h)")
+            except ValueError:
+                if os.environ.get("RANK", "0") == "0":
+                    print(f"[time_budget] WARNING: invalid MAX_RUNTIME_HOURS='{max_runtime_hours_env}' (ignored)")
+
+        
         from pathlib import Path as _P
         csv_stem = _P((self.cfg.get("logging", {}) or {}).get("metrics_csv_name", "ssl_timeseries.csv")).stem
         csv_path = prefixed(self.run_dirs["metrics"], self.model_key, csv_stem, "csv")
@@ -468,6 +489,19 @@ class Orchestrator:
             #---fine blocco nuovo test----
             if hasattr(model, "on_epoch_end"):
                 model.on_epoch_end(epoch)
+            
+            if max_runtime_s is not None:
+                elapsed = time.time() - t0_run
+                if elapsed >= max_runtime_s:
+                    if os.environ.get("RANK", "0") == "0":
+                        h = elapsed / 3600.0
+                        print(
+                            f"[time_budget][{self.model_key}] "
+                            f"Reached time budget ({h:.2f}h >= {max_runtime_s/3600.0:.2f}h). "
+                            f"Stopping after epoch {epoch + 1}/{epochs}.",
+                            flush=True,
+                        )
+                    break
         
         best_loss = best_ssl_loss
         

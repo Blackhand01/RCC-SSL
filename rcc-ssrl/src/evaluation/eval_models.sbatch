@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH -J rcc-eval
+#SBATCH -J eval
 #SBATCH -A mla_group_01
 #SBATCH -p gpu_a40
 #SBATCH --gpus=1
@@ -13,7 +13,7 @@
 set -euo pipefail
 
 WORKDIR="/home/mla_group_01/rcc-ssrl/src/evaluation"
-VENV="/home/mla_group_01/rcc-ssrl/.venvs/rcc-eval"
+VENV="/home/mla_group_01/rcc-ssrl/.venvs/eval"
 PYTHON="$VENV/bin/python"
 
 mkdir -p /home/mla_group_01/rcc-ssrl/src/logs/eval

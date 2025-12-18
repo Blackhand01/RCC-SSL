@@ -22,7 +22,7 @@ Struttura principale:
 
 - `eval_models.sbatch`  
   Script SLURM che:
-  - crea/aggiorna il venv dedicato (`.venvs/rcc-eval`),
+  - crea/aggiorna il venv dedicato (`.venvs/eval`),
   - installa `requirements_eval.txt`,
   - lancia `eval.py --config "$CFG_PATH"` dove `CFG_PATH` viene esportato da `tools/auto_eval.py`.
 
@@ -38,15 +38,15 @@ Struttura principale:
 
 Gli script SLURM (`eval_models.sbatch`) gestiscono automaticamente:
 
-- creazione venv: `.venvs/rcc-eval`
+- creazione venv: `.venvs/eval`
 - installazione dipendenze: `pip install -r src/evaluation/requirements_eval.txt`
 
 Se vuoi lanciare localmente (senza SLURM), puoi fare:
 
 ```bash
 cd /home/mla_group_01/rcc-ssrl
-python3 -m venv .venvs/rcc-eval
-source .venvs/rcc-eval/bin/activate
+python3 -m venv .venvs/eval
+source .venvs/eval/bin/activate
 pip install --upgrade pip
 pip install -r src/evaluation/requirements_eval.txt
 
@@ -57,7 +57,7 @@ Esecuzione: evaluation automatica
 Esempio: lanciare l’evaluation automatica su tutti i run dentro un esperimento MLflow (exp_20251118_105221_dino_v3):
 
 python /home/mla_group_01/rcc-ssrl/src/evaluation/tools/auto_eval.py \
-  --mlruns-root "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/exp_20251127_214113_i_jepa" \
+  --mlruns-root "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/exp_20251213_121650_i_jepa" \
   --submit
 
 
@@ -70,5 +70,15 @@ Una volta che eval.py ha prodotto predictions.csv e (opzionalmente) logits_test.
 Esempio:
 
 python /home/mla_group_01/rcc-ssrl/src/evaluation/tools/batch_patient_aggregation.py \
-  --mlruns-root /beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/exp_jepa_ckpt_test/exp_i_jepa_abl35/i_jepa \
+  --mlruns-root /beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/ablation_final/exp_20251213_121650_i_jepa \
   --method prob_sum
+
+
+genera Reliability Diagram + ECE e Risk–Coverage (patch e/o patient)
+
+source /home/mla_group_01/rcc-ssrl/.venvs/eval/bin/activate  # consigliato se esiste
+python /home/mla_group_01/rcc-ssrl/src/evaluation/tools/calibration_and_coverage.py \
+  --run-dir /beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/ablation_final/exp_20251209_234736_dino_v3/exp_dino_v3_abl03/eval/dino_v3_ssl_linear_best/20251211_104905 \
+  --out-dir /home/mla_group_01/rcc-ssrl/src/evaluation/results/dino_v3_best_calibration \
+  --n-bins 15 \
+  --title "Dino v3 (patch-level)"

@@ -1,0 +1,11 @@
+numpy<2
+pyyaml
+pillow
+tqdm
+webdataset
+transformers
+huggingface_hub
+matplotlib
+pandas
+scikit-learn
+timm

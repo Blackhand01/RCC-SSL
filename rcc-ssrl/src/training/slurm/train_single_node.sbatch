@@ -8,7 +8,7 @@
 #SBATCH -o /home/mla_group_01/rcc-ssrl/src/logs/train/%x.%j.out
 #SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/train/%x.%j.err
 
-#SBATCH --exclude=compute-5-14,compute-5-11,compute-3-12,compute-3-15
+#SBATCH --exclude=compute-5-14,compute-5-11,compute-3-12,compute-3-15,compute-4-13
 # The job name and log paths are overridden by --job-name/--output/--error from sbatch
 
 set -euo pipefail
@@ -67,6 +67,10 @@ echo "[sbatch] RCC_DATASET_ROOT=${RCC_DATASET_ROOT}"
 export CONFIG_PATH="${CONFIG_PATH}"
 export TRAIN_CONFIG="${CONFIG_PATH}"
 export RUN_CFG="${CONFIG_PATH}"
+
+# Tempo massimo di training in ore (wall-clock), il resto del tempo lo tieni per
+# feature extraction + linear probe + overhead vari.
+export MAX_RUNTIME_HOURS="${MAX_RUNTIME_HOURS:-23.0}"
 
 # Quick sanity check on the target node to confirm visibility of the dataset
 srun -N1 -n1 bash -lc 'hostname; ls -ld ${RCC_DATASET_ROOT}/rcc_webdataset_final/train' || {

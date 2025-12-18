@@ -1,0 +1,17 @@
+\begin{table}[t]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccccc}
+\toprule
+Model & Acc & Macro-F1 & AUROC & PR-AUC & MinRecall(T) & $N_{pat}(T)$ \\
+\midrule
+dino_v3 & 0.750 & 0.786 & 0.920 & 0.898 & 0.571 & 12 \\
+i_jepa & 0.417 & 0.354 & 0.829 & 0.791 & 0.000 & 12 \\
+ibot & 0.833 & 0.612 & 0.967 & 0.943 & 0.000 & 12 \\
+moco_v3 & 0.917 & 0.945 & 0.984 & 0.975 & 0.857 & 12 \\
+\bottomrule
+\end{tabular}%
+}
+\caption{Patient-level results (tumor-only aggregation; NOT\_TUMOR excluded). Rows correspond to the same best ablations selected by patch-level Macro-F1.}
+\label{tab:main_results_patient}
+\end{table}

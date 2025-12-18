@@ -1,1 +1,1 @@
-# empty – marks "spatial" as a package
+# empty on purpose – marks "common" as a package

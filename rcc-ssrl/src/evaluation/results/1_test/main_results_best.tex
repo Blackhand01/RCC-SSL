@@ -1,0 +1,16 @@
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lcccccccccc}
+\hline
+Model & Patch Macro-F1 & Patch BalAcc & Patch AUROC & Patch PR-AUC & Patch MinRecall(T) & Patient Macro-F1 & Patient AUROC & Patient PR-AUC & Patient MinRecall(T) & N_pat(T) \\
+\hline
+dino_v3 & 0.615 & 0.632 & 0.883 & 0.643 & 0.486 & 0.786 & 0.920 & 0.898 & 0.571 & 12 \\
+i_jepa & 0.464 & 0.551 & 0.864 & 0.590 & 0.159 &  &  &  &  &  \\
+ibot & 0.529 & 0.596 & 0.919 & 0.704 & 0.040 & 0.612 & 0.967 & 0.943 & 0.000 & 12 \\
+moco_v3 & 0.736 & 0.739 & 0.948 & 0.812 & 0.563 & 0.945 & 0.984 & 0.975 & 0.857 & 12 \\
+\hline
+\end{tabular}
+\caption{Main results (best ablation per model selected by patch-level Macro-F1, then AUROC, then tumor min-recall).}
+\label{tab:main_results}
+\end{table}

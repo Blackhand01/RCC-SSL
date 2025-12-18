@@ -1,28 +1,31 @@
-# Shared SSL template (baseline knobs to be overridden per suite/experiment)
 experiment:
-  name: "exp_template_ssl"
-  date: "2025-11-08"
+  name: exp_i_jepa_abl_base
+  date: '2025-12-13'
   seed: 1337
   default_run_index: -1
-  paper_tags: ["ssl", "histopathology"]
-  mlflow_experiment: "RCC_SSL"
-  outputs_layout: "v2"
+  paper_tags:
+  - ssl
+  - histopathology
+  - i_jepa_histopathology_ablations
+  - i_jepa
+  - ablation
+  - he_aug
+  - stain_normalization
+  mlflow_experiment: RCC_SSL
+  outputs_layout: v2
   validate:
     paths: true
     steps_per_epoch: true
     batch_sizes: true
   allow_cpu: true
-
 data:
-  # Keep names generic; concrete datasets/loaders come from base_config or overrides
   sampler:
     shardshuffle: true
-    resampled: true    # avvio più rapido, epoch “senza lunghezza fissa”
+    resampled: true
     limit_per_epoch: null
   img_size: 224
-  # Optionally: webdataset params can be injected by base_config or overrides
   webdataset:
-    dataset_key: "rcc_final_ablation"
+    dataset_key: rcc_final_ablation
     shuffle_shards: 64
     shuffle_samples: 2000
     prefetch_factor: 4
@@ -31,16 +34,24 @@ data:
     batch_size_ssl: 64
     batch_size_sl: 64
     num_workers: 8
-    class_to_id: { ccRCC: 0, pRCC: 1, CHROMO: 2, ONCO: 3, NOT_TUMOR: 4 }
-
-
+    class_to_id:
+      ccRCC: 0
+      pRCC: 1
+      CHROMO: 2
+      ONCO: 3
+      NOT_TUMOR: 4
 model:
-  # Section intentionally minimal; specific SSL model params come via overrides
   backbone:
-    name: "vit_small_patch16_224"
+    name: vit_small_patch16_224
     patch_size: 16
   ssl:
-    name: "ssl_model"     # e.g. "moco_v3" / "dino_v3" / "ibot" / "i_jepa"
+    name: i_jepa
+    i_jepa:
+      predictor_depth: 6
+      predictor_embed_dim: 384
+      predictor_num_heads: 6
+      num_target_masks: 4
+      background_std_threshold: 0.02
     temperature: 0.2
     hidden_dim: 4096
     proj_dim: 256
@@ -54,65 +65,86 @@ model:
       blur_prob: 0.1
       gray_prob: 0.2
       solarize_prob: 0.0
-
 train:
   optim:
-    name: "adamw"
+    name: adamw
     lr: 0.0003
     weight_decay: 0.05
-    betas: [0.9, 0.999]
+    betas:
+    - 0.9
+    - 0.999
   scheduler:
-    name: "cosine"
-    T_max: null  # set by base/override if you want step-based cosine
+    name: cosine
+    T_max: null
   ssl:
-    epochs: 8               # debug-friendly by default
-    steps_per_epoch: 4450     # debug-friendly by default
+    epochs: 90
+    steps_per_epoch: 4450
+    checkpoint:
+      metric: probe_val_acc  # ssl_loss | final_epoch | probe_val_acc | ssl_loss_after_warmup
+      warmup_epochs: 20              # usato solo per *_after_warmup / probe_val_acc
+      eval_every_epochs: 1          # per probe_val_acc: frequenza di valutazione
+      probe_epochs: 15  
     batch_size: 64
-    accumulate_steps: 1
+    accumulate_steps: 16
     num_workers: 8
-    ema_momentum: 0.996
+    ema_m: 0.996
     amp: true
     grad_clip_max: 1.0
-    probe:                 # linear probe on frozen backbone during SSL
+    probe:
       enabled: true
-      epochs: 40
+      epochs: 50
       lr: 0.05
       weight_decay: 0.0
       batch_size: 512
-
-# ---- Global toggles (top-level) ----
 aug:
   base:
     rotate90: true
     hflip: true
     vflip: true
-    random_resized_crop: { scale: [0.6, 1.0], ratio: [0.75, 1.33] }
+    random_resized_crop:
+      scale:
+      - 0.6
+      - 1.0
+      ratio:
+      - 0.75
+      - 1.33
     gaussian_blur_p: 0.2
     sharpen_p: 0.2
     jpeg_artifacts_p: 0.1
   stain:
-    normalize: { enable: false, method: "macenko" }   # true if lib available
-    jitter:     { enable: true,  mode: "HED", delta: 0.02 }
+    normalize:
+      enable: true
+      method: vahadane
+    jitter:
+      enable: true
+      mode: HED
+      delta: 0.02
   mixing:
-    mixup:  { enable: true,  alpha: 0.3 }
-    cutmix: { enable: true,  beta: 1.0, p: 0.5 }
-
+    mixup:
+      enable: true
+      alpha: 0.3
+    cutmix:
+      enable: true
+      beta: 1.0
+      p: 0.5
 multiscale:
   enable: true
-  scales: [1.0, 1.5, 2.0]
+  scales:
+  - 1.0
+  - 1.5
+  - 2.0
   n_per_scale: 1
-
 sampler:
-  tissue_aware: { enable: true, min_tissue_frac: 0.6 }
-
+  tissue_aware:
+    enable: true
+    min_tissue_frac: 0.6
 logging:
   log_every_steps: 10
-  metrics_csv_name: "ssl_timeseries.csv"
+  metrics_csv_name: ssl_timeseries.csv
   smoothing_window: 100
-
-
 artifacts:
   save_best_model: true
   save_ckpt_every: 1
-  export_csv: ["metrics"]
+  export_csv:
+  - metrics
   report_md: true
