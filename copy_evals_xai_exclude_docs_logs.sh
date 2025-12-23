@@ -4,9 +4,10 @@
 set -euo pipefail
 
 
-EXCLUDE_DIRS=("__pycache__" ".venv" "logs" "docs")
+EXCLUDE_DIRS=("__pycache__" ".venv" "logs" "docs" "output")
 EXCLUDE_FILES=(
-  "*.md" "*.pyc" "*.txt" "*.log" "*.err" "*.out" "*.json" "*.png" "*.csv" "*.npy" "*.npz" "*.tar" "*.jpg" "*.jpeg" "*.tif" "*.tiff" "*.bmp" "*.gif" "*.pdf"
+  "*.md" "*.pt"  "*.tex" "*.txt" "*.pyc""*.log" "*.err" "*.out" "*.json" "*.jsonl" "*.png" "*.csv" "*.npy" "*.npz" "*.tar" "*.jpg" "*.jpeg" "*.tif" "*.tiff" "*.bmp" "*.gif" "*.pdf"
+   "*.pyc"
 )
 
 SRC_DIRS=(

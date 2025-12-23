@@ -1,0 +1,67 @@
+# Mirror of config_xai.yaml (unified spatial config)
+
+experiment:
+  name: "xai_ssl_rcc_vit_spatial"
+  seed: 1337
+  outputs_root: "/home/mla_group_01/rcc-ssrl/src/explainability/output/spatial"
+  run_id: "default"
+
+evaluation_inputs:
+  eval_run_dir: null
+  predictions_csv: "predictions.csv"
+  logits_npy: "logits_test.npy"
+
+data:
+  backend: "webdataset"
+  img_size: 224
+  imagenet_norm: true
+  num_workers: 8
+  batch_size: 1
+  webdataset:
+    test_dir: null          # overridden
+    pattern: "shard-*.tar"
+    image_key: "img.jpg;jpg;jpeg;png"
+    meta_key: "meta.json;json"
+  imagefolder:
+    test_dir: null          # optional
+
+labels:
+  class_order: ["ccRCC", "pRCC", "CHROMO", "ONCO", "NOT_TUMOR"]
+
+model:
+  name: null               # overridden per ablation
+  arch_hint: "ssl_linear"
+  backbone_name: "vit_small_patch16_224"
+  ssl_backbone_ckpt: null  # overridden per ablation
+  ssl_head_ckpt: null      # overridden per ablation
+
+selection:
+  per_class:
+    topk_tp: 5
+    topk_fp: 3
+    topk_fn: 3
+  global_low_conf:
+    topk: 3
+  min_per_class: 10
+
+xai:
+  methods: ["attn_rollout", "gradcam", "ig"]
+
+  gradcam:
+    target_layer: "backbone.model.norm"
+
+  ig:
+    steps: 25
+    baseline: "black"
+
+  occlusion:
+    window: 32
+    stride: 16
+
+  attn_rollout:
+    head_fusion: "mean"
+    discard_ratio: 0.9
+
+runtime:
+  device: "cuda"
+  precision: "fp32"

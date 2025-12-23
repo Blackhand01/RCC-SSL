@@ -2254,7 +2254,7 @@ runtime:
 
 eval_models.sbatch codice <<
 #!/usr/bin/env bash
-#SBATCH -J rcc-eval
+#SBATCH -J eval
 #SBATCH -A mla_group_01
 #SBATCH -p gpu_a40
 #SBATCH --gpus=1
@@ -2267,7 +2267,7 @@ eval_models.sbatch codice <<
 set -euo pipefail
 
 WORKDIR="/home/mla_group_01/rcc-ssrl/src/evaluation"
-VENV="/home/mla_group_01/rcc-ssrl/.venvs/rcc-eval"
+VENV="/home/mla_group_01/rcc-ssrl/.venvs/eval"
 PYTHON="$VENV/bin/python"
 
 mkdir -p /home/mla_group_01/rcc-ssrl/logs/05_eval

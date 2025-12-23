@@ -208,7 +208,7 @@ rcc-ssrl/src/evaluation/auto_configs/
 rcc-ssrl/src/training/configs/old/
 *.pickle
 *.tsv
-rcc-ssrl/src/explainability/concept/calibration/metadata
-rcc-ssrl/src/explainability/concept/calibration/analysis
 rcc-ssrl/src/xai-backup/
-explainability
+.triton
+rcc-ssrl/outputs/
+rcc-ssrl/src/explainability/output/

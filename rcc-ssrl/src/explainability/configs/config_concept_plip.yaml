@@ -1,0 +1,26 @@
+concepts:
+  ontology_yaml: /home/mla_group_01/rcc-ssrl/src/explainability/configs/concepts_list.yaml
+  score_scale: 100.0
+
+plip:
+  model_id: vinid/plip
+  device: cuda
+  precision: fp16
+  model_local_dir: /beegfs-scratch/mla_group_01/workspace/mla_group_01/hf_models/plip_vinid
+  hf_cache_dir: /beegfs-scratch/mla_group_01/workspace/mla_group_01/hf_cache
+
+data:
+  batch_size: 256
+  num_workers: 8
+  max_patches: 0
+  webdataset:
+    pattern: "shard-*.tar"
+    image_key: "img.jpg;jpg;jpeg;png"
+    meta_key: "meta.json;json"
+    class_field: "class_label"
+
+output:
+  save_arrays: true
+  plots: true
+  formats: ["pdf", "png"]
+  plots_dpi: 300

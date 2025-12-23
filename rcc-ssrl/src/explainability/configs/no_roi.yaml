@@ -1,0 +1,40 @@
+# Canonical NO-ROI config (model-independent concept scoring on TEST).
+#
+# Minimal required runtime input:
+#   - export WDS_TEST_DIR (unless you set data.webdataset.test_dir below)
+#
+# Optional overrides:
+#   - export CALIBRATION_METADATA_DIR
+#   - export CONCEPT_SHORTLIST_YAML
+
+profiles:
+  no_roi:
+    inputs:
+      # If null, runner uses (in priority): CLI override -> env -> canonical explainability.paths
+      calibration_metadata_dir: null
+      shortlist_yaml: null
+      use_shortlist_only: true
+
+    data:
+      backend: "webdataset"
+      num_workers: 8
+      batch_size: 256
+      max_patches: 0
+      webdataset:
+        test_dir: /beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final/test
+        pattern: "shard-*.tar"
+        image_key: "img.jpg;jpg;jpeg;png"
+        meta_key: "meta.json;json"
+        class_field: "class_label"
+
+    plip:
+      model_id: "vinid/plip"
+      model_local_dir: null
+      device: "cuda"
+      precision: "fp16"
+      hf_cache_dir: null
+
+    output:
+      plots: true
+      formats: ["pdf", "png"]
+      plots_dpi: 300

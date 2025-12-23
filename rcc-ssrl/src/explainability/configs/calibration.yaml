@@ -1,0 +1,42 @@
+# Canonical calibration config (TRAIN + optional VAL kept separate).
+# Dynamic inputs:
+#   - export WDS_CALIB_TRAIN_DIR (required)
+#   - export WDS_CALIB_VAL_DIR   (optional, but recommended)
+
+experiment:
+  name: "plip_calibration"
+  seed: 1337
+  # The runner ENFORCES canonical output via explainability.paths (metadata/).
+  # Keep this field for backward compatibility with older configs, but it is ignored.
+  outputs_root: null
+  run_id: null
+  use_runs: false
+
+data:
+  backend: "webdataset"
+  num_workers: 8
+  batch_size: 256
+  max_patches: 0
+  webdataset:
+    train_dir: /beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final/train
+    val_dir:   /beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final/val
+    pattern: "shard-*.tar"
+    image_key: "img.jpg;jpg;jpeg;png"
+    meta_key: "meta.json;json"
+    class_field: "class_label"
+
+concepts:
+  ontology_yaml: /home/mla_group_01/rcc-ssrl/src/explainability/configs/concepts_list.yaml
+  score_scale: 100.0
+
+plip:
+  model_id: "vinid/plip"
+  model_local_dir: null
+  device: "cuda"
+  precision: "fp16"
+  hf_cache_dir: null
+
+output:
+  save_arrays: true
+  save_topk_jsonl: false
+  plots: true

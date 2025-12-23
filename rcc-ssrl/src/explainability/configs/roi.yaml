@@ -1,0 +1,75 @@
+# Concept ROI scoring — per model, uses spatial outputs (attention rollout masks).
+# Unified defaults: NO-ROI profile is included under profiles.no_roi.
+
+inputs:
+  calibration_metadata_dir: /home/mla_group_01/rcc-ssrl/src/explainability/output/calibration/metadata
+  shortlist_yaml: /home/mla_group_01/rcc-ssrl/src/explainability/output/calibration/analysis/concepts_shortlist.yaml
+
+plip:
+  model_id: vinid/plip
+  device: cuda
+  precision: fp16
+  model_local_dir: /beegfs-scratch/mla_group_01/workspace/mla_group_01/hf_models/plip_vinid
+  hf_cache_dir: /beegfs-scratch/mla_group_01/workspace/mla_group_01/hf_cache
+
+roi:
+  mode: crop
+  quantile: 0.90
+  min_area_frac: 0.01
+  pad_frac: 0.05
+  save_overlay: true
+  save_roi_crops: true
+
+selection:
+  per_class:
+    topk_tp: 2
+    topk_fp: 2
+    topk_fn: 2
+  global_low_conf:
+    topk: 0
+
+xai:
+  attn_rollout:
+    discard_ratio: 0.90
+
+data:
+  backend: "webdataset"
+  img_size: 224
+  imagenet_norm: true
+  num_workers: 8
+  webdataset:
+    test_dir: ""
+    pattern: "shard-*.tar"
+    image_key: "img.jpg;jpg;jpeg;png"
+    meta_key: "meta.json;json"
+  imagefolder:
+    test_dir: ""
+    batch_size: 64
+
+profiles:
+  no_roi:
+    inputs:
+      calibration_metadata_dir: /home/mla_group_01/rcc-ssrl/src/explainability/output/calibration/metadata
+      shortlist_yaml: /home/mla_group_01/rcc-ssrl/src/explainability/output/calibration/analysis/concepts_shortlist.yaml
+      use_shortlist_only: true
+    plip:
+      model_id: vinid/plip
+      device: cuda
+      precision: fp16
+      model_local_dir: /beegfs-scratch/mla_group_01/workspace/mla_group_01/hf_models/plip_vinid
+      hf_cache_dir: /beegfs-scratch/mla_group_01/workspace/mla_group_01/hf_cache
+    data:
+      batch_size: 256
+      num_workers: 8
+      max_patches: 0
+      webdataset:
+        test_dir: /beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final/test
+        pattern: "shard-*.tar"
+        image_key: "img.jpg;jpg;jpeg;png"
+        meta_key: "meta.json;json"
+        class_field: "class_label"
+    output:
+      save_arrays: true
+      plots: true
+      formats: ["pdf", "png"]
+      plots_dpi: 300

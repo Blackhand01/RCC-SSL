@@ -1,0 +1,88 @@
+version: 1
+rank_by: auc_ovr
+k_primary: 8
+k_confounds: 5
+classes:
+  CHROMO:
+    primary:
+    - chrcc_pale_reticulated
+    - chrcc_oncocytic_variant
+    - chrcc_perinuclear_halos
+    - chrcc_microvesicular_cytoplasm
+    - chrcc_binucleation
+    confounds:
+    - notumor_glomerulus_bowman
+    - prcc_psammoma_bodies
+    - ccrcc_mixed_cytoplasm
+    - grade_high_isup34
+    - onco_round_nuclei_no_halos
+  NOT_TUMOR:
+    primary:
+    - notumor_interstitial_fibrosis_atrophy
+    - other_lymphocytes
+    - other_scar_like_stroma
+    - notumor_distal_collecting
+    - other_hyaline_basement_membranes
+    - other_peritumoral_kidney
+    - other_fibrous_septa
+    - other_hemorrhage
+    confounds:
+    - prcc_hyalinized_cores
+    - necrosis_coagulative
+    - onco_peripheral_rim_edematous
+    - dediff_sarcomatoid
+  ONCO:
+    primary:
+    - onco_round_nuclei_no_halos
+    - onco_bland_round_nuclei
+    - onco_nested_trabecular
+    - onco_uncommon_binucleation_no_necrosis
+    - onco_oncocytic_cytoplasm
+    - onco_polygonal_cells_prominent_nucleoli
+    - onco_tubulocystic
+    - onco_nests_small_capillaries
+    confounds:
+    - prcc_hobnail_nuclei
+    - ccrcc_mixed_cytoplasm
+    - prcc_psammoma_bodies
+    - prcc_type2
+    - grade_high_isup34
+  ccRCC:
+    primary:
+    - ccrcc_solid_clear
+    - ccrcc_macrocystic_change
+    - ccrcc_clear_diffuse
+    - ccrcc_clear_capillaries
+    - ccrcc_tubular_acinar
+    - ccrcc_alveolar_nested
+    - ccrcc_microcystic
+    confounds:
+    - chrcc_solid_sheets_pale
+    - dediff_rhabdoid
+    - other_neutrophils_acute
+    - grade_low_isup12
+    - onco_archipelagenous
+  pRCC:
+    primary:
+    - prcc_papillary_fronds
+    - prcc_type1
+    - prcc_crowded_pseudostratified
+    - prcc_hemosiderin_macrophages
+    - prcc_hyalinized_cores
+    - prcc_tubulopapillary
+    - prcc_foamy_macrophages
+    - prcc_hobnail_nuclei
+    confounds:
+    - other_peritumoral_kidney
+    - notumor_medulla_collecting_vasa_recta
+    - other_hemorrhage
+    - other_lymphocytes
+    - onco_thick_vessels
+relaxed_filters:
+  ONCO:
+  - primary_empty_after_filter_backoff_to_raw_rank
+notes:
+- 'primary concepts: primary_class matches class (NOT_TUMOR: primary_class==NOT_TUMOR
+  OR legacy primary_class null AND group==Other)'
+- 'confounds: high-ranked concepts where primary_class mismatches the class (possible
+  leakage / dataset bias / prompt ambiguity)'
