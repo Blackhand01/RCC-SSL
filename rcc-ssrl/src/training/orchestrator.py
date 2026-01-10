@@ -291,7 +291,7 @@ class Orchestrator:
 
         t0_run = time.time()
 
-                # ------------------------------------------------------------------ time budget (optional)
+        # ------------------------------------------------------------------ time budget (optional)
         # Read max runtime from env (in hours). Example: MAX_RUNTIME_HOURS=23.5
         max_runtime_hours_env = os.environ.get("MAX_RUNTIME_HOURS", "").strip()
         max_runtime_s: float | None = None

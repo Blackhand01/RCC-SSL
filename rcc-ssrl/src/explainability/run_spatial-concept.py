@@ -64,6 +64,7 @@ from explainability.spatial.eval_utils import (  # noqa: E402
     make_wds_loader_with_keys,
     select_items,
     tensor_to_pil,
+    canonicalize_key,
 )
 from explainability.spatial.ssl_linear_loader import SSLLinearClassifier  # noqa: E402
 from explainability.spatial.attention_rollout import ViTAttentionRollout, overlay_heatmap  # noqa: E402
@@ -162,7 +163,9 @@ def _load_text_features(text_features_pt: Path) -> Optional[torch.Tensor]:
     if torch.is_tensor(obj):
         tf = obj
     elif isinstance(obj, dict):
-        tf = obj.get("text_features", None) or obj.get("features", None)
+        tf = obj.get("text_features", None)
+        if tf is None:
+            tf = obj.get("features", None)
     else:
         tf = None
     if tf is None or (not torch.is_tensor(tf)) or tf.ndim != 2:
@@ -376,18 +379,6 @@ def _guess_vit_backbone_name_from_ckpt(ssl_backbone_ckpt: Path) -> Optional[str]
     return "vit_base_patch16_224"
 
 
-def _canon_key_strip_prefix(k: str) -> str:
-    """
-    Canonicalize a key possibly prefixed with split provenance, e.g. 'test::abcd' -> 'abcd'.
-    """
-    s = str(k)
-    if "::" in s:
-        pref = s.split("::", 1)[0].strip().lower()
-        if pref in ("train", "val", "test"):
-            return s.split("::", 1)[1]
-    return s
-
-
 def _build_rollout_mask_binary(mask_2d: np.ndarray, q: float) -> np.ndarray:
     m = np.asarray(mask_2d, dtype=np.float32)
     m = np.nan_to_num(m, nan=0.0, posinf=0.0, neginf=0.0)
@@ -402,6 +393,29 @@ def _build_rollout_mask_binary(mask_2d: np.ndarray, q: float) -> np.ndarray:
     if not bw.any() and m.size:
         bw = (m == float(np.max(m)))
     return bw.astype(bool)
+
+def _ensure_2d_mask(mask_any: Any) -> np.ndarray:
+    """
+    Coerce common rollout shapes to a 2D float32 array (H,W).
+    Accepts (H,W), (1,H,W), (H,W,1), (B,H,W), etc.
+    """
+    m = np.asarray(mask_any, dtype=np.float32)
+    m = np.nan_to_num(m, nan=0.0, posinf=0.0, neginf=0.0)
+    if m.ndim == 2:
+        return m
+    m = np.squeeze(m)
+    if m.ndim == 2:
+        return m
+    if m.ndim == 3:
+        # channel-first or channel-last -> average channels; otherwise average first dim
+        if m.shape[0] in (1, 3, 4) and m.shape[1] != m.shape[0]:
+            return m.mean(axis=0).astype(np.float32)
+        if m.shape[-1] in (1, 3, 4) and m.shape[-2] != m.shape[-1]:
+            return m.mean(axis=-1).astype(np.float32)
+        return m.mean(axis=0).astype(np.float32)
+    while m.ndim > 2:
+        m = m.mean(axis=0)
+    return np.asarray(m, dtype=np.float32)
 
 
 def _apply_mask_to_image(img: Image.Image, mask_bool: np.ndarray) -> Image.Image:
@@ -433,7 +447,7 @@ def _load_precomputed_attn_rollout_index(
         with index_csv.open("r", encoding="utf-8", newline="") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                k = _canon_key_strip_prefix(str(row.get("wds_key", "") or "").strip())
+                k = canonicalize_key(str(row.get("wds_key", "") or "").strip())
                 if not k:
                     continue
                 try:
@@ -604,10 +618,10 @@ def _process_one_ablation(
         for i, k in enumerate(keys):
             if k is None:
                 continue
-            kk = _canon_key_strip_prefix(str(k))
+            kk = canonicalize_key(str(k))
             if kk not in idx_by_key:
                 idx_by_key[kk] = int(i)
-        selected_keys = [_canon_key_strip_prefix(str(k)) for k in targets]
+        selected_keys = [canonicalize_key(str(k)) for k in targets]
         for k in selected_keys:
             ii = idx_by_key.get(k, None)
             if ii is not None:
@@ -806,11 +820,11 @@ def _process_one_ablation(
         try:
             # Prefer precomputed rollout (3/5) keyed by WebDataset key
             if key is not None and precomputed_rollout_by_key:
-                kcanon = _canon_key_strip_prefix(str(key))
+                kcanon = canonicalize_key(str(key))
                 p = precomputed_rollout_by_key.get(kcanon, None)
                 if p is not None and p.exists():
                     try:
-                        mask_np = np.load(p)
+                        mask_np = _ensure_2d_mask(np.load(p))
                     except Exception as e:
                         log.warning("[%s] Failed to load precomputed attn_rollout.npy (%s): %s", model_id, p, e)
                         mask_np = None  # fall back below
@@ -820,19 +834,20 @@ def _process_one_ablation(
                 mask_np = None
 
             if mask_np is not None:
-                mask_np = np.asarray(mask_np, dtype=np.float32)
+                mask_np = _ensure_2d_mask(mask_np)
             else:
                 if rollout is not None:
                     x = img_t.unsqueeze(0).to(device)
                     m = rollout(x)
-                    mask_np = np.asarray(m, dtype=np.float32) if m is not None else np.zeros((1, 1), dtype=np.float32)
+                    mask_np = _ensure_2d_mask(m) if m is not None else np.zeros((1, 1), dtype=np.float32)
                 else:
                     mask_np = np.zeros((1, 1), dtype=np.float32)
         except Exception as e:
             log.warning("[%s] rollout failed idx=%d key=%s (%s) -> fallback full ROI", model_id, idx_eval, key, e)
             mask_np = np.zeros((1, 1), dtype=np.float32)
 
-        np.save(item_dir / "attn_rollout.npy", mask_np.astype(np.float32))
+        mask_np = _ensure_2d_mask(mask_np)
+        np.save(item_dir / "attn_rollout.npy", mask_np.astype(np.float32, copy=False))
         try:
             over = overlay_heatmap(pil_in, mask_np, alpha=0.6)
             over.save(item_dir / "attn_rollout.png")
@@ -944,10 +959,10 @@ def _process_one_ablation(
         )
 
         if selected_keys is not None and wanted_keys_set:
-            wanted = set(_canon_key_strip_prefix(k) for k in wanted_keys_set)
+            wanted = set(canonicalize_key(k) for k in wanted_keys_set)
             found = set()
             for img_t, _meta, kk in iter_wds_filtered_by_keys(loader, wanted):
-                kkc = _canon_key_strip_prefix(str(kk))
+                kkc = canonicalize_key(str(kk))
                 idx_eval = idx_by_key.get(kkc, None)
                 if idx_eval is None:
                     continue
@@ -963,7 +978,7 @@ def _process_one_ablation(
                     continue
                 img_t, _meta, kk = batch
                 if int(seen) in wanted_indices_set:
-                    _process_sample(img_t, idx_eval=int(seen), key=_canon_key_strip_prefix(str(kk)))
+                    _process_sample(img_t, idx_eval=int(seen), key=canonicalize_key(str(kk)))
                 seen += 1
 
     elif ds_spec["backend"] == "imagefolder":

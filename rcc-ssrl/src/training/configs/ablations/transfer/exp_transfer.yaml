@@ -1,0 +1,85 @@
+experiment:
+  name: "exp_transfer"
+  date: "2026-01-10"
+  seed: 1337
+  default_run_index: -1
+  paper_tags: ["sl", "supervised", "baseline", "resnet50"]
+  mlflow_experiment: "RCC_SL"
+  outputs_layout: "v2"
+  validate:
+    paths: true
+    steps_per_epoch: true
+    batch_sizes: true
+  allow_cpu: true
+
+data:
+  sampler:
+    shardshuffle: true
+    resampled: true
+    limit_per_epoch: null
+  img_size: 224
+  webdataset:
+    dataset_key: "rcc_final_ablation"  # Deve corrispondere a una chiave in paths.py
+    shuffle_shards: 64
+    shuffle_samples: 2000
+    prefetch_factor: 4
+    persistent_workers: true
+    pin_memory: true
+    batch_size_sl: 128                # Batch size specifica per la modalità SL
+    num_workers: 8
+    class_to_id:
+      ccRCC: 0
+      pRCC: 1
+      CHROMO: 2
+      ONCO: 3
+      NOT_TUMOR: 4
+
+model:
+  type: "sl"                          # Forza l'orchestratore in modalità Supervised Learning
+  sl:
+    name: "resnet50"          # Usa build_resnet_transfer da transfer.py
+    imagenet_weights: "DEFAULT"       # Carica i pesi pre-addestrati di torchvision
+    freeze_backbone: false            # Setta a true se vuoi addestrare solo il classificatore finale
+    dropout_p: 0.2                    # Dropout applicato prima del layer lineare finale
+    bn_eval_freeze: false             # Se true, congela i BatchNorm in modalità eval
+
+train:
+  optim:
+    name: "adamw"
+    lr: 0.0001
+    weight_decay: 0.05
+    betas: [0.9, 0.999]
+  scheduler:
+    name: "cosine"
+    T_max: 2                        # Deve corrispondere al numero di epoche
+  sl:
+    epochs: 2                       # Numero totale di epoche di addestramento supervisionato
+    amp: true                         # Abilita l'Automatic Mixed Precision per velocizzare il training
+
+aug:
+  base:
+    rotate90: true
+    hflip: true
+    vflip: true
+    random_resized_crop:
+      scale: [0.6, 1.0]
+      ratio: [0.75, 1.33]
+    gaussian_blur_p: 0.2
+  stain:
+    normalize:
+      enable: false                   # Opzionale: attiva se serve normalizzazione Macenko/Vahadane
+    jitter:
+      enable: true
+      mode: "HED"
+      delta: 0.02
+
+logging:
+  log_every_steps: 10
+  metrics_csv_name: "sl_timeseries.csv"
+  smoothing_window: 100
+
+artifacts:
+  save_best_model: true
+  save_ckpt_every: 1
+  export_csv: ["metrics"]
+  report_md: true

@@ -27,9 +27,34 @@ class RoiBox:
 
 
 def _normalize_mask(m: np.ndarray) -> np.ndarray:
+    """
+    Normalize a rollout/heatmap mask to [0,1] and coerce to 2D.
+    Accepts common variants: (H,W), (1,H,W), (H,W,1), (B,H,W), (B,1,H,W), etc.
+    """
     m = np.asarray(m, dtype=np.float32)
+    m = np.nan_to_num(m, nan=0.0, posinf=0.0, neginf=0.0)
+
+    if m.ndim == 2:
+        pass
+    else:
+        m = np.squeeze(m)
+        if m.ndim == 2:
+            pass
+        elif m.ndim == 3:
+            # Heuristic: if looks like (C,H,W) or (H,W,C), average channels; else average batch-like dim.
+            if m.shape[0] in (1, 3, 4) and m.shape[1] != m.shape[0]:
+                m = m.mean(axis=0)
+            elif m.shape[-1] in (1, 3, 4) and m.shape[-2] != m.shape[-1]:
+                m = m.mean(axis=-1)
+            else:
+                m = m.mean(axis=0)
+        else:
+            # collapse any remaining leading dims until 2D
+            while m.ndim > 2:
+                m = m.mean(axis=0)
+
     if m.ndim != 2:
-        raise ValueError(f"Mask must be 2D, got shape={m.shape}")
+        raise ValueError(f"Mask must be 2D after coercion, got shape={m.shape}")
     mn = float(np.nanmin(m))
     mx = float(np.nanmax(m))
     if not np.isfinite(mn) or not np.isfinite(mx) or (mx - mn) <= 1e-12:
@@ -55,6 +80,9 @@ def extract_bbox_from_mask(
     - min_area_frac: if bbox is too small, fall back to full image.
     - pad_frac: expand bbox by this fraction of its size (clamped).
     """
+    if int(img_w) <= 0 or int(img_h) <= 0:
+        raise ValueError(f"Invalid image size img_w={img_w} img_h={img_h}")
+
     m = _normalize_mask(mask_2d)
     thr = float(np.quantile(m, quantile)) if m.size > 0 else 1.0
     bw = (m >= thr)

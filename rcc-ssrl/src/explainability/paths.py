@@ -235,8 +235,23 @@ def roi_concept_layout(model_root: Union[str, Path]) -> RoiConceptLayout:
     )
 
 
+def _comparison_base_dir(model_id: str) -> Path:
+    """
+    Canonical comparison dir name is 'roi-no_roi-comparison'.
+    Back-compat: if legacy misspelling exists and canonical does not, keep using legacy.
+    """
+    new = XAI_ROOT / "roi-no_roi-comparison" / str(model_id)
+    old = XAI_ROOT / "roi-no_roi-comparision" / str(model_id)
+    try:
+        if old.exists() and not new.exists():
+            return old
+    except Exception:
+        pass
+    return new
+
+
 def comparison_layout(model_id: str) -> ComparisonLayout:
-    base = XAI_ROOT / "roi-no_roi-comparision" / str(model_id)
+    base = _comparison_base_dir(str(model_id))
     tables_dir = base / "tables"
     return ComparisonLayout(
         root_dir=base,
@@ -362,8 +377,15 @@ def get_light_stats_dir(kind: str, model_id: str) -> Path:
         return OUTPUT_DIR / "spatial" / mid
     if kind_norm in ("roi", "roi_stats", "stats_roi"):
         return OUTPUT_DIR / "roi" / mid
-    if kind_norm in ("roi-no_roi-comparision", "comparision", "comparison"):
-        return OUTPUT_DIR / "roi-no_roi-comparision" / mid
+    if kind_norm in ("roi-no_roi-comparison", "roi-no_roi-comparision", "comparision", "comparison"):
+        new = OUTPUT_DIR / "roi-no_roi-comparison" / mid
+        old = OUTPUT_DIR / "roi-no_roi-comparision" / mid
+        try:
+            if old.exists() and not new.exists():
+                return old
+        except Exception:
+            pass
+        return new
     if kind_norm in ("no_roi", "no-roi"):
         return OUTPUT_DIR / "no_roi"
     if kind_norm in ("calibration",):
@@ -412,12 +434,17 @@ def resolve_checkpoints(ablation_dir: Union[str, Path]) -> Optional[Dict[str, Pa
     if not ckpt_dir.exists() or not ckpt_dir.is_dir():
         return None
 
-    # Backbone: *_ssl_best.pt but NOT *_ssl_linear_best.pt
-    backbone = sorted(
-        [p for p in ckpt_dir.glob("*_ssl_best.pt") if "linear" not in p.name.lower()],
-        key=lambda p: p.name,
-    )
-    head = sorted(list(ckpt_dir.glob("*_ssl_linear_best.pt")), key=lambda p: p.name)
+    # Backbone: *_ssl_best.(pt|pth) but NOT *_ssl_linear_best.(pt|pth)
+    backbone_cands: List[Path] = []
+    backbone_cands += [p for p in ckpt_dir.glob("*_ssl_best.pt") if "linear" not in p.name.lower()]
+    backbone_cands += [p for p in ckpt_dir.glob("*_ssl_best.pth") if "linear" not in p.name.lower()]
+    backbone = sorted(backbone_cands, key=lambda p: p.name)
+
+    # Head: *_ssl_linear_best.(pt|pth)
+    head_cands: List[Path] = []
+    head_cands += list(ckpt_dir.glob("*_ssl_linear_best.pt"))
+    head_cands += list(ckpt_dir.glob("*_ssl_linear_best.pth"))
+    head = sorted(head_cands, key=lambda p: p.name)
     if not backbone or not head:
         return None
 

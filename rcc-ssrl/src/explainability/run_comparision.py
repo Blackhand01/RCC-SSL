@@ -24,7 +24,7 @@ Inputs:
         concept_scores_json (path relativo a heavy_run_dir)
 
 Outputs canonici:
-  - XAI_ROOT/roi-no_roi-comparision/<MODEL_ID>/
+  - XAI_ROOT/roi-no_roi-comparison/<MODEL_ID>/   (back-compat: accetta anche '.../roi-no_roi-comparision/')
       tables/roi_vs_no_roi_summary.csv
       figures/top_abs_delta.png/pdf
       report.md
@@ -55,19 +55,26 @@ def _bootstrap_package() -> None:
     if src_str not in sys.path:
         sys.path.insert(0, src_str)
     rel = this.relative_to(src_dir).with_suffix("")
-    globals()["__package__"] = ".".join(rel.parts[:-1])
+    # Keep __package__ consistent when executed as a script, but rely on absolute imports below.
+    globals()["__package__"] = ".".join(rel.parts[:-1])  # e.g. "explainability"
 
 
 _bootstrap_package()
 
-from ..spatial.eval_utils import atomic_write_text  # noqa: E402
-from ..paths import (  # noqa: E402
+from explainability.spatial.eval_utils import atomic_write_text  # noqa: E402
+from explainability.paths import (  # noqa: E402
     CONFIG_DIR,
     NO_ROI_PATHS,
     ensure_comparison_layout,
     get_light_stats_dir,
 )
 import yaml  # noqa: E402
+
+
+def _default_comp_cfg() -> Path:
+    p_new = CONFIG_DIR / "comparison.yaml"
+    p_old = CONFIG_DIR / "comparision.yaml"
+    return p_new if p_new.exists() else p_old
 
 
 def _load_selected_concepts(path: Path) -> List[Dict[str, Any]]:
@@ -139,8 +146,8 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument(
         "--config",
         type=Path,
-        default=CONFIG_DIR / "comparision.yaml",
-        help="Config YAML (opzionale, default: explainability/configs/comparision.yaml)",
+        default=_default_comp_cfg(),
+        help="Config YAML (opzionale, default: explainability/configs/comparison.yaml)",
     )
     ap.add_argument(
         "--model-id",
@@ -159,7 +166,7 @@ def main() -> None:
         level=getattr(logging, str(args.log_level).upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(message)s",
     )
-    log = logging.getLogger("comparision_roi_no_roi")
+    log = logging.getLogger("comparison_roi_no_roi")
 
     # Config opzionale per topk
     topk_cfg = None
@@ -347,7 +354,7 @@ def main() -> None:
 
     atomic_write_text(lay.report_md, "\n".join(report) + "\n")
 
-    log.info("Comparision done: %s", lay.root)
+    log.info("Comparison done: %s", lay.root)
     log.info("  - %s", lay.summary_csv)
     log.info("  - %s", lay.report_md)
 

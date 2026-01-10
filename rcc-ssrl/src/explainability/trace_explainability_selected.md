@@ -1,218 +1,4 @@
-class_utils.py codice <<
-from __future__ import annotations
-
-import json
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set
-
-import yaml
-
-
-# Canonicalize class names across configs (handles common drift).
-CLASS_ALIASES: Dict[str, str] = {
-    "Oncocytoma": "ONCO",
-    "onco": "ONCO",
-    "ONCOCYTOMA": "ONCO",
-    "chRCC": "CHROMO",
-    "chrcc": "CHROMO",
-    "Chromophobe": "CHROMO",
-    "CHROMOPHOBE": "CHROMO",
-    "Other": "NOT_TUMOR",
-    "OTHER": "NOT_TUMOR",
-    "Normal": "NOT_TUMOR",
-    "NORMAL": "NOT_TUMOR",
-}
-
-
-def canon_class(x: Optional[str]) -> Optional[str]:
-    if x is None:
-        return None
-    s = str(x).strip()
-    if not s:
-        return None
-    return CLASS_ALIASES.get(s, s)
-
-
-def idx_to_class(idx: Optional[int], class_names: Optional[Sequence[str]]) -> Optional[str]:
-    if idx is None:
-        return None
-    if class_names and 0 <= idx < len(class_names):
-        return str(class_names[idx])
-    return str(idx)
-
-
-def load_class_names(eval_run_dir: Path) -> Optional[List[str]]:
-    """
-    Best-effort load of class names from eval config (if present).
-    """
-    for name in ("config_eval.yaml", "config_resolved.yaml", "config.yaml"):
-        cfg_path = eval_run_dir / name
-        if not cfg_path.exists():
-            continue
-        try:
-            cfg = yaml.safe_load(cfg_path.read_text())
-        except Exception:
-            continue
-        for key_path in [
-            ("data", "class_names"),
-            ("dataset", "class_names"),
-            ("data", "classes"),
-            ("dataset", "classes"),
-        ]:
-            cur: Any = cfg
-            ok = True
-            for k in key_path:
-                if isinstance(cur, dict) and k in cur:
-                    cur = cur[k]
-                else:
-                    ok = False
-                    break
-            if ok and isinstance(cur, list) and all(isinstance(x, str) for x in cur):
-                return list(cur)
-    return None
-
-
-def load_shortlist_idx(path: Path, concept_to_idx: Dict[str, int], log: Any = None) -> Dict[str, Dict[str, List[int]]]:
-    # Support both JSON (legacy) and YAML (canonical required file).
-    if path.suffix.lower() in (".yaml", ".yml"):
-        raw = yaml.safe_load(path.read_text())
-    else:
-        raw = json.loads(path.read_text())
-    classes = raw.get("classes", {})
-    if not isinstance(classes, dict) or not classes:
-        raise RuntimeError(f"Invalid shortlist JSON (classes missing/empty): {path}")
-    out: Dict[str, Dict[str, List[int]]] = {}
-    for cls, items in classes.items():
-        cls_norm = canon_class(str(cls)) or str(cls)
-        if not isinstance(items, dict):
-            continue
-        prim = [concept_to_idx[c] for c in items.get("primary", []) if c in concept_to_idx]
-        conf = [concept_to_idx[c] for c in items.get("confounds", []) if c in concept_to_idx]
-        missing = [c for c in items.get("primary", []) + items.get("confounds", []) if c not in concept_to_idx]
-        if missing and log is not None:
-            try:
-                log.warning("[SHORTLIST] Concepts missing in ontology (ignored) for %s: %s", cls_norm, missing)
-            except Exception:
-                pass
-        out[cls_norm] = {"primary": prim, "confounds": conf}
-    return out
-
-
-def concept_indices_for_patch(shortlist: Dict[str, Dict[str, List[int]]], true_cls: Optional[str], pred_cls: Optional[str]) -> List[int]:
-    idxs: Set[int] = set()
-    if pred_cls and pred_cls in shortlist:
-        idxs.update(shortlist[pred_cls].get("primary", []))
-        idxs.update(shortlist[pred_cls].get("confounds", []))
-    if true_cls and true_cls in shortlist:
-        idxs.update(shortlist[true_cls].get("primary", []))
-    return sorted(idxs)
->>
-
-roi_utils.py codice <<
-#!/usr/bin/env python3
-from __future__ import annotations
-
-"""
-ROI utilities:
-  - robust bbox extraction from 2D rollout masks (supports low-res 14x14 etc)
-  - safe scaling to image pixel coordinates
-"""
-
-from dataclasses import dataclass
-from typing import Tuple, Optional
-
-import numpy as np
-
-
-@dataclass(frozen=True)
-class RoiBox:
-    x0: int
-    y0: int
-    x1: int
-    y1: int
-    method: str
-    threshold: float
-
-    def as_xyxy(self) -> Tuple[int, int, int, int]:
-        return int(self.x0), int(self.y0), int(self.x1), int(self.y1)
-
-
-def _normalize_mask(m: np.ndarray) -> np.ndarray:
-    m = np.asarray(m, dtype=np.float32)
-    if m.ndim != 2:
-        raise ValueError(f"Mask must be 2D, got shape={m.shape}")
-    mn = float(np.nanmin(m))
-    mx = float(np.nanmax(m))
-    if not np.isfinite(mn) or not np.isfinite(mx) or (mx - mn) <= 1e-12:
-        return np.zeros_like(m, dtype=np.float32)
-    out = (m - mn) / (mx - mn)
-    out = np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
-    return out
-
-
-def extract_bbox_from_mask(
-    mask_2d: np.ndarray,
-    *,
-    img_w: int,
-    img_h: int,
-    quantile: float = 0.90,
-    min_area_frac: float = 0.01,
-    pad_frac: float = 0.05,
-) -> RoiBox:
-    """
-    Extract a single bbox around the most salient region.
-
-    - quantile: threshold at q-quantile of normalized mask.
-    - min_area_frac: if bbox is too small, fall back to full image.
-    - pad_frac: expand bbox by this fraction of its size (clamped).
-    """
-    m = _normalize_mask(mask_2d)
-    thr = float(np.quantile(m, quantile)) if m.size > 0 else 1.0
-    bw = (m >= thr)
-    ys, xs = np.where(bw)
-
-    # fallback: no pixels above threshold
-    if xs.size == 0 or ys.size == 0:
-        return RoiBox(0, 0, img_w - 1, img_h - 1, method="fallback_full", threshold=thr)
-
-    # bbox in mask coords
-    x0m, x1m = int(xs.min()), int(xs.max())
-    y0m, y1m = int(ys.min()), int(ys.max())
-
-    mh, mw = m.shape[0], m.shape[1]
-    sx = float(img_w) / float(max(1, mw))
-    sy = float(img_h) / float(max(1, mh))
-
-    x0 = int(np.floor(x0m * sx))
-    x1 = int(np.ceil((x1m + 1) * sx) - 1)
-    y0 = int(np.floor(y0m * sy))
-    y1 = int(np.ceil((y1m + 1) * sy) - 1)
-
-    # clamp
-    x0 = max(0, min(img_w - 1, x0))
-    x1 = max(0, min(img_w - 1, x1))
-    y0 = max(0, min(img_h - 1, y0))
-    y1 = max(0, min(img_h - 1, y1))
-
-    # padding
-    bwx = max(1, x1 - x0 + 1)
-    bwy = max(1, y1 - y0 + 1)
-    px = int(round(pad_frac * bwx))
-    py = int(round(pad_frac * bwy))
-    x0 = max(0, x0 - px)
-    y0 = max(0, y0 - py)
-    x1 = min(img_w - 1, x1 + px)
-    y1 = min(img_h - 1, y1 + py)
-
-    area = float((x1 - x0 + 1) * (y1 - y0 + 1))
-    full = float(img_w * img_h)
-    if full > 0 and (area / full) < float(min_area_frac):
-        return RoiBox(0, 0, img_w - 1, img_h - 1, method="fallback_small_bbox", threshold=thr)
-
-    return RoiBox(x0, y0, x1, y1, method="quantile_bbox", threshold=thr)
->>
-
-run_spatial-concept.py codice <<
+explainability/run_spatial-concept.py codice <<
 #!/usr/bin/env python3
 from __future__ import annotations
 
@@ -279,6 +65,7 @@ from explainability.spatial.eval_utils import (  # noqa: E402
     make_wds_loader_with_keys,
     select_items,
     tensor_to_pil,
+    canonicalize_key,
 )
 from explainability.spatial.ssl_linear_loader import SSLLinearClassifier  # noqa: E402
 from explainability.spatial.attention_rollout import ViTAttentionRollout, overlay_heatmap  # noqa: E402
@@ -591,18 +378,6 @@ def _guess_vit_backbone_name_from_ckpt(ssl_backbone_ckpt: Path) -> Optional[str]
     return "vit_base_patch16_224"
 
 
-def _canon_key_strip_prefix(k: str) -> str:
-    """
-    Canonicalize a key possibly prefixed with split provenance, e.g. 'test::abcd' -> 'abcd'.
-    """
-    s = str(k)
-    if "::" in s:
-        pref = s.split("::", 1)[0].strip().lower()
-        if pref in ("train", "val", "test"):
-            return s.split("::", 1)[1]
-    return s
-
-
 def _build_rollout_mask_binary(mask_2d: np.ndarray, q: float) -> np.ndarray:
     m = np.asarray(mask_2d, dtype=np.float32)
     m = np.nan_to_num(m, nan=0.0, posinf=0.0, neginf=0.0)
@@ -617,6 +392,29 @@ def _build_rollout_mask_binary(mask_2d: np.ndarray, q: float) -> np.ndarray:
     if not bw.any() and m.size:
         bw = (m == float(np.max(m)))
     return bw.astype(bool)
+
+def _ensure_2d_mask(mask_any: Any) -> np.ndarray:
+    """
+    Coerce common rollout shapes to a 2D float32 array (H,W).
+    Accepts (H,W), (1,H,W), (H,W,1), (B,H,W), etc.
+    """
+    m = np.asarray(mask_any, dtype=np.float32)
+    m = np.nan_to_num(m, nan=0.0, posinf=0.0, neginf=0.0)
+    if m.ndim == 2:
+        return m
+    m = np.squeeze(m)
+    if m.ndim == 2:
+        return m
+    if m.ndim == 3:
+        # channel-first or channel-last -> average channels; otherwise average first dim
+        if m.shape[0] in (1, 3, 4) and m.shape[1] != m.shape[0]:
+            return m.mean(axis=0).astype(np.float32)
+        if m.shape[-1] in (1, 3, 4) and m.shape[-2] != m.shape[-1]:
+            return m.mean(axis=-1).astype(np.float32)
+        return m.mean(axis=0).astype(np.float32)
+    while m.ndim > 2:
+        m = m.mean(axis=0)
+    return np.asarray(m, dtype=np.float32)
 
 
 def _apply_mask_to_image(img: Image.Image, mask_bool: np.ndarray) -> Image.Image:
@@ -648,7 +446,7 @@ def _load_precomputed_attn_rollout_index(
         with index_csv.open("r", encoding="utf-8", newline="") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                k = _canon_key_strip_prefix(str(row.get("wds_key", "") or "").strip())
+                k = canonicalize_key(str(row.get("wds_key", "") or "").strip())
                 if not k:
                     continue
                 try:
@@ -819,10 +617,10 @@ def _process_one_ablation(
         for i, k in enumerate(keys):
             if k is None:
                 continue
-            kk = _canon_key_strip_prefix(str(k))
+            kk = canonicalize_key(str(k))
             if kk not in idx_by_key:
                 idx_by_key[kk] = int(i)
-        selected_keys = [_canon_key_strip_prefix(str(k)) for k in targets]
+        selected_keys = [canonicalize_key(str(k)) for k in targets]
         for k in selected_keys:
             ii = idx_by_key.get(k, None)
             if ii is not None:
@@ -1021,11 +819,11 @@ def _process_one_ablation(
         try:
             # Prefer precomputed rollout (3/5) keyed by WebDataset key
             if key is not None and precomputed_rollout_by_key:
-                kcanon = _canon_key_strip_prefix(str(key))
+                kcanon = canonicalize_key(str(key))
                 p = precomputed_rollout_by_key.get(kcanon, None)
                 if p is not None and p.exists():
                     try:
-                        mask_np = np.load(p)
+                        mask_np = _ensure_2d_mask(np.load(p))
                     except Exception as e:
                         log.warning("[%s] Failed to load precomputed attn_rollout.npy (%s): %s", model_id, p, e)
                         mask_np = None  # fall back below
@@ -1035,19 +833,20 @@ def _process_one_ablation(
                 mask_np = None
 
             if mask_np is not None:
-                mask_np = np.asarray(mask_np, dtype=np.float32)
+                mask_np = _ensure_2d_mask(mask_np)
             else:
                 if rollout is not None:
                     x = img_t.unsqueeze(0).to(device)
                     m = rollout(x)
-                    mask_np = np.asarray(m, dtype=np.float32) if m is not None else np.zeros((1, 1), dtype=np.float32)
+                    mask_np = _ensure_2d_mask(m) if m is not None else np.zeros((1, 1), dtype=np.float32)
                 else:
                     mask_np = np.zeros((1, 1), dtype=np.float32)
         except Exception as e:
             log.warning("[%s] rollout failed idx=%d key=%s (%s) -> fallback full ROI", model_id, idx_eval, key, e)
             mask_np = np.zeros((1, 1), dtype=np.float32)
 
-        np.save(item_dir / "attn_rollout.npy", mask_np.astype(np.float32))
+        mask_np = _ensure_2d_mask(mask_np)
+        np.save(item_dir / "attn_rollout.npy", mask_np.astype(np.float32, copy=False))
         try:
             over = overlay_heatmap(pil_in, mask_np, alpha=0.6)
             over.save(item_dir / "attn_rollout.png")
@@ -1159,10 +958,10 @@ def _process_one_ablation(
         )
 
         if selected_keys is not None and wanted_keys_set:
-            wanted = set(_canon_key_strip_prefix(k) for k in wanted_keys_set)
+            wanted = set(canonicalize_key(k) for k in wanted_keys_set)
             found = set()
             for img_t, _meta, kk in iter_wds_filtered_by_keys(loader, wanted):
-                kkc = _canon_key_strip_prefix(str(kk))
+                kkc = canonicalize_key(str(kk))
                 idx_eval = idx_by_key.get(kkc, None)
                 if idx_eval is None:
                     continue
@@ -1178,7 +977,7 @@ def _process_one_ablation(
                     continue
                 img_t, _meta, kk = batch
                 if int(seen) in wanted_indices_set:
-                    _process_sample(img_t, idx_eval=int(seen), key=_canon_key_strip_prefix(str(kk)))
+                    _process_sample(img_t, idx_eval=int(seen), key=canonicalize_key(str(kk)))
                 seen += 1
 
     elif ds_spec["backend"] == "imagefolder":
@@ -1466,160 +1265,401 @@ if __name__ == "__main__":
     main()
 >>
 
-run_comparision.py codice <<
+explainability/concept/run_no_roi.py codice <<
 #!/usr/bin/env python3
 from __future__ import annotations
 
 """
-Compare ROI vs NO-ROI concept scores.
+Compute PLIP concept scores on TEST patches WITHOUT ROI (NO-ROI).
 
-Inputs:
-
-  NO-ROI (model-independent, canonico):
-    - NO_ROI_PATHS.root_dir / artifacts/
-        scores_fp32.npy
-        keys.npy
-        selected_concepts.json
-
-  ROI (per modello, prodotti da run_spatial-concept.py):
-    - src/explainability/output/roi/<MODEL_ID>/spatial_concept/latest_run.json
-      {
-        "heavy_run_dir": ".../attention_rollout_concept/run_<RUN_ID>/",
-        "summary_json": ".../src/explainability/output/roi/<MODEL_ID>/spatial_concept/xai_summary.json",
-        ...
-      }
-    - summary_json contiene "items", ognuno con:
-        key
-        concept_scores_json (path relativo a heavy_run_dir)
-
-Outputs canonici:
-  - XAI_ROOT/roi-no_roi-comparision/<MODEL_ID>/
-      tables/roi_vs_no_roi_summary.csv
-      figures/top_abs_delta.png/pdf
-      report.md
+Design constraints (requested):
+  - Must be MODEL-INDEPENDENT (run once for the test set).
+  - Must not depend on spatial XAI, backbone, checkpoint.
+  - Must write deterministically under the canonical no_roi/ layout
+    (no timestamps, idempotent, overwrite-safe).
 """
 
 import argparse
+import copy
+import csv
 import json
 import logging
+import math
 import os
+import tempfile
 from pathlib import Path
-import sys
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
-import pandas as pd
+import torch
+import yaml
 
+from explainability.utils.bootstrap import bootstrap_package
 
-def _bootstrap_package() -> None:
-    if __package__:
-        return
-    this = Path(__file__).resolve()
-    src_dir = this
-    while src_dir.name != "src" and src_dir.parent != src_dir:
-        src_dir = src_dir.parent
-    if src_dir.name != "src":
-        return
-    src_str = str(src_dir)
-    if src_str not in sys.path:
-        sys.path.insert(0, src_str)
-    rel = this.relative_to(src_dir).with_suffix("")
-    globals()["__package__"] = ".".join(rel.parts[:-1])
+bootstrap_package(__file__, globals())
 
-
-_bootstrap_package()
-
-from ..spatial.eval_utils import atomic_write_text  # noqa: E402
-from ..paths import (  # noqa: E402
-    CONFIG_DIR,
-    NO_ROI_PATHS,
-    ensure_comparison_layout,
-    get_light_stats_dir,
+from ..utils.class_utils import load_shortlist_idx
+from .plip.plip_model import load_plip, encode_images
+from .plip.scoring import score
+from .plip.wds_loader import build_wds_loader
+from .calibration.utils import (
+    Concept,
+    as_float,
+    augment_selection_with_primary_concepts,
+    build_metrics_tables,
+    build_selection_from_delta,
+    build_selection_union,
+    compute_auc_ap_for_selected,
+    compute_fast_stats,
+    ensure_dir,
+    get_plt,
+    guess_class_names,
+    load_concepts,
+    normalize_labels,
+    plot_barh,
+    plot_heatmap,
+    write_exemplars,
 )
-import yaml  # noqa: E402
+from ..paths import CALIBRATION_PATHS, ensure_no_roi_layout, NO_ROI_CONFIG_YAML, resolve_config
 
 
-def _load_selected_concepts(path: Path) -> List[Dict[str, Any]]:
-    obj = json.loads(path.read_text())
-    sel = obj.get("selected", [])
-    if not isinstance(sel, list) or not sel:
-        raise RuntimeError(f"Invalid selected_concepts.json: {path}")
-    return sel
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp", delete=False) as tf:
+        tmp = Path(tf.name)
+        tf.write(data)
+        tf.flush()
+        os.fsync(tf.fileno())
+    tmp.replace(path)
 
 
-def _canon_key_strip_prefix(k: str) -> str:
-    """
-    Canonicalizza chiavi tipo 'test::abcd' -> 'abcd' (come in run_spatial-concept).
-    """
-    s = str(k)
-    if "::" in s:
-        pref = s.split("::", 1)[0].strip().lower()
-        if pref in ("train", "val", "test"):
-            return s.split("::", 1)[1]
-    return s
+def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
+    _atomic_write_bytes(path, text.encode(encoding))
 
 
-def _load_latest_roi_summary(model_id: str, log: logging.Logger) -> Tuple[Path, List[Dict[str, Any]]]:
-    """
-    Trova heavy_run_dir + lista items ROI a partire da output/roi/<MODEL_ID>/spatial_concept/latest_run.json
-    """
-    base = get_light_stats_dir("roi", model_id)
-    out_dir = base / "spatial_concept"
-    latest_path = out_dir / "latest_run.json"
-    if not latest_path.exists():
-        raise FileNotFoundError(
-            f"latest_run.json non trovato per ROI: {latest_path} "
-            "(esegui prima run_spatial-concept.py)"
+def atomic_write_json(path: Path, obj: Any) -> None:
+    atomic_write_text(path, json.dumps(obj, indent=2, ensure_ascii=False) + "\n")
+
+
+
+def _load_text_features(text_features_pt: Path) -> torch.Tensor:
+    obj = torch.load(text_features_pt, map_location="cpu")
+    if torch.is_tensor(obj):
+        tf = obj
+    elif isinstance(obj, dict):
+        tf = obj.get("text_features", None)
+        if tf is None:
+            tf = obj.get("features", None)
+    else:
+        tf = None
+    if tf is None or not torch.is_tensor(tf) or tf.ndim != 2:
+        raise RuntimeError(f"Invalid text_features.pt format: {text_features_pt}")
+    return tf
+
+
+def _resolve_test_dir(cfg: Dict[str, Any]) -> Path:
+    wds = cfg.get("data", {}).get("webdataset", {})
+    td = str(wds.get("test_dir") or "").strip()
+    if not td:
+        td = os.getenv("WDS_TEST_DIR", "").strip()
+    if not td:
+        raise RuntimeError(
+            "Missing TEST WebDataset dir. Set data.webdataset.test_dir or export WDS_TEST_DIR."
         )
+    p = Path(td)
+    if not p.exists():
+        raise FileNotFoundError(f"TEST WebDataset dir not found: {p}")
+    return p
 
-    latest = json.loads(latest_path.read_text())
-    heavy_run_dir = Path(latest.get("heavy_run_dir", "")).expanduser()
-    if not heavy_run_dir.exists():
-        raise FileNotFoundError(f"heavy_run_dir non esistente: {heavy_run_dir}")
 
-    summary_json_path = Path(latest.get("summary_json", ""))
-    if not summary_json_path.is_absolute():
-        summary_json_path = out_dir / summary_json_path
-    if not summary_json_path.exists():
-        raise FileNotFoundError(f"summary_json non trovato: {summary_json_path}")
+def _build_selected_indices(
+    *,
+    concepts: List[Concept],
+    shortlist_yaml: Path,
+    use_shortlist_only: bool,
+    log: logging.Logger,
+) -> Tuple[List[int], List[Dict[str, Any]]]:
+    concept_to_idx = {c.short_name: c.idx for c in concepts if c.short_name}
 
-    summary = json.loads(summary_json_path.read_text())
-    items = summary.get("items", [])
-    if not isinstance(items, list) or not items:
-        raise RuntimeError(f"xai_summary.json vuoto o invalido: {summary_json_path}")
-    log.info("Trovati %d item ROI (summary=%s)", len(items), summary_json_path)
-    return heavy_run_dir, items
+    if not use_shortlist_only:
+        idxs = list(range(len(concepts)))
+    else:
+        if not shortlist_yaml.exists():
+            raise FileNotFoundError(f"Shortlist YAML not found: {shortlist_yaml}")
+        shortlist = load_shortlist_idx(shortlist_yaml, concept_to_idx, log=log)
+        union: set[int] = set()
+        for _cls, d in shortlist.items():
+            union.update(d.get("primary", []))
+            union.update(d.get("confounds", []))
+        idxs = sorted(union)
+        if not idxs:
+            raise RuntimeError(f"Shortlist produced 0 indices (ontology mismatch?): {shortlist_yaml}")
+        log.info("Selected concepts (union shortlist): %d / %d", len(idxs), len(concepts))
+
+    sel: List[Dict[str, Any]] = []
+    for local_idx, global_idx in enumerate(idxs):
+        c = concepts[global_idx]
+        sel.append(
+            {
+                "concept_idx": int(local_idx),
+                "concept_idx_global": int(global_idx),
+                "concept_id": c.id,
+                "concept_short_name": c.short_name,
+                "concept_name": c.name,
+                "group": c.group,
+                "primary_class": c.primary_class,
+            }
+        )
+    return idxs, sel
+
+
+def _build_selected_concepts(
+    concepts: List[Concept],
+    selected_global_idxs: Sequence[int],
+) -> Tuple[List[Concept], List[int]]:
+    selected: List[Concept] = []
+    global_idx_by_local: List[int] = []
+    for local_idx, global_idx in enumerate(selected_global_idxs):
+        c = concepts[global_idx]
+        selected.append(
+            Concept(
+                idx=local_idx,
+                id=c.id,
+                short_name=c.short_name,
+                name=c.name,
+                group=c.group,
+                primary_class=c.primary_class,
+                prompt=c.prompt,
+            )
+        )
+        global_idx_by_local.append(int(global_idx))
+    return selected, global_idx_by_local
+
+
+def _load_selected_concepts(
+    path: Path,
+    concepts: List[Concept],
+    log: logging.Logger,
+) -> Tuple[List[int], List[Dict[str, Any]]]:
+    if not path.exists():
+        raise FileNotFoundError(f"selected_concepts.json not found: {path}")
+    obj = json.loads(path.read_text())
+    selected = obj.get("selected", [])
+    if not isinstance(selected, list) or not selected:
+        raise RuntimeError(f"selected_concepts.json is empty/invalid: {path}")
+
+    concept_to_idx = {c.short_name: c.idx for c in concepts if c.short_name}
+    sel_idxs: List[int] = []
+    sel_meta: List[Dict[str, Any]] = []
+    for local_idx, entry in enumerate(selected):
+        if not isinstance(entry, dict):
+            continue
+        global_idx = entry.get("concept_idx_global", None)
+        if global_idx is None:
+            global_idx = entry.get("concept_idx", None)
+        if global_idx is None:
+            sn = str(entry.get("concept_short_name") or "").strip()
+            if sn and sn in concept_to_idx:
+                global_idx = concept_to_idx[sn]
+        if global_idx is None:
+            raise RuntimeError(f"selected_concepts.json missing global idx for entry {local_idx}: {path}")
+        global_idx = int(global_idx)
+        if global_idx < 0 or global_idx >= len(concepts):
+            raise RuntimeError(f"selected_concepts.json has out-of-range index {global_idx}: {path}")
+        c = concepts[global_idx]
+        sel_idxs.append(global_idx)
+        sel_meta.append(
+            {
+                "concept_idx": int(local_idx),
+                "concept_idx_global": int(global_idx),
+                "concept_id": c.id,
+                "concept_short_name": c.short_name,
+                "concept_name": c.name,
+                "group": c.group,
+                "primary_class": c.primary_class,
+            }
+        )
+    log.info("Loaded selected concepts from: %s", path)
+    return sel_idxs, sel_meta
+
+
+def _load_subset_keys(path: Optional[Path]) -> Optional[set[str]]:
+    if path is None:
+        return None
+    if not path.exists():
+        raise FileNotFoundError(f"Subset keys file not found: {path}")
+    keys = {line.strip() for line in path.read_text().splitlines() if line.strip()}
+    return keys or None
+
+
+def _save_heatmap_mean_by_class(
+    *,
+    scores: np.ndarray,
+    labels: np.ndarray,
+    concept_short: Sequence[str],
+    out_base: Path,
+    formats: Sequence[str],
+    dpi: int,
+) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    if scores.size == 0:
+        return
+
+    labels_arr = np.asarray(labels, dtype=object)
+    # Preserve first-seen order of labels
+    classes = [str(c) for c in dict.fromkeys(labels_arr.tolist())]
+    if not classes:
+        return
+
+    n_classes = len(classes)
+    n_concepts = scores.shape[1]
+    mat = np.zeros((n_classes, n_concepts), dtype=np.float32)
+    for i, cls in enumerate(classes):
+        mask = labels_arr == cls
+        if not np.any(mask):
+            continue
+        mat[i] = scores[mask].mean(axis=0)
+
+    out_base.parent.mkdir(parents=True, exist_ok=True)
+
+    fig, ax = plt.subplots(
+        figsize=(
+            max(8.0, 0.3 * n_concepts),
+            max(4.0, 0.4 * n_classes),
+        )
+    )
+    im = ax.imshow(mat, aspect="auto")
+    ax.set_yticks(np.arange(n_classes))
+    ax.set_yticklabels(classes)
+    ax.set_xticks(np.arange(len(concept_short)))
+    ax.set_xticklabels(concept_short, rotation=90, fontsize=6)
+    ax.set_xlabel("Concept")
+    ax.set_ylabel("Class label")
+    ax.set_title("NO-ROI: mean concept score per class")
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    fig.tight_layout()
+
+    for fmt in formats:
+        ext = str(fmt).lstrip(".")
+        out_path = out_base.with_suffix(f".{ext}")
+        fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+
+    plt.close(fig)
 
 
 def parse_args() -> argparse.Namespace:
-    ap = argparse.ArgumentParser(description="ROI vs NO-ROI comparison (paper-ready).")
-    ap.add_argument(
-        "--model-root",
-        type=Path,
-        required=True,
-        help="Root di un'ablation (es: .../exp_*/exp_*_abl01)",
-    )
-    ap.add_argument(
-        "--no-roi-root",
-        type=Path,
-        default=NO_ROI_PATHS.root_dir,
-        help="Root NO-ROI canonico (default: NO_ROI_PATHS.root_dir).",
-    )
+    ap = argparse.ArgumentParser(description="Concept NO-ROI on TEST (model-independent, canonical output).")
     ap.add_argument(
         "--config",
         type=Path,
-        default=CONFIG_DIR / "comparision.yaml",
-        help="Config YAML (opzionale, default: explainability/configs/comparision.yaml)",
+        default=NO_ROI_CONFIG_YAML,
+        help=(
+            "YAML config (default: central configs/no_roi.yaml). "
+            "If missing/unreadable, the runner falls back to env/defaults."
+        ),
     )
     ap.add_argument(
-        "--model-id",
-        type=str,
+        "--test-dir",
+        type=Path,
         default=None,
-        help="Override model id (default: nome della cartella model-root).",
+        help="Override TEST WebDataset dir (otherwise from config.data.webdataset.test_dir or env WDS_TEST_DIR).",
     )
-    ap.add_argument("--topk", type=int, default=20)
+    ap.add_argument(
+        "--calibration-metadata-dir",
+        type=Path,
+        default=None,
+        help="Override calibration metadata dir (otherwise from config.inputs.calibration_metadata_dir or canonical).",
+    )
+    ap.add_argument(
+        "--shortlist-yaml",
+        type=Path,
+        default=None,
+        help="Override shortlist YAML path (otherwise from config.inputs.shortlist_yaml or canonical).",
+    )
+    ap.add_argument(
+        "--all-concepts",
+        action="store_true",
+        help="Score all ontology concepts (ignore shortlist).",
+    )
+    ap.add_argument(
+        "--max-patches",
+        type=int,
+        default=None,
+        help="Stop after N patches (subset). Overrides data.max_patches.",
+    )
+    ap.add_argument(
+        "--subset-prob",
+        type=float,
+        default=None,
+        help="Randomly keep each patch with probability p in (0,1].",
+    )
+    ap.add_argument(
+        "--subset-keys",
+        type=Path,
+        default=None,
+        help="File with WebDataset keys (one per line) to restrict to a subset.",
+    )
+    ap.add_argument(
+        "--subset-seed",
+        type=int,
+        default=0,
+        help="Seed for subset sampling when --subset-prob is used.",
+    )
+    ap.add_argument(
+        "--compute-auc",
+        dest="compute_auc",
+        action="store_true",
+        default=None,
+        help="Compute AUC/AP for selected concepts (requires scikit-learn).",
+    )
+    ap.add_argument(
+        "--no-compute-auc",
+        dest="compute_auc",
+        action="store_false",
+        help="Disable AUC/AP computation.",
+    )
+    ap.add_argument(
+        "--no-metrics",
+        dest="compute_metrics",
+        action="store_false",
+        default=True,
+        help="Skip metrics/plots/exemplars (scores only).",
+    )
     ap.add_argument("--log-level", type=str, default="INFO")
+    ap.add_argument("--overwrite", action="store_true", help="Overwrite existing NO-ROI artifacts.")
     return ap.parse_args()
+
+
+
+def _safe_load_yaml(path: Path, log: logging.Logger) -> Dict[str, Any]:
+    try:
+        obj = yaml.safe_load(path.read_text())
+        return obj if isinstance(obj, dict) else {}
+    except FileNotFoundError:
+        log.warning("NO-ROI config not found (continuing with env/defaults): %s", path)
+        return {}
+    except Exception as e:
+        raise RuntimeError(f"Failed to parse NO-ROI config YAML: {path} ({e})") from e
+
+
+def _merge_missing(dst: Dict[str, Any], src: Dict[str, Any]) -> None:
+    """
+    Recursively merge entries from src into dst without overwriting existing keys.
+    Useful to apply profile defaults.
+    """
+    for k, v in src.items():
+        if isinstance(v, dict):
+            cur = dst.get(k)
+            if isinstance(cur, dict):
+                _merge_missing(cur, v)
+            elif k not in dst:
+                dst[k] = copy.deepcopy(v)
+        elif k not in dst:
+            dst[k] = v
 
 
 def main() -> None:
@@ -1628,729 +1668,199 @@ def main() -> None:
         level=getattr(logging, str(args.log_level).upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(message)s",
     )
-    log = logging.getLogger("comparision_roi_no_roi")
+    log = logging.getLogger("concept_no_roi")
 
-    # Config opzionale per topk
-    topk_cfg = None
-    if args.config and args.config.exists():
-        try:
-            cfg = yaml.safe_load(args.config.read_text())
-            if isinstance(cfg, dict) and "topk" in cfg:
-                topk_cfg = int(cfg["topk"])
-        except Exception as e:
-            log.warning("Failed to read comparison config %s: %s", args.config, e)
+    layout = ensure_no_roi_layout()
 
-    model_root = args.model_root.resolve()
-    if not model_root.exists():
-        raise FileNotFoundError(f"model_root not found: {model_root}")
-    model_id = args.model_id or model_root.name
+    cfg: Dict[str, Any] = {}
+    cfg_path = resolve_config(args.config) if args.config is not None else None
+    if cfg_path is not None and cfg_path.exists():
+        cfg = _safe_load_yaml(cfg_path, log=log)
+    else:
+        log.warning("NO-ROI config missing; continuing with env/defaults: %s", cfg_path)
 
-    lay = ensure_comparison_layout(model_id=model_id)
+    # If config defines profiles.no_roi, merge its defaults into the top-level cfg
+    # without overwriting explicit root keys. This allows using shared configs
+    # that bundle ROI + NO-ROI under profiles.
+    profile_no_roi = cfg.get("profiles", {}).get("no_roi", {})
+    if isinstance(profile_no_roi, dict):
+        _merge_missing(cfg, profile_no_roi)
 
-    # ---------------- NO-ROI canonical ----------------
-    no_roi_root = args.no_roi_root or NO_ROI_PATHS.root_dir
-    no_roi_art = no_roi_root / "artifacts"
-    no_scores_p = no_roi_art / "scores_fp32.npy"
-    no_keys_p = no_roi_art / "keys.npy"
-    sel_json_p = no_roi_art / "selected_concepts.json"
+    # Inject CLI overrides into the expected config schema (without requiring a file).
+    cfg.setdefault("inputs", {})
+    cfg.setdefault("data", {})
+    cfg["data"].setdefault("webdataset", {})
+    cfg.setdefault("plip", {})
 
-    for p in (no_scores_p, no_keys_p, sel_json_p):
-        if not p.exists():
-            raise FileNotFoundError(f"NO-ROI artifact mancante: {p}")
+    if args.calibration_metadata_dir is not None:
+        cfg["inputs"]["calibration_metadata_dir"] = str(args.calibration_metadata_dir)
+    else:
+        # Allow env override even without YAML.
+        if os.getenv("CALIBRATION_METADATA_DIR"):
+            cfg["inputs"]["calibration_metadata_dir"] = os.getenv("CALIBRATION_METADATA_DIR")
 
-    no_scores = np.load(no_scores_p)
-    no_keys = np.load(no_keys_p, allow_pickle=True).astype(object).tolist()
-    sel = _load_selected_concepts(sel_json_p)
-    concept_names = [str(x.get("concept_short_name")) for x in sel]
-    if no_scores.ndim != 2:
-        raise RuntimeError(f"NO-ROI scores_fp32 deve essere 2D, shape={no_scores.shape}")
+    if args.shortlist_yaml is not None:
+        cfg["inputs"]["shortlist_yaml"] = str(args.shortlist_yaml)
+    else:
+        if os.getenv("CONCEPT_SHORTLIST_YAML"):
+            cfg["inputs"]["shortlist_yaml"] = os.getenv("CONCEPT_SHORTLIST_YAML")
 
-    n_concepts = len(concept_names)
-    if no_scores.shape[1] != n_concepts:
-        raise RuntimeError(
-            f"NO-ROI scores dim mismatch: scores.shape[1]={no_scores.shape[1]} vs selected={n_concepts}"
-        )
+    if args.test_dir is not None:
+        cfg["data"]["webdataset"]["test_dir"] = str(args.test_dir)
 
-    idx_by_name = {name: i for i, name in enumerate(concept_names)}
-    no_map = {_canon_key_strip_prefix(str(k)): i for i, k in enumerate(no_keys)}
+    if args.all_concepts:
+        cfg["inputs"]["use_shortlist_only"] = False
 
-    # ---------------- ROI (run_spatial-concept) ----------------
-    heavy_run_dir, items = _load_latest_roi_summary(model_id, log)
+    # Canonical output enforced
+    ARTIFACTS_DIR = layout.artifacts_dir
+    PLOTS_DIR = layout.plots_dir
+    LOGS_DIR = layout.logs_dir
+    ensure_dir(ARTIFACTS_DIR)
+    ensure_dir(PLOTS_DIR)
+    ensure_dir(LOGS_DIR)
 
-    roi_vecs: List[np.ndarray] = []
-    roi_keys: List[str] = []
-    missing_scores = 0
+    # Optional wipe (idempotent)
+    scores_path = ARTIFACTS_DIR / "scores_fp32.npy"
+    keys_path = ARTIFACTS_DIR / "keys.npy"
+    labels_path = ARTIFACTS_DIR / "labels.npy"
+    if scores_path.exists() and not args.overwrite:
+        log.info("NO-ROI already computed (scores exist). Use --overwrite to recompute: %s", scores_path)
+        return
 
-    for row in items:
-        key = str(row.get("key", "")).strip()
-        if not key:
-            continue
-        rel_cs = row.get("concept_scores_json", "")
-        if not rel_cs:
-            missing_scores += 1
-            continue
-        cs_path = heavy_run_dir / rel_cs
-        if not cs_path.exists():
-            log.warning("concept_scores.json mancante per key=%s: %s", key, cs_path)
-            missing_scores += 1
-            continue
+    # Inputs
+    inp = cfg.get("inputs", {})
+    cal_dir = Path(inp.get("calibration_metadata_dir") or CALIBRATION_PATHS.metadata_dir)
+    shortlist_yaml = Path(inp.get("shortlist_yaml") or CALIBRATION_PATHS.shortlist_yaml)
+    use_shortlist_only = bool(inp.get("use_shortlist_only", True))
 
-        try:
-            obj = json.loads(cs_path.read_text())
-        except Exception as e:
-            log.warning("concept_scores.json illeggibile (%s): %s", cs_path, e)
-            missing_scores += 1
-            continue
+    # Resolve TEST dir now that we injected CLI/env overrides into cfg
+    # (this keeps the rest of the code unchanged).
+    _ = _resolve_test_dir(cfg)  # will raise with a clear message if still missing
 
-        scores_map = obj.get("scores", {})
-        if not isinstance(scores_map, dict) or not scores_map:
-            missing_scores += 1
-            continue
+    concepts_json = cal_dir / "concepts.json"
+    text_features_pt = cal_dir / "text_features.pt"
+    if not concepts_json.exists():
+        raise FileNotFoundError(f"Missing calibration concepts.json: {concepts_json}")
+    if not text_features_pt.exists():
+        raise FileNotFoundError(f"Missing calibration text_features.pt: {text_features_pt}")
 
-        meta = obj.get("meta", {}) or {}
-        key_meta = str(meta.get("key") or key).strip()
-        kcanon = _canon_key_strip_prefix(key_meta)
+    concepts = load_concepts(concepts_json)
+    tf_all = _load_text_features(text_features_pt)  # [C,D]
 
-        v = np.full((n_concepts,), np.nan, dtype=np.float32)
-        for sname, sval in scores_map.items():
-            j = idx_by_name.get(str(sname))
-            if j is None:
-                continue
-            try:
-                v[j] = float(sval)
-            except Exception:
-                continue
-
-        roi_vecs.append(v)
-        roi_keys.append(kcanon)
-
-    if not roi_vecs:
-        raise RuntimeError(
-            f"Nessun vettore ROI valido trovato (items={len(items)}, missing_scores={missing_scores})."
-        )
-
-    # Allineamento chiavi
-    aligned_roi: List[np.ndarray] = []
-    aligned_no: List[np.ndarray] = []
-    aligned_keys: List[str] = []
-    no_missing = 0
-
-    for k, v in zip(roi_keys, roi_vecs):
-        j = no_map.get(k, None)
-        if j is None:
-            no_missing += 1
-            continue
-        aligned_roi.append(v)
-        aligned_no.append(no_scores[j])
-        aligned_keys.append(k)
-
-    if not aligned_keys:
-        raise RuntimeError(
-            f"Nessuna chiave in comune tra ROI e NO-ROI. "
-            f"ROI_valid={len(roi_vecs)} missing_in_no_roi={no_missing}"
-        )
-
-    A = np.asarray(aligned_roi, dtype=np.float32)
-    B = np.asarray(aligned_no, dtype=np.float32)
-    if A.shape != B.shape:
-        raise RuntimeError(f"Shape mismatch ROI vs NO-ROI: {A.shape} vs {B.shape}")
-
-    D = A - B
-    mean_delta = np.nanmean(D, axis=0)
-    mean_abs = np.nanmean(np.abs(D), axis=0)
-
-    # ---------------- Output tabella + figura ----------------
-    df = pd.DataFrame(
-        {
-            "concept_short_name": concept_names,
-            "mean_delta_roi_minus_no_roi": mean_delta.astype(np.float64),
-            "mean_abs_delta": mean_abs.astype(np.float64),
-        }
-    ).sort_values("mean_abs_delta", ascending=False)
-
-    lay.summary_csv.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(lay.summary_csv, index=False)
-
-    topk = max(5, int(topk_cfg if topk_cfg is not None else args.topk))
-    df_top = df.head(topk)
-
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-
-        fig = plt.figure(figsize=(10, max(4, 0.35 * len(df_top))))
-        ax = fig.add_subplot(111)
-        ax.barh(np.arange(len(df_top)), df_top["mean_abs_delta"].values)
-        ax.set_yticks(np.arange(len(df_top)))
-        ax.set_yticklabels(df_top["concept_short_name"].tolist(), fontsize=9)
-        ax.set_xlabel("mean |ROI - NO-ROI|")
-        ax.set_title(
-            f"{model_id}: ROI vs NO-ROI - top-{topk} concepts by mean absolute delta"
-        )
-        fig.tight_layout()
-        lay.figures_dir.mkdir(parents=True, exist_ok=True)
-        fig.savefig(lay.figures_dir / "top_abs_delta.png", dpi=300, bbox_inches="tight")
-        fig.savefig(lay.figures_dir / "top_abs_delta.pdf", bbox_inches="tight")
-        plt.close(fig)
-    except Exception as e:
-        log.warning("Plot failed: %s", str(e))
-
-    # ---------------- Report markdown ----------------
-    report = []
-    report.append("# ROI vs NO-ROI comparison\n")
-    report.append(f"- model_id: `{model_id}`")
-    report.append(f"- model_root: `{model_root}`")
-    report.append(f"- no_roi_root: `{no_roi_root}`")
-    report.append(
-        f"- n_overlap: **{len(aligned_keys)}** "
-        f"(roi_valid={len(roi_vecs)}, missing_in_no_roi={no_missing})\n"
+    sel_idxs, sel_concepts = _build_selected_indices(
+        concepts=concepts,
+        shortlist_yaml=shortlist_yaml,
+        use_shortlist_only=use_shortlist_only,
+        log=log,
     )
-    report.append("## Summary\n")
-    report.append(f"- table: `{lay.summary_csv}`")
-    report.append(f"- figure: `{lay.figures_dir / 'top_abs_delta.png'}`\n")
-    report.append("## Top concepts by mean_abs_delta\n")
-    report.append(df_top.to_markdown(index=False))
-    report.append("")
+    tf = tf_all[torch.tensor(sel_idxs, dtype=torch.long)]
 
-    atomic_write_text(lay.report_md, "\n".join(report) + "\n")
+    # PLIP
+    plip_cfg = cfg.get("plip", {})
+    plip = load_plip(
+        model_id=str(plip_cfg.get("model_id", "vinid/plip")),
+        model_local_dir=plip_cfg.get("model_local_dir", None),
+        device=str(plip_cfg.get("device", "cuda")),
+        precision=str(plip_cfg.get("precision", "fp16")),
+        score_scale=None,  # rely on learned logit_scale for inference (more standard)
+        hf_cache_dir=plip_cfg.get("hf_cache_dir", None),
+    )
 
-    log.info("Comparision done: %s", lay.root)
-    log.info("  - %s", lay.summary_csv)
-    log.info("  - %s", lay.report_md)
+    # Data
+    test_dir = _resolve_test_dir(cfg)
+    data = cfg.get("data", {})
+    wds = data.get("webdataset", {})
+    pattern = str(wds.get("pattern", "shard-*.tar"))
+    image_key = str(wds.get("image_key", "img.jpg;jpg;jpeg;png"))
+    meta_key = str(wds.get("meta_key", "meta.json;json"))
+    class_field = str(wds.get("class_field", "class_label"))
+    bs = int(data.get("batch_size", 256))
+    nw = int(data.get("num_workers", 8))
+    max_patches = (
+        int(args.max_patches)
+        if getattr(args, "max_patches", None) is not None
+        else int(data.get("max_patches", 0))
+    )
+
+    loader = build_wds_loader(
+        split_dir=test_dir,
+        pattern=pattern,
+        image_key=image_key,
+        meta_key=meta_key,
+        preprocess=plip.preprocess,
+        batch_size=bs,
+        num_workers=nw,
+        return_raw=False,
+    )
+
+    keys: List[str] = []
+    labels: List[str] = []
+    chunks: List[np.ndarray] = []
+    n_seen = 0
+    for batch in loader:
+        if batch is None:
+            continue
+        imgs, metas, bkeys, _raw = batch
+        if imgs is None:
+            continue
+        metas_list = list(metas) if isinstance(metas, (list, tuple)) else [metas] * int(imgs.shape[0])
+
+        img_feats = encode_images(plip, imgs)
+        logits = score(plip, img_feats, tf.to(device=img_feats.device, dtype=img_feats.dtype))
+        logits_np = logits.detach().cpu().float().numpy()
+
+        # store
+        for m, k in zip(metas_list, list(bkeys)):
+            keys.append(str(k))
+            labels.append(str(m.get(class_field, "UNKNOWN")))
+        chunks.append(logits_np.astype(np.float32, copy=False))
+        n_seen += int(logits_np.shape[0])
+        if max_patches > 0 and n_seen >= max_patches:
+            break
+
+    scores = np.concatenate(chunks, axis=0) if chunks else np.zeros((0, len(sel_idxs)), dtype=np.float32)
+    keys_arr = np.asarray(keys, dtype=object)
+    labels_arr = np.asarray(labels, dtype=object)
+
+    # Save
+    np.save(ARTIFACTS_DIR / "scores_fp32.npy", scores.astype(np.float32))
+    np.save(ARTIFACTS_DIR / "keys.npy", keys_arr)
+    np.save(ARTIFACTS_DIR / "labels.npy", labels_arr)
+    atomic_write_json(ARTIFACTS_DIR / "selected_concepts.json", {"selected": sel_concepts})
+    atomic_write_text(ARTIFACTS_DIR / "config_resolved.yaml", yaml.safe_dump(cfg, sort_keys=False))
+
+    summary = {
+        "n_samples": int(scores.shape[0]),
+        "n_concepts_scored": int(scores.shape[1]),
+        "use_shortlist_only": bool(use_shortlist_only),
+        "test_dir": str(test_dir),
+        "shortlist_yaml": str(shortlist_yaml),
+    }
+    atomic_write_json(ARTIFACTS_DIR / "summary.json", summary)
+
+    # Plots (optional)
+    out_cfg = cfg.get("output", {})
+    if bool(out_cfg.get("plots", True)) and scores.shape[0] > 0:
+        formats = tuple(out_cfg.get("formats", ["pdf", "png"]))
+        dpi = int(out_cfg.get("plots_dpi", 300))
+        concept_short = [c["concept_short_name"] for c in sel_concepts]
+        _save_heatmap_mean_by_class(
+            scores=scores,
+            labels=labels_arr,
+            concept_short=concept_short,
+            out_base=PLOTS_DIR / "heatmap_mean_score_class_x_concept",
+            formats=formats,
+            dpi=dpi,
+        )
+
+    log.info("NO-ROI done (canonical): %s", ARTIFACTS_DIR.parent)
+    log.info("  - scores: %s", ARTIFACTS_DIR / "scores_fp32.npy")
+    log.info("  - keys  : %s", ARTIFACTS_DIR / "keys.npy")
+    log.info("  - labels: %s", ARTIFACTS_DIR / "labels.npy")
 
 
 if __name__ == "__main__":
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     main()
->>
-
-paths.py codice <<
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Single source of truth for explainability filesystem layout + central configs.
-
-Goals:
-  - One canonical layout (no timestamped runs) with optional env override.
-  - Centralised config directory: src/explainability/configs/
-  - Outputs stay under src/explainability/output/ by default.
-  - Avoid hard-coded absolute paths inside code; compute relative to repo.
-
-Back-compat:
-  - Default artifact root is src/explainability/output unless XAI_ROOT is set.
-
-New (unified pipeline):
-  - Light outputs (stats-only) remain under src/explainability/output/...
-  - Heavy per-patch artifacts (input/rollout/ROI/overlays) live under each model root on scratch:
-      <MODEL_ROOT>/attention_rollout_concept/run_<RUN_ID>/
-  - Experiment discovery helpers for scratch model runs live here as the single source of truth.
-"""
-
-from __future__ import annotations
-
-import fnmatch
-import os
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Tuple, Union
-
-# ---------------------------------------------------------------------
-# Repo / package roots
-# ---------------------------------------------------------------------
-
-EXPLAINABILITY_DIR = Path(__file__).resolve().parent  # .../src/explainability
-SRC_DIR = EXPLAINABILITY_DIR.parent                   # .../src
-REPO_ROOT = SRC_DIR.parent                            # .../ (repo root)
-
-# Centralised configs directory
-CONFIG_DIR = EXPLAINABILITY_DIR / "configs"
-# Canonical output root (default)
-OUTPUT_DIR = EXPLAINABILITY_DIR / "output"
-
-# Scratch model root (defaults for the RCC cluster)
-MODELS_ROOT_DEFAULT = Path(
-    "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/models"
-)
-
-
-def _env_path(key: str) -> Optional[Path]:
-    v = os.getenv(key, "").strip()
-    if not v:
-        return None
-    return Path(v)
-
-
-# Canonical artifacts root.
-# Default keeps outputs under src/explainability/output unless XAI_ROOT is set.
-XAI_ROOT = _env_path("XAI_ROOT") or OUTPUT_DIR
-
-
-def resolve_config(path_or_name: Union[str, Path]) -> Path:
-    """
-    Resolve a config file path.
-      - If an existing path is provided -> return it.
-      - Else interpret it as a filename under CONFIG_DIR.
-    """
-    p = Path(path_or_name)
-    if p.exists():
-        return p
-    return CONFIG_DIR / str(path_or_name)
-
-
-def resolve_models_root(models_root: Optional[Union[str, Path]] = None) -> Path:
-    """
-    Resolve the scratch models root:
-      - explicit models_root arg wins
-      - else env MODELS_ROOT
-      - else MODELS_ROOT_DEFAULT
-    """
-    if models_root is not None:
-        return Path(models_root).expanduser()
-    return (_env_path("MODELS_ROOT") or MODELS_ROOT_DEFAULT).expanduser()
-
-
-# ---------------------------------------------------------------------
-# Layout dataclasses
-# ---------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class CalibrationLayout:
-    root_dir: Path
-    metadata_dir: Path
-    analysis_dir: Path
-    report_dir: Path
-    shortlist_dir: Path
-    shortlist_yaml: Path
-    shortlist_json: Path
-
-    @property
-    def configs_dir(self) -> Path:
-        # Legacy alias (shortlist artifacts no longer live under configs/).
-        return self.shortlist_dir
-
-
-@dataclass(frozen=True)
-class NoRoiLayout:
-    root_dir: Path
-    artifacts_dir: Path
-    plots_dir: Path
-    logs_dir: Path
-
-
-@dataclass(frozen=True)
-class SpatialLayout:
-    """
-    Model-dependent spatial XAI layout.
-    Stored under <XAI_ROOT>/spatial/<MODEL_ID>/...
-    """
-    root_dir: Path
-    artifacts_dir: Path
-    plots_dir: Path
-    logs_dir: Path
-
-
-@dataclass(frozen=True)
-class RoiConceptLayout:
-    """
-    Model-dependent concept XAI with ROI masks (depends on spatial outputs).
-    Light artifacts (arrays/JSON) are stored under <XAI_ROOT>/roi/<MODEL_ID>/...
-    Heavy ROI crops/overlays are stored under <MODEL_ROOT>/xai/roi/...
-    """
-    root_dir: Path
-    artifacts_dir: Path
-    rois_dir: Path
-    figures_dir: Path
-    logs_dir: Path
-
-
-@dataclass(frozen=True)
-class ComparisonLayout:
-    root_dir: Path
-    figures_dir: Path
-    summary_csv: Path
-    report_md: Path
-
-
-@dataclass(frozen=True)
-class SpatialConceptHeavyLayout:
-    """
-    Heavy, per-patch artifacts for unified spatial+concept XAI.
-    Stored under: <MODEL_ROOT>/attention_rollout_concept/run_<RUN_ID>/
-    """
-    root_dir: Path
-    selection_dir: Path
-    items_dir: Path
-    selection_json: Path
-    summary_csv: Path
-    summary_json: Path
-
-
-def _ensure_dir(p: Path) -> None:
-    p.mkdir(parents=True, exist_ok=True)
-
-
-# ---------------------------------------------------------------------
-# Canonical layout builders
-# ---------------------------------------------------------------------
-
-def calibration_layout(root: Optional[Path] = None) -> CalibrationLayout:
-    """
-    Canonical calibration + deep validation layout.
-    shortlist_dir is under the analysis output (no artifacts in configs/).
-    """
-    base = (Path(root) if root is not None else XAI_ROOT) / "calibration"
-    meta = base / "metadata"
-    analysis = base / "analysis"
-    report = analysis / "report"
-    shortlist_dir = analysis
-    return CalibrationLayout(
-        root_dir=base,
-        metadata_dir=meta,
-        analysis_dir=analysis,
-        report_dir=report,
-        shortlist_dir=shortlist_dir,
-        shortlist_yaml=shortlist_dir / "concepts_shortlist.yaml",
-        shortlist_json=shortlist_dir / "concepts_shortlist.json",
-    )
-
-
-def no_roi_layout(root: Optional[Path] = None) -> NoRoiLayout:
-    """
-    Canonical NO-ROI concept scoring on TEST (model-independent).
-    """
-    base = (Path(root) if root is not None else XAI_ROOT) / "no_roi"
-    return NoRoiLayout(
-        root_dir=base,
-        artifacts_dir=base / "artifacts",
-        plots_dir=base / "plots",
-        logs_dir=base / "logs",
-    )
-
-def _model_id(model_root: Union[str, Path]) -> str:
-    return Path(model_root).name
-
-
-def model_xai_root(model_root: Union[str, Path]) -> Path:
-    """
-    Legacy helper retained for compatibility with older code.
-    Prefer spatial_layout/roi_concept_layout for canonical outputs under XAI_ROOT.
-    """
-    return Path(model_root) / "xai"
-
-
-def spatial_layout(model_root: Union[str, Path]) -> SpatialLayout:
-    base = XAI_ROOT / "spatial" / _model_id(model_root)
-    return SpatialLayout(
-        root_dir=base,
-        artifacts_dir=base / "artifacts",
-        plots_dir=base / "plots",
-        logs_dir=base / "logs",
-    )
-
-
-def roi_concept_layout(model_root: Union[str, Path]) -> RoiConceptLayout:
-    model_root_p = Path(model_root)
-    base = XAI_ROOT / "roi" / _model_id(model_root_p)
-    # Heavy outputs (per-sample crops/overlays) must not live under the repo output.
-    heavy = model_root_p / "xai" / "roi"
-    return RoiConceptLayout(
-        root_dir=base,
-        artifacts_dir=base / "artifacts",
-        rois_dir=heavy / "rois",
-        figures_dir=heavy / "figures",
-        logs_dir=base / "logs",
-    )
-
-
-def comparison_layout(model_id: str) -> ComparisonLayout:
-    base = XAI_ROOT / "roi-no_roi-comparision" / str(model_id)
-    tables_dir = base / "tables"
-    return ComparisonLayout(
-        root_dir=base,
-        figures_dir=base / "figures",
-        summary_csv=tables_dir / "roi_vs_no_roi_summary.csv",
-        report_md=base / "report.md",
-    )
-
-
-def spatial_concept_heavy_layout(model_root: Union[str, Path], run_id: str) -> SpatialConceptHeavyLayout:
-    """
-    Heavy artifacts layout for unified spatial+concept XAI (per model root).
-    """
-    mr = Path(model_root)
-    root = mr / "attention_rollout_concept" / f"run_{str(run_id)}"
-    selection_dir = root / "selection"
-    items_dir = root / "items"
-    return SpatialConceptHeavyLayout(
-        root_dir=root,
-        selection_dir=selection_dir,
-        items_dir=items_dir,
-        selection_json=selection_dir / "xai_selection.json",
-        summary_csv=root / "xai_summary.csv",
-        summary_json=root / "xai_summary.json",
-    )
-
-
-def ensure_spatial_concept_heavy_layout(layout: SpatialConceptHeavyLayout) -> SpatialConceptHeavyLayout:
-    _ensure_dir(layout.root_dir)
-    _ensure_dir(layout.selection_dir)
-    _ensure_dir(layout.items_dir)
-    return layout
-
-
-# ---------------------------------------------------------------------
-# Ensure helpers (used by runners)
-# ---------------------------------------------------------------------
-
-def ensure_calibration_layout(layout: Optional[CalibrationLayout] = None) -> CalibrationLayout:
-    l = layout or calibration_layout()
-    _ensure_dir(l.root_dir)
-    _ensure_dir(l.metadata_dir)
-    _ensure_dir(l.analysis_dir)
-    _ensure_dir(l.report_dir)
-    _ensure_dir(l.shortlist_dir)
-    return l
-
-
-def ensure_no_roi_layout(layout: Optional[NoRoiLayout] = None) -> NoRoiLayout:
-    l = layout or no_roi_layout()
-    _ensure_dir(l.root_dir)
-    _ensure_dir(l.artifacts_dir)
-    _ensure_dir(l.plots_dir)
-    _ensure_dir(l.logs_dir)
-    return l
-
-
-def ensure_spatial_layout(layout: SpatialLayout) -> SpatialLayout:
-    _ensure_dir(layout.artifacts_dir)
-    _ensure_dir(layout.plots_dir)
-    _ensure_dir(layout.logs_dir)
-    return layout
-
-
-def ensure_roi_concept_layout(model_root: Union[str, Path, RoiConceptLayout]) -> RoiConceptLayout:
-    if isinstance(model_root, RoiConceptLayout):
-        layout = model_root
-    else:
-        layout = roi_concept_layout(model_root)
-    _ensure_dir(layout.artifacts_dir)
-    # Heavy dirs live under model_root (scratch) - still ensure them.
-    _ensure_dir(layout.rois_dir)
-    _ensure_dir(layout.figures_dir)
-    _ensure_dir(layout.logs_dir)
-    return layout
-
-
-def ensure_roi_layout(model_root: Union[str, Path]) -> RoiConceptLayout:
-    """
-    Backward-compatible alias used by run_spatial-concept.py.
-    """
-    return ensure_roi_concept_layout(roi_concept_layout(model_root))
-
-
-def ensure_comparison_layout(model_id: str) -> ComparisonLayout:
-    l = comparison_layout(model_id)
-    _ensure_dir(l.figures_dir)
-    _ensure_dir(l.summary_csv.parent)
-    _ensure_dir(l.report_md.parent)
-    return l
-
-
-def get_heavy_xai_dir(model_root: Union[str, Path], run_id: str, *, kind: str = "spatial_concept") -> Path:
-    """
-    Resolve heavy XAI directory under a model root.
-    kind:
-      - spatial_concept -> <MODEL_ROOT>/attention_rollout_concept/run_<RUN_ID>/
-    """
-    kind = str(kind).strip().lower()
-    mr = Path(model_root)
-    if kind in ("spatial_concept", "attention_rollout_concept", "roi"):
-        return mr / "attention_rollout_concept" / f"run_{str(run_id)}"
-    # Default fallback: keep heavy XAI under model_root/xai/<kind>/run_<id>
-    return mr / "xai" / kind / f"run_{str(run_id)}"
-
-
-def get_item_out_dir(model_root: Union[str, Path], run_id: str, idx: int, *, kind: str = "spatial_concept") -> Path:
-    """
-    Item output dir for a single selected sample under the heavy layout.
-    Canonical name uses 8 digits: idx_00001234
-    """
-    base = get_heavy_xai_dir(model_root, run_id, kind=kind)
-    return Path(base) / "items" / f"idx_{int(idx):08d}"
-
-
-def get_light_stats_dir(kind: str, model_id: str) -> Path:
-    """
-    Resolve the canonical light (stats-only) output directory inside the repo.
-    """
-    kind_norm = str(kind).strip().lower()
-    mid = str(model_id)
-    if kind_norm in ("spatial", "spatial_stats", "stats_spatial"):
-        return OUTPUT_DIR / "spatial" / mid
-    if kind_norm in ("roi", "roi_stats", "stats_roi"):
-        return OUTPUT_DIR / "roi" / mid
-    if kind_norm in ("roi-no_roi-comparision", "comparision", "comparison"):
-        return OUTPUT_DIR / "roi-no_roi-comparision" / mid
-    if kind_norm in ("no_roi", "no-roi"):
-        return OUTPUT_DIR / "no_roi"
-    if kind_norm in ("calibration",):
-        return OUTPUT_DIR / "calibration"
-    return OUTPUT_DIR / kind_norm / mid
-
-
-# ---------------------------------------------------------------------
-# Experiment discovery + resolvers (scratch models)
-# ---------------------------------------------------------------------
-
-def iter_exp_roots(models_root: Union[str, Path], exp_prefix: str) -> Iterator[Path]:
-    """
-    Iterate experiment roots under models_root matching exp_prefix (sorted by name).
-    """
-    root = Path(models_root)
-    if not root.exists() or not root.is_dir():
-        return iter(())
-    exps = [p for p in root.iterdir() if p.is_dir() and p.name.startswith(str(exp_prefix))]
-    exps = sorted(exps, key=lambda p: p.name)
-    return iter(exps)
-
-
-def iter_ablation_dirs(exp_root: Union[str, Path]) -> Iterator[Path]:
-    """
-    Iterate ablation dirs under an exp root (sorted by name).
-    Expected pattern: exp_*_ablXX
-    """
-    er = Path(exp_root)
-    if not er.exists() or not er.is_dir():
-        return iter(())
-    abls = [p for p in er.iterdir() if p.is_dir() and ("_abl" in p.name)]
-    abls = sorted(abls, key=lambda p: p.name)
-    return iter(abls)
-
-
-def resolve_checkpoints(ablation_dir: Union[str, Path]) -> Optional[Dict[str, Path]]:
-    """
-    Resolve required checkpoints under an ablation dir.
-    Returns dict with keys:
-      - ssl_backbone_ckpt
-      - ssl_head_ckpt
-    """
-    ad = Path(ablation_dir)
-    ckpt_dir = ad / "checkpoints"
-    if not ckpt_dir.exists() or not ckpt_dir.is_dir():
-        return None
-
-    # Backbone: *_ssl_best.pt but NOT *_ssl_linear_best.pt
-    backbone = sorted(
-        [p for p in ckpt_dir.glob("*_ssl_best.pt") if "linear" not in p.name.lower()],
-        key=lambda p: p.name,
-    )
-    head = sorted(list(ckpt_dir.glob("*_ssl_linear_best.pt")), key=lambda p: p.name)
-    if not backbone or not head:
-        return None
-
-    return {
-        "ssl_backbone_ckpt": backbone[-1],
-        "ssl_head_ckpt": head[-1],
-    }
-
-
-def resolve_latest_eval_dir(ablation_dir: Union[str, Path], pattern: str = "*_ssl_linear_best*") -> Optional[Path]:
-    """
-    Resolve latest eval dir for an ablation:
-      <ablation_dir>/eval/<something matching pattern>/<TIMESTAMP>/
-    Chooses latest TIMESTAMP (lexicographic), and if multiple parents match, chooses
-    the latest (parent, timestamp) lexicographically.
-    """
-    ad = Path(ablation_dir)
-    eval_root = ad / "eval"
-    if not eval_root.exists() or not eval_root.is_dir():
-        return None
-
-    parents = sorted(
-        [p for p in eval_root.iterdir() if p.is_dir() and fnmatch.fnmatch(p.name, pattern)],
-        key=lambda p: p.name,
-    )
-    candidates: List[Tuple[str, str, Path]] = []
-    for par in parents:
-        ts_dirs = sorted([d for d in par.iterdir() if d.is_dir()], key=lambda p: p.name)
-        if not ts_dirs:
-            continue
-        ts = ts_dirs[-1]
-        candidates.append((par.name, ts.name, ts))
-    if not candidates:
-        return None
-
-    candidates = sorted(candidates, key=lambda t: (t[0], t[1]))
-    return candidates[-1][2]
-
-
-# ---------------------------------------------------------------------
-# Canonical exported constants
-# ---------------------------------------------------------------------
-
-CALIBRATION_PATHS = calibration_layout()
-NO_ROI_PATHS = no_roi_layout()
-
-# Central config file defaults (optional convenience)
-CALIBRATION_CONFIG_YAML = CONFIG_DIR / "calibration.yaml"
-NO_ROI_CONFIG_YAML = CONFIG_DIR / "no_roi.yaml"
-SPATIAL_CONFIG_YAML = CONFIG_DIR / "spatial.yaml"
-SPATIAL_CONCEPT_CONFIG_YAML = CONFIG_DIR / "roi.yaml"
-CONCEPT_PLIP_CONFIG_YAML = CONFIG_DIR / "config_concept_plip.yaml"
-CONCEPTS_LIST_YAML = CONFIG_DIR / "concepts_list.yaml"
-CONCEPT_SHORTLIST_YAML_CFG = CONFIG_DIR / "concepts_shortlist.yaml"
-CONCEPT_SHORTLIST_JSON_CFG = CONFIG_DIR / "concepts_shortlist.json"
-CONCEPT_SHORTLIST_FLAT_CSV_CFG = CONFIG_DIR / "concepts_shortlist_flat.csv"
-
-
-__all__ = [
-    "EXPLAINABILITY_DIR",
-    "SRC_DIR",
-    "REPO_ROOT",
-    "MODELS_ROOT_DEFAULT",
-    "resolve_models_root",
-    "XAI_ROOT",
-    "CONFIG_DIR",
-    "OUTPUT_DIR",
-    "resolve_config",
-    "CalibrationLayout",
-    "NoRoiLayout",
-    "SpatialLayout",
-    "RoiConceptLayout",
-    "ComparisonLayout",
-    "SpatialConceptHeavyLayout",
-    "CALIBRATION_PATHS",
-    "NO_ROI_PATHS",
-    "CALIBRATION_CONFIG_YAML",
-    "NO_ROI_CONFIG_YAML",
-    "SPATIAL_CONFIG_YAML",
-    "SPATIAL_CONCEPT_CONFIG_YAML",
-    "CONCEPT_PLIP_CONFIG_YAML",
-    "CONCEPTS_LIST_YAML",
-    "CONCEPT_SHORTLIST_YAML_CFG",
-    "CONCEPT_SHORTLIST_JSON_CFG",
-    "CONCEPT_SHORTLIST_FLAT_CSV_CFG",
-    "ensure_calibration_layout",
-    "ensure_no_roi_layout",
-    "model_xai_root",
-    "spatial_layout",
-    "roi_concept_layout",
-    "ensure_spatial_layout",
-    "ensure_roi_concept_layout",
-    "ensure_roi_layout",
-    "comparison_layout",
-    "ensure_comparison_layout",
-    "spatial_concept_heavy_layout",
-    "ensure_spatial_concept_heavy_layout",
-    "get_heavy_xai_dir",
-    "get_item_out_dir",
-    "get_light_stats_dir",
-    "iter_exp_roots",
-    "iter_ablation_dirs",
-    "resolve_checkpoints",
-    "resolve_latest_eval_dir",
-]
 >>
 
