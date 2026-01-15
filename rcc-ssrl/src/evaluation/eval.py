@@ -111,15 +111,23 @@ def load_model_from_repo(repo_root, module_name, class_name, checkpoint, strict,
         log.warning("Checkpoint mancante o non leggibile.")
     return model
 
-def load_fallback_resnet50(checkpoint, strict, num_classes=5, log=None):
+def load_fallback_resnet50(checkpoint, strict, num_classes=5, log=None, dropout_p=0.2):
     model = torchvision.models.resnet50(weights=None)
-    model.fc = nn.Linear(model.fc.in_features, num_classes)
+    if dropout_p > 0:
+        model.fc = nn.Sequential(
+            nn.Dropout(p=dropout_p),
+            nn.Linear(model.fc.in_features, num_classes)
+        )
+    else:
+        model.fc = nn.Linear(model.fc.in_features, num_classes)
+        
     if checkpoint and os.path.isfile(checkpoint):
         sd = torch.load(checkpoint, map_location="cpu")
         if "state_dict" in sd: sd = sd["state_dict"]
         sd = {k.replace("module.", ""): v for k, v in sd.items()}
         missing, unexpected = model.load_state_dict(sd, strict=strict)
-        if log: log.info(f"Checkpoint (fallback). Missing:{len(missing)} Unexpected:{len(unexpected)}")
+        if log: 
+            log.info(f"Checkpoint caricato correttamente. Missing:{len(missing)} Unexpected:{len(unexpected)}")
     return model
 
 

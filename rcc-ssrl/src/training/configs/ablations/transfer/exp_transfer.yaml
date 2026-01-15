@@ -38,10 +38,10 @@ model:
   type: "sl"                          # Forza l'orchestratore in modalità Supervised Learning
   sl:
     name: "resnet50"          # Usa build_resnet_transfer da transfer.py
-    imagenet_weights: "DEFAULT"       # Carica i pesi pre-addestrati di torchvision
-    freeze_backbone: false            # Setta a true se vuoi addestrare solo il classificatore finale
     dropout_p: 0.2                    # Dropout applicato prima del layer lineare finale
-    bn_eval_freeze: false             # Se true, congela i BatchNorm in modalità eval
+    # imagenet_weights: "DEFAULT"       # Carica i pesi pre-addestrati di torchvision
+    # freeze_backbone: false            # Setta a true se vuoi addestrare solo il classificatore finale
+    # bn_eval_freeze: false             # Se true, congela i BatchNorm in modalità eval
 
 train:
   optim:
@@ -51,9 +51,9 @@ train:
     betas: [0.9, 0.999]
   scheduler:
     name: "cosine"
-    T_max: 2                        # Deve corrispondere al numero di epoche
+    T_max: 100                        # Deve corrispondere al numero di epoche
   sl:
-    epochs: 2                       # Numero totale di epoche di addestramento supervisionato
+    epochs: 100                      # Numero totale di epoche di addestramento supervisionato
     amp: true                         # Abilita l'Automatic Mixed Precision per velocizzare il training
 
 aug:

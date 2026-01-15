@@ -1,0 +1,36 @@
+experiment:
+  name: "eval_supervised_scratch"
+  seed: 1337
+  outputs_root: "/home/mla_group_01/rcc-ssrl/outputs/mlruns/experiments/exp_20260112-114138/exp_supervised/resnet50_scratch"
+
+runtime:
+  device: "cuda"
+  precision: "fp32"
+
+data:
+  img_size: 224
+  backend: "webdataset"
+  num_workers: 8
+  batch_size: 256
+  webdataset:
+    test_dir: "/mnt/beegfs-compat/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final/test"
+    pattern: "shard-*.tar"
+    image_key: img.jpg;jpg;jpeg;png
+    meta_key: meta.json;json
+
+labels:
+  class_order: ["ccRCC", "pRCC", "CHROMO", "ONCO", "NOT_TUMOR"]
+
+model:
+  name: "resnet50_scratch"
+  arch_hint: "cnn"
+  checkpoint: "/home/mla_group_01/rcc-ssrl/outputs/mlruns/experiments/exp_20260112-114138/exp_supervised/resnet50_scratch/checkpoints/resnet50_scratch__sl_best_classifier.pt"
+  strict_load: false
+
+evaluation:
+  umap:
+    enabled: true
+    source: "logits"
+    n_neighbors: 15
+    min_dist: 0.1
+    random_state: 1337
