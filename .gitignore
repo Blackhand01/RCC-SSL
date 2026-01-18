@@ -18,7 +18,6 @@ venv/
 ENV/
 .python-version
 pip-wheel-metadata/
-docs/
 # Notebook
 .ipynb_checkpoints/
 profile_default/
@@ -212,3 +211,5 @@ rcc-ssrl/src/xai-backup/
 .triton
 rcc-ssrl/outputs/
 rcc-ssrl/src/explainability/output/
+rcc-ssrl/src/explainability/output copy
+rcc-ssrl/src/explainability/docs/
