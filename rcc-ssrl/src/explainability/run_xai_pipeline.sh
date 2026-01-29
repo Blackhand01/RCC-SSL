@@ -37,6 +37,7 @@ EXP_PREFIX="${EXP_PREFIX:-exp_20251109_}"
 MODELS_ROOT="${MODELS_ROOT:-$("${PYTHON_BIN}" -c 'from explainability.paths import resolve_models_root; print(resolve_models_root())')}"
 XAI_ROOT="$("${PYTHON_BIN}" -c 'from explainability.paths import XAI_ROOT; print(XAI_ROOT)')"
 CALIB_META_DIR="$("${PYTHON_BIN}" -c 'from explainability.paths import CALIBRATION_PATHS; print(CALIBRATION_PATHS.metadata_dir)')"
+CALIB_ANALYSIS_DIR="$("${PYTHON_BIN}" -c 'from explainability.paths import CALIBRATION_PATHS; print(CALIBRATION_PATHS.analysis_dir)')"
 SHORTLIST_YAML="$("${PYTHON_BIN}" -c 'from explainability.paths import CALIBRATION_PATHS; print(CALIBRATION_PATHS.shortlist_yaml)')"
 SPATIAL_OUTPUT_ROOT="$("${PYTHON_BIN}" -c 'import pathlib; from explainability.paths import XAI_ROOT; print(pathlib.Path(XAI_ROOT) / "spatial")')"
 PIPELINE_CFG_ROOT="$("${PYTHON_BIN}" -c 'import pathlib; from explainability.paths import XAI_ROOT; print(pathlib.Path(XAI_ROOT) / "spatial" / "_pipeline_cfgs")')"
@@ -46,7 +47,7 @@ export CALIBRATION_METADATA_DIR="${CALIB_META_DIR}"
 export CONCEPT_SHORTLIST_YAML="${SHORTLIST_YAML}"
 
 # Deterministic default for dataset (override via env).
-export WDS_TEST_DIR="${WDS_TEST_DIR:-/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final/test}"
+export WDS_TEST_DIR="${WDS_TEST_DIR:-/mnt/beegfs-compat/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final/test}"
 
 echo "[PRE] Host=$(hostname)"
 echo "[PRE] Project=${PROJECT_ROOT}"
@@ -62,14 +63,17 @@ printf "[PRE] WDS_TEST_DIR(%%q)=%q\n" "${WDS_TEST_DIR}"
 if [[ ! -d "${WDS_TEST_DIR}" ]]; then
   echo "[FATAL] WDS_TEST_DIR not visible on this node: ${WDS_TEST_DIR}" >&2
   echo "[FATAL] Debug:" >&2
-  ls -ld /beegfs-scratch >&2 || true
-  df -hT /beegfs-scratch >&2 || true
+  ls -ld /mnt/beegfs-compat >&2 || true
+  df -hT /mnt/beegfs-compat >&2 || true
   ls -ld "${WDS_TEST_DIR}" >&2 || true
   exit 2
 fi
 
 CALIB_TEXT_FEATS="${CALIB_META_DIR}/text_features.pt"
 CALIB_CONCEPTS_JSON="${CALIB_META_DIR}/concepts.json"
+CALIB_SCORES_NPY="${CALIB_META_DIR}/scores_fp32.npy"
+CALIB_LABELS_NPY="${CALIB_META_DIR}/labels.npy"
+CALIB_METRICS_CSV="${CALIB_ANALYSIS_DIR}/metrics_per_class.csv"
 
 CALIB_CFG="${CALIB_CFG:-$("${PYTHON_BIN}" -c 'from explainability.paths import CALIBRATION_CONFIG_YAML; print(CALIBRATION_CONFIG_YAML)')}"
 NO_ROI_CFG="${NO_ROI_CFG:-$("${PYTHON_BIN}" -c 'from explainability.paths import NO_ROI_CONFIG_YAML; print(NO_ROI_CONFIG_YAML)')}"
@@ -116,17 +120,48 @@ log_warn() {
   fi
 }
 
-echo "[1/5] Calibration + shortlist (skip if already present)"
-if [[ -f "${CALIB_TEXT_FEATS}" && -f "${CALIB_CONCEPTS_JSON}" && -f "${SHORTLIST_YAML}" ]]; then
+echo "[1/5] Calibration + deep validation + shortlist (skip if already present)"
+need_calib=0
+need_deep=0
+need_shortlist=0
+if [[ ! -f "${CALIB_TEXT_FEATS}" || ! -f "${CALIB_CONCEPTS_JSON}" || ! -f "${CALIB_SCORES_NPY}" || ! -f "${CALIB_LABELS_NPY}" ]]; then
+  need_calib=1
+fi
+if [[ ! -f "${CALIB_METRICS_CSV}" ]]; then
+  need_deep=1
+fi
+if [[ ! -f "${SHORTLIST_YAML}" ]]; then
+  need_shortlist=1
+fi
+
+if [[ "${need_calib}" -eq 0 && "${need_deep}" -eq 0 && "${need_shortlist}" -eq 0 ]]; then
   echo "  [SKIP] Calibration outputs already present:"
   echo "         - ${CALIB_TEXT_FEATS}"
   echo "         - ${CALIB_CONCEPTS_JSON}"
+  echo "         - ${CALIB_SCORES_NPY}"
+  echo "         - ${CALIB_LABELS_NPY}"
+  echo "         - ${CALIB_METRICS_CSV}"
   echo "         - ${SHORTLIST_YAML}"
 else
-  echo "  [RUN] calibration.py --config ${CALIB_CFG}"
-  "${PYTHON_BIN}" "${CALIB_PY}" --config "${CALIB_CFG}"
-  echo "  [RUN] build_shortlist.py (uses calibration analysis to write shortlist)"
-  "${PYTHON_BIN}" "${SHORTLIST_PY}"
+  if [[ "${need_calib}" -eq 1 ]]; then
+    echo "  [RUN] calibration.py calibrate --config ${CALIB_CFG}"
+    "${PYTHON_BIN}" "${CALIB_PY}" calibrate --config "${CALIB_CFG}" --log-level "${LOG_LEVEL}"
+  fi
+  if [[ "${need_deep}" -eq 1 ]]; then
+    echo "  [RUN] calibration.py deep-validate --metadata-dir ${CALIB_META_DIR} --out-dir ${CALIB_ANALYSIS_DIR}"
+    "${PYTHON_BIN}" "${CALIB_PY}" deep-validate \
+      --metadata-dir "${CALIB_META_DIR}" \
+      --out-dir "${CALIB_ANALYSIS_DIR}" \
+      --log-level "${LOG_LEVEL}"
+  fi
+  if [[ "${need_shortlist}" -eq 1 ]]; then
+    if [[ ! -f "${CALIB_METRICS_CSV}" ]]; then
+      echo "[FATAL] Missing metrics_per_class.csv after deep validation: ${CALIB_METRICS_CSV}" >&2
+      exit 2
+    fi
+    echo "  [RUN] build_shortlist.py (uses calibration analysis to write shortlist)"
+    "${PYTHON_BIN}" "${SHORTLIST_PY}"
+  fi
 fi
 
 echo "[2/5] Concept NO-ROI (model-independent)"

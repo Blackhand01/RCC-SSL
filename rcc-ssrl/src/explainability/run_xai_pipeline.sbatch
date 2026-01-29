@@ -13,6 +13,8 @@ set -euo pipefail
 
 export PROJ=/home/mla_group_01/rcc-ssrl
 export PYTHONNOUSERSITE=1
+export MODELS_ROOT=/mnt/beegfs-compat/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/ablation_final
+export EXP_PREFIX=exp_20251213_
 
 cd "$PROJ"
 mkdir -p "$PROJ/src/logs/xai"
@@ -20,7 +22,7 @@ mkdir -p "$PROJ/src/logs/xai"
 # Optional overrides via sbatch --export=...
 #   RUN_ID=latest|<tag>
 #   EXP_PREFIX=exp_20251109_
-#   MODELS_ROOT=/beegfs-scratch/...
+#   MODELS_ROOT=/mnt/beegfs-compat/...
 #   XAI_ROOT=/path/for/canonical/artifacts
 #   WDS_TEST_DIR=/path/to/test
 #   PYTHON_BIN=/path/to/python

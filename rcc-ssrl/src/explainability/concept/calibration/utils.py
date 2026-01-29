@@ -70,14 +70,25 @@ def plot_heatmap(
     vmax: Optional[float] = None,
 ) -> None:
     plt = _get_plt()
-    fig = plt.figure(figsize=(max(8, 0.35 * len(col_labels)), max(4, 0.35 * len(row_labels))))
+    n_rows = len(row_labels)
+    n_cols = len(col_labels)
+    fig_w = min(22, max(8, 0.25 * n_cols))
+    fig_h = min(18, max(4, 0.45 * n_rows))
+    fig = plt.figure(figsize=(fig_w, fig_h))
     ax = fig.add_subplot(111)
     im = ax.imshow(mat, aspect="auto", interpolation="nearest", vmin=vmin, vmax=vmax)
     ax.set_title(title)
-    ax.set_yticks(np.arange(len(row_labels)))
-    ax.set_yticklabels(list(row_labels))
-    ax.set_xticks(np.arange(len(col_labels)))
-    ax.set_xticklabels(list(col_labels), rotation=90)
+    y_font = 10 if n_rows <= 20 else 8
+    x_font = 8 if n_cols <= 40 else 6
+    ax.set_yticks(np.arange(n_rows))
+    ax.set_yticklabels(list(row_labels), fontsize=y_font)
+    x_step = max(1, int(math.ceil(n_cols / 60))) if n_cols else 1
+    ax.set_xticks(np.arange(n_cols))
+    ax.set_xticklabels(
+        [col_labels[i] if i % x_step == 0 else "" for i in range(n_cols)],
+        rotation=90,
+        fontsize=x_font,
+    )
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     fig.tight_layout()
     _save_fig(fig, out_base, formats, dpi)

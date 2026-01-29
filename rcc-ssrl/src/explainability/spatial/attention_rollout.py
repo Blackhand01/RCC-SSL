@@ -427,7 +427,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             logger.error(f"Cannot initialize Rollout: model structure error. {e}")
             use_rollout = False
 
-    # Conteggi per validazione/summary
+    # Counting fro validation/summary
     method_counts: Counter[str] = Counter()
     reason_counts: Counter[str] = Counter()
 
@@ -628,7 +628,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         f"[Spatial XAI] Done. Produced {produced} cases in {total_elapsed/60:.1f} min."
     )
 
-    # ----------------- VALIDAZIONE / SEGNALAZIONI -----------------
+    # ----------------- VALIDATION / SEGNALAZIONI -----------------
     if produced == 0:
         logger.warning(
             "[Spatial XAI] No outputs produced (produced=0). "

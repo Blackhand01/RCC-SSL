@@ -42,7 +42,7 @@ OUTPUT_DIR = EXPLAINABILITY_DIR / "output"
 
 # Scratch model root (defaults for the RCC cluster)
 MODELS_ROOT_DEFAULT = Path(
-    "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/models"
+    "/mnt/beegfs-compat/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/models/ablation_final"
 )
 
 

@@ -37,7 +37,7 @@ bootstrap_package(__file__, globals())
 
 from . import ensure_layout, SHORTLIST_DIR, REPORT_DIR, ANALYSIS_DIR
 from .utils import copy_plot_files, format_tex_table
-from ..utils.class_utils import canon_class
+from explainability.utils.class_utils import canon_class
 
 
 # ---------------------------------------------------------------------
@@ -296,9 +296,21 @@ def main() -> None:
         ]
 
         report_lines.append("### Diagnostic concepts (primary_class match)\n")
-        report_lines.append(primary[cols].to_markdown(index=False) if not primary.empty else "_None after filtering._")
+    if primary.empty:
+        report_lines.append("_None after filtering._")
+    else:
+        try:
+            report_lines.append(primary[cols].to_markdown(index=False))
+        except ImportError:
+            report_lines.append(primary[cols].to_csv(index=False))
         report_lines.append("\n### Confounders (high rank but primary_class mismatch)\n")
-        report_lines.append(confounds[cols].to_markdown(index=False) if not confounds.empty else "_None after filtering._")
+    if confounds.empty:
+        report_lines.append("_None after filtering._")
+    else:
+        try:
+            report_lines.append(confounds[cols].to_markdown(index=False))
+        except ImportError:
+            report_lines.append(confounds[cols].to_csv(index=False))
         report_lines.append("")
 
         if args.write_tex:

@@ -25,7 +25,7 @@ SSL_HEAD_CKPT="${SSL_HEAD_CKPT:-}"                       # REQUIRED
 DATA_BACKEND="${DATA_BACKEND:-webdataset}"               # webdataset | imagefolder
 TEST_WDS_DIR="${TEST_WDS_DIR:-}"                         # REQUIRED if webdataset
 WDS_PATTERN="${WDS_PATTERN:-*.tar}"
-# FIX: dataset usa chiavi multi-estensione (es. "img.jpg", "meta.json")
+# FIX: dataset uses multi-extension keys (e.g. "img.jpg", "meta.json")
 WDS_IMAGE_KEY="${WDS_IMAGE_KEY:-img.jpg;jpg}"
 WDS_META_KEY="${WDS_META_KEY:-meta.json;json}"
 TEST_IMAGEFOLDER_DIR="${TEST_IMAGEFOLDER_DIR:-}"         # REQUIRED if imagefolder
@@ -131,7 +131,7 @@ fi
 
 CFG_PATH="${CFG_DIR}/attn_rollout_${MODEL_NAME}_${RUN_ID}.yaml"
 
-# EXPORT: tutto ciò che il blocco Python legge da os.environ
+# EXPORT: everything that the Python block reads from os.environ
 export PROJECT_ROOT DATA_BACKEND XAI_METHODS FULL_TEST TOPK_TP TOPK_FN TOPK_FP TOPK_LOWCONF
 export CLASS_ORDER_JSON SEED RUN_ID OUTPUTS_ROOT DEVICE MODEL_NAME BACKBONE_NAME
 export SSL_BACKBONE_CKPT SSL_HEAD_CKPT EVAL_RUN_DIR PREDICTIONS_CSV LOGITS_NPY

@@ -1173,14 +1173,43 @@ def main() -> None:
             log.warning("Calibration artifacts missing under %s. Concept stage will emit stubs.", cal_dir)
 
         shortlist_yaml = CALIBRATION_PATHS.shortlist_yaml
+        cfg_shortlist_yaml = CONCEPT_SHORTLIST_YAML_CFG
         if not shortlist_yaml.exists():
-            shortlist_yaml = CONCEPT_SHORTLIST_YAML_CFG
+            shortlist_yaml = cfg_shortlist_yaml
         if plip_concepts is not None and shortlist_yaml.exists():
             try:
                 plip_shortlist = load_shortlist_idx(shortlist_yaml, _concept_to_idx(plip_concepts), log=log)
             except Exception as e:
                 log.warning("Failed to load shortlist (%s): %s. Concept stage will emit stubs.", shortlist_yaml, e)
                 plip_shortlist = None
+            # Merge numeric aliases from the config shortlist if calibration output lacks them.
+            if (
+                plip_shortlist is not None
+                and cfg_shortlist_yaml.exists()
+                and cfg_shortlist_yaml != shortlist_yaml
+            ):
+                try:
+                    cfg_shortlist = load_shortlist_idx(
+                        cfg_shortlist_yaml, _concept_to_idx(plip_concepts), log=log
+                    )
+                    added = 0
+                    for cls_key, items in cfg_shortlist.items():
+                        key = str(cls_key)
+                        if key.isdigit() and key not in plip_shortlist:
+                            plip_shortlist[key] = items
+                            added += 1
+                    if added:
+                        log.info(
+                            "Merged %d numeric class aliases from %s into shortlist.",
+                            added,
+                            cfg_shortlist_yaml,
+                        )
+                except Exception as e:
+                    log.warning(
+                        "Failed to load config shortlist for numeric aliases (%s): %s",
+                        cfg_shortlist_yaml,
+                        e,
+                    )
         else:
             if not shortlist_yaml.exists():
                 log.warning("Shortlist YAML not found (%s). Concept stage will emit stubs.", shortlist_yaml)

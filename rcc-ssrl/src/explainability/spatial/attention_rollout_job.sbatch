@@ -19,9 +19,9 @@ module purge || true
 # -----------------------------
 # REQUIRED: eval + ckpts (i-JEPA abl01)
 # -----------------------------
-ABL_ROOT="/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/models/exp_20251109_181534_i_jepa/exp_i_jepa_abl01"
+ABL_ROOT="/mnt/beegfs-compat/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/models/ablation_final/exp_20251213_121650_i_jepa/exp_i_jepa_abl01"
 
-EVAL_RUN_DIR="${EVAL_RUN_DIR:-${ABL_ROOT}/eval/i_jepa_ssl_linear_best/20251113_120919}"
+EVAL_RUN_DIR="${EVAL_RUN_DIR:-${ABL_ROOT}/eval/i_jepa_ssl_linear_best/20251213_121650}"
 SSL_BACKBONE_CKPT="${SSL_BACKBONE_CKPT:-${ABL_ROOT}/checkpoints/i_jepa__ssl_best.pt}"
 SSL_HEAD_CKPT="${SSL_HEAD_CKPT:-${ABL_ROOT}/checkpoints/i_jepa__ssl_linear_best.pt}"
 
@@ -30,7 +30,7 @@ SSL_HEAD_CKPT="${SSL_HEAD_CKPT:-${ABL_ROOT}/checkpoints/i_jepa__ssl_linear_best.
 # -----------------------------
 DATA_BACKEND="${DATA_BACKEND:-webdataset}"
 
-TEST_WDS_DIR="${TEST_WDS_DIR:-/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final/test}"
+TEST_WDS_DIR="${TEST_WDS_DIR:-/mnt/beegfs-compat/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final/test}"
 WDS_PATTERN="${WDS_PATTERN:-*.tar}"
 # FIX: le chiavi reali nel tar sono "img.jpg" e "meta.json" (fallback compat: "jpg"/"json")
 WDS_IMAGE_KEY="${WDS_IMAGE_KEY:-img.jpg;jpg}"

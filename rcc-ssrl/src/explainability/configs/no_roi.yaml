@@ -21,7 +21,7 @@ profiles:
       batch_size: 256
       max_patches: 0
       webdataset:
-        test_dir: /beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final/test
+        test_dir: /mnt/beegfs-compat/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final/test
         pattern: "shard-*.tar"
         image_key: "img.jpg;jpg;jpeg;png"
         meta_key: "meta.json;json"

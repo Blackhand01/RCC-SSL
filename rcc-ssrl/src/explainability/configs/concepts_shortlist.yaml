@@ -2,8 +2,13 @@ version: 1
 rank_by: auc_ovr
 k_primary: 8
 k_confounds: 5
+
 classes:
-  CHROMO:
+  # ==========================================
+  # CLASS DEFINITIONS (with Anchors &)
+  # ==========================================
+
+  CHROMO: &CHROMO
     primary:
     - chrcc_pale_reticulated
     - chrcc_oncocytic_variant
@@ -16,7 +21,8 @@ classes:
     - ccrcc_mixed_cytoplasm
     - grade_high_isup34
     - onco_round_nuclei_no_halos
-  NOT_TUMOR:
+
+  NOT_TUMOR: &NOT_TUMOR
     primary:
     - notumor_interstitial_fibrosis_atrophy
     - other_lymphocytes
@@ -31,7 +37,8 @@ classes:
     - necrosis_coagulative
     - onco_peripheral_rim_edematous
     - dediff_sarcomatoid
-  ONCO:
+
+  ONCO: &ONCO
     primary:
     - onco_round_nuclei_no_halos
     - onco_bland_round_nuclei
@@ -47,7 +54,8 @@ classes:
     - prcc_psammoma_bodies
     - prcc_type2
     - grade_high_isup34
-  ccRCC:
+
+  ccRCC: &ccRCC
     primary:
     - ccrcc_solid_clear
     - ccrcc_macrocystic_change
@@ -62,7 +70,8 @@ classes:
     - other_neutrophils_acute
     - grade_low_isup12
     - onco_archipelagenous
-  pRCC:
+
+  pRCC: &pRCC
     primary:
     - prcc_papillary_fronds
     - prcc_type1
@@ -78,9 +87,23 @@ classes:
     - other_hemorrhage
     - other_lymphocytes
     - onco_thick_vessels
+
+  # ==========================================
+  # NUMERIC MAPPING (Aliases *)
+  # This is because the XAI pipeline uses indices (0,1,2..)
+  # Check the order in your model's class_names.json file!
+  # ==========================================
+  
+  "0": *ccRCC      # Assumed: 0 is ccRCC
+  "1": *pRCC       # Assumed: 1 is pRCC
+  "2": *CHROMO     # Assumed: 2 is CHROMO
+  "3": *ONCO       # Assumed: 3 is ONCO
+  "4": *NOT_TUMOR  # Assumed: 4 is NOT_TUMOR
+
 relaxed_filters:
   ONCO:
   - primary_empty_after_filter_backoff_to_raw_rank
+
 notes:
 - 'primary concepts: primary_class matches class (NOT_TUMOR: primary_class==NOT_TUMOR
   OR legacy primary_class null AND group==Other)'

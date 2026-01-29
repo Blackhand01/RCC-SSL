@@ -3,14 +3,14 @@
 """
 postdiag_xai_fast.py
 
-Post-diagnostica XAI (attention-rollout + concept scores) per modelli/ablation.
+XAI post-diagnostics (attention-rollout + concept scores) for models/ablations.
 
-Input atteso (per item):
+Expected input (per item):
   attention_rollout_concept/<run>/items/idx_xxxxxxxx/
     - input.png
-    - attn_rollout.npy  (H x W) o (h x w)
-    - roi_bbox.json     (bbox in pixel su input)
-    - roi.png           (opzionale, crop)
+    - attn_rollout.npy  (H x W) or (h x w)
+    - roi_bbox.json     (bbox in pixels on input)
+    - roi.png           (optional, crop)
     - concept_scores.json (dict concept->score)
 
 Output:
@@ -22,15 +22,18 @@ Output:
       summary.csv
       figures/
         idx_xxxxxxxx_panel.png
+      paper/
+        fig_01_idx_xxxxxxxx.png
+        fig_01_idx_xxxxxxxx.json   <-- sidecar with ROI + concepts (Top-k)
       montage.png
 
-Uso:
-  python postdiag_xai_fast.py \
-    --models-root /beegfs-scratch/.../models \
-    --out-root /home/.../explainability/output \
-    --per-ablation-figures 6 \
-    --max-metrics-items 200 \
-    --max-pixels 1024
+Usage:
+  PYTHONPATH=/path/to/src /path/to/python postdiag_xai_fast.py \
+    --models-root /path/to/models \
+    --out-root /path/to/output \
+    --selection-mode concept_top \
+    --per-class-figures 6 \
+    --class-source true
 
 """
 
@@ -40,7 +43,6 @@ import argparse
 import csv
 import json
 import math
-import os
 import random
 import statistics
 from dataclasses import dataclass
@@ -50,7 +52,6 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-# Evita falsi allarmi su immagini grandi (tipico in pipeline WSI/patch).
 Image.MAX_IMAGE_PIXELS = None
 
 
@@ -88,9 +89,10 @@ def clamp_bbox(x1: int, y1: int, x2: int, y2: int, w: int, h: int) -> Tuple[int,
 
 def parse_bbox(obj: dict) -> Tuple[int, int, int, int]:
     """
-    Supporta vari formati comuni:
+    Supports various common formats:
       {x1,y1,x2,y2} / {xmin,ymin,xmax,ymax} / {left,top,right,bottom} / {x,y,w,h}
-      oppure lista [x1,y1,x2,y2]
+      {x0,y0,x1,y1}
+      or list [x1,y1,x2,y2]
     """
     if isinstance(obj, list) and len(obj) >= 4:
         return int(obj[0]), int(obj[1]), int(obj[2]), int(obj[3])
@@ -98,6 +100,8 @@ def parse_bbox(obj: dict) -> Tuple[int, int, int, int]:
     keys = set(obj.keys())
     if {"x1", "y1", "x2", "y2"}.issubset(keys):
         return int(obj["x1"]), int(obj["y1"]), int(obj["x2"]), int(obj["y2"])
+    if {"x0", "y0", "x1", "y1"}.issubset(keys):
+        return int(obj["x0"]), int(obj["y0"]), int(obj["x1"]), int(obj["y1"])
     if {"xmin", "ymin", "xmax", "ymax"}.issubset(keys):
         return int(obj["xmin"]), int(obj["ymin"]), int(obj["xmax"]), int(obj["ymax"])
     if {"left", "top", "right", "bottom"}.issubset(keys):
@@ -106,7 +110,7 @@ def parse_bbox(obj: dict) -> Tuple[int, int, int, int]:
         x1, y1 = int(obj["x"]), int(obj["y"])
         return x1, y1, x1 + int(obj["w"]), y1 + int(obj["h"])
 
-    raise ValueError(f"Formato bbox non riconosciuto: keys={sorted(list(keys))}")
+    raise ValueError(f"Unrecognized bbox format: keys={sorted(list(keys))}")
 
 def try_read_csv(path: Path) -> List[dict]:
     with path.open("r", encoding="utf-8", newline="") as f:
@@ -125,6 +129,38 @@ def safe_float(s: object, default: float = float("nan")) -> float:
         return float(str(s))
     except Exception:
         return default
+
+def _parse_quantile(q: object, default: float = 0.90) -> float:
+    try:
+        v = float(q)
+    except Exception:
+        return default
+    if v > 1.0:
+        v = v / 100.0
+    if v <= 0.0 or v > 1.0:
+        return default
+    return v
+
+_CONCEPT_PREFIXES_TO_STRIP = (
+    "chrcc_",
+    "onco_",
+    "ccrcc_",
+    "prcc_",
+    "notumor_",
+)
+
+def concept_display_name(short_name: str) -> str:
+    """
+    User-facing display: strip class prefixes (chrcc_/onco_/ccrcc_/prcc_/notumor_)
+    and replace underscores with spaces.
+    """
+    s = str(short_name)
+    for p in _CONCEPT_PREFIXES_TO_STRIP:
+        if s.startswith(p):
+            s = s[len(p):]
+            break
+    s = s.replace("_", " ").strip()
+    return s
 
 
 # -------------------------
@@ -191,13 +227,72 @@ def discover_items(run_dir: Path) -> List[Path]:
 
 def discover_selection(run_dir: Path) -> List[Path]:
     """
-    Se selection/ contiene idx_* (symlink o cartelle), lo usiamo come shortlist.
+    If selection/ contains idx_* (symlink or folders), we use it as shortlist.
     """
     sel = run_dir / "selection"
     if not sel.exists() or not sel.is_dir():
         return []
     idxs = sorted([p for p in sel.iterdir() if p.name.startswith("idx_")])
-    return idxs
+    if idxs:
+        return idxs
+
+    sel_json = sel / "xai_selection.json"
+    if sel_json.exists():
+        try:
+            obj = read_json(sel_json)
+        except Exception:
+            return []
+        indices = obj.get("selected_indices")
+        if isinstance(indices, list) and indices:
+            items_dir = run_dir / "items"
+            chosen: List[Path] = []
+            seen: set = set()
+            for i in indices:
+                try:
+                    gi = int(i)
+                except Exception:
+                    continue
+                cand = items_dir / f"idx_{gi:08d}"
+                if not cand.exists():
+                    cand = items_dir / f"idx_{gi:07d}"
+                if cand.exists() and cand not in seen:
+                    chosen.append(cand)
+                    seen.add(cand)
+            return chosen
+
+    return []
+
+
+def _item_class_from_meta(meta: dict, class_source: str) -> Optional[str]:
+    if not isinstance(meta, dict):
+        return None
+    if class_source == "true":
+        return meta.get("true_class") or None
+    if class_source == "pred":
+        return meta.get("pred_class") or None
+    return meta.get("true_class") or meta.get("pred_class") or None
+
+
+def _extract_top_scores(concept_scores: dict) -> List[float]:
+    topk = concept_scores.get("topk") if isinstance(concept_scores, dict) else None
+    scores: List[float] = []
+    if isinstance(topk, list) and topk:
+        for row in topk:
+            if isinstance(row, dict):
+                s = row.get("score")
+            elif isinstance(row, (list, tuple)) and len(row) >= 2:
+                s = row[1]
+            else:
+                s = None
+            if is_number(s):
+                scores.append(float(s))
+        return scores
+    scores_map = concept_scores.get("scores") if isinstance(concept_scores, dict) else None
+    if isinstance(scores_map, dict):
+        for v in scores_map.values():
+            if is_number(v):
+                scores.append(float(v))
+    return scores
 
 def build_item_paths(idx_dir: Path) -> Optional[ItemPaths]:
     input_png = idx_dir / "input.png"
@@ -236,7 +331,7 @@ def compute_metrics(item: ItemPaths) -> ItemMetrics:
         attn = attn.astype(np.float32, copy=False)
         ah, aw = int(attn.shape[0]), int(attn.shape[1])
 
-        # Porta bbox nello spazio della mappa attenzione se dimensioni diverse
+        # Map bbox into attention space if sizes differ
         sx = aw / float(w)
         sy = ah / float(h)
         ax1 = int(math.floor(x1 * sx))
@@ -257,9 +352,39 @@ def compute_metrics(item: ItemPaths) -> ItemMetrics:
         if item.concept_scores_json is not None:
             cs = read_json(item.concept_scores_json)
             if isinstance(cs, dict):
-                pairs = [(str(k), float(v)) for k, v in cs.items() if is_number(v)]
-                pairs.sort(key=lambda kv: kv[1], reverse=True)
-                top_concepts = pairs[:10]
+                topk = cs.get("topk", None)
+                if isinstance(topk, list) and topk:
+                    pairs: List[Tuple[str, float]] = []
+                    for row in topk:
+                        if isinstance(row, dict):
+                            name = (
+                                row.get("concept_short_name")
+                                or row.get("concept_name")
+                                or row.get("concept")
+                                or row.get("name")
+                            )
+                            score = row.get("score")
+                        elif isinstance(row, (list, tuple)) and len(row) >= 2:
+                            name, score = row[0], row[1]
+                        else:
+                            continue
+                        if name is None or not is_number(score):
+                            continue
+                        pairs.append((str(name), float(score)))
+                    if pairs:
+                        top_concepts = pairs[:10]
+
+                if not top_concepts:
+                    scores_map = cs.get("scores", None)
+                    if isinstance(scores_map, dict):
+                        pairs = [(str(k), float(v)) for k, v in scores_map.items() if is_number(v)]
+                        pairs.sort(key=lambda kv: kv[1], reverse=True)
+                        top_concepts = pairs[:10]
+
+                if not top_concepts:
+                    pairs = [(str(k), float(v)) for k, v in cs.items() if is_number(v)]
+                    pairs.sort(key=lambda kv: kv[1], reverse=True)
+                    top_concepts = pairs[:10]
 
         return ItemMetrics(
             idx=item.idx,
@@ -307,21 +432,12 @@ def draw_bbox(im: Image.Image, bbox: Tuple[int, int, int, int], width: int = 4) 
         d.rectangle([x1 - i, y1 - i, x2 + i, y2 + i], outline=(255, 0, 0))
     return out
 
-def overlay_roi_mask(im: Image.Image, bbox: Tuple[int, int, int, int], alpha: int = 80) -> Image.Image:
-    base = im.convert("RGBA")
-    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
-    d = ImageDraw.Draw(overlay)
-    x1, y1, x2, y2 = bbox
-    d.rectangle([x1, y1, x2, y2], fill=(255, 0, 0, alpha))
-    return Image.alpha_composite(base, overlay).convert("RGB")
-
 def attn_to_heatmap_rgb(attn: np.ndarray) -> Image.Image:
     """
-    Converte una mappa [0,1] in RGB usando una LUT semplice (no Matplotlib figure).
-    Palette tipo "inferno-lite" custom per evitare dipendenze extra.
+    Converts a [0,1] map to RGB using a simple LUT (no Matplotlib figure).
+    Custom "inferno-lite" palette to avoid extra dependencies.
     """
     a = (np.clip(attn, 0.0, 1.0) * 255.0).astype(np.uint8)
-    # LUT 256x3 (gradiente scuro->chiaro con tinta calda)
     lut = np.zeros((256, 3), dtype=np.uint8)
     for i in range(256):
         t = i / 255.0
@@ -330,89 +446,244 @@ def attn_to_heatmap_rgb(attn: np.ndarray) -> Image.Image:
         b = int(255 * (t ** 3.0) * 0.3)
         lut[i] = (r, g, b)
     rgb = lut[a]
-    return Image.fromarray(rgb, mode=None).convert("RGB")  # mode=None -> niente 'mode=' deprecato
+    return Image.fromarray(rgb, mode=None).convert("RGB")
 
 def blend_heatmap(im_rgb: Image.Image, heat_rgb: Image.Image, alpha: float = 0.45) -> Image.Image:
     heat = heat_rgb.resize(im_rgb.size, resample=Image.BILINEAR)
     return Image.blend(im_rgb, heat, alpha=alpha)
 
-def text_block(lines: List[str], width: int, height: int) -> Image.Image:
-    canvas = Image.new("RGB", (width, height), (255, 255, 255))
-    d = ImageDraw.Draw(canvas)
-    try:
-        font = ImageFont.truetype("DejaVuSans.ttf", 16)
-    except Exception:
-        font = ImageFont.load_default()
 
-    y = 8
-    for ln in lines:
-        d.text((8, y), ln, fill=(0, 0, 0), font=font)
-        y += 20
-        if y > height - 20:
-            break
-    return canvas
+def _ensure_2d_mask(mask_any: np.ndarray) -> np.ndarray:
+    m = np.asarray(mask_any, dtype=np.float32)
+    m = np.nan_to_num(m, nan=0.0, posinf=0.0, neginf=0.0)
+    if m.ndim == 2:
+        return m
+    m = np.squeeze(m)
+    if m.ndim == 2:
+        return m
+    if m.ndim == 3:
+        if m.shape[0] in (1, 3, 4) and m.shape[1] != m.shape[0]:
+            return m.mean(axis=0).astype(np.float32)
+        if m.shape[-1] in (1, 3, 4) and m.shape[-2] != m.shape[-1]:
+            return m.mean(axis=-1).astype(np.float32)
+        return m.mean(axis=0).astype(np.float32)
+    while m.ndim > 2:
+        m = m.mean(axis=0)
+    return np.asarray(m, dtype=np.float32)
 
-def panel_2x2(a: Image.Image, b: Image.Image, c: Image.Image, dimg: Image.Image, pad: int = 12) -> Image.Image:
-    # uniforma dimensioni usando la max
-    w = max(a.size[0], b.size[0], c.size[0], dimg.size[0])
-    h = max(a.size[1], b.size[1], c.size[1], dimg.size[1])
 
-    def fit(im: Image.Image) -> Image.Image:
-        if im.size == (w, h):
-            return im
-        return im.resize((w, h), resample=Image.BILINEAR)
+def _build_rollout_mask_binary(mask_2d: np.ndarray, q: float) -> np.ndarray:
+    m = np.asarray(mask_2d, dtype=np.float32)
+    m = np.nan_to_num(m, nan=0.0, posinf=0.0, neginf=0.0)
+    mn = float(np.min(m)) if m.size else 0.0
+    mx = float(np.max(m)) if m.size else 0.0
+    if not np.isfinite(mn) or not np.isfinite(mx) or (mx - mn) <= 1e-12:
+        m = np.zeros_like(m, dtype=np.float32)
+    else:
+        m = (m - mn) / (mx - mn)
+    thr = float(np.quantile(m, q)) if m.size else 1.0
+    bw = (m >= thr)
+    if not bw.any() and m.size:
+        bw = (m == float(np.max(m)))
+    return bw.astype(bool)
 
-    a2, b2, c2, d2 = fit(a), fit(b), fit(c), fit(dimg)
-    out = Image.new("RGB", (2 * w + pad, 2 * h + pad), (255, 255, 255))
-    out.paste(a2, (0, 0))
-    out.paste(b2, (w + pad, 0))
-    out.paste(c2, (0, h + pad))
-    out.paste(d2, (w + pad, h + pad))
+
+def _resize_mask(mask_bool: np.ndarray, size: Tuple[int, int]) -> np.ndarray:
+    w, h = size
+    m_img = Image.fromarray(mask_bool.astype(np.uint8) * 255).resize((w, h), resample=Image.NEAREST)
+    return (np.asarray(m_img) > 0)
+
+
+def _shift_mask(m: np.ndarray, dy: int, dx: int) -> np.ndarray:
+    h, w = m.shape
+    out = np.zeros_like(m, dtype=bool)
+    y0 = max(0, dy)
+    y1 = h + min(0, dy)
+    x0 = max(0, dx)
+    x1 = w + min(0, dx)
+    out[y0:y1, x0:x1] = m[y0 - dy:y1 - dy, x0 - dx:x1 - dx]
     return out
 
-def render_item_panel(item: ItemPaths, metrics: ItemMetrics, out_png: Path, max_pixels: int, topk: int = 6) -> None:
+
+def _mask_edges(mask_bool: np.ndarray) -> np.ndarray:
+    if mask_bool.size == 0:
+        return mask_bool
+    m = mask_bool.astype(bool)
+    eroded = m.copy()
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            if dx == 0 and dy == 0:
+                continue
+            eroded &= _shift_mask(m, dy, dx)
+    return m & (~eroded)
+
+
+def _dilate_mask(mask_bool: np.ndarray, steps: int = 1) -> np.ndarray:
+    out = mask_bool.astype(bool)
+    for _ in range(max(0, steps)):
+        expanded = out.copy()
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                expanded |= _shift_mask(out, dy, dx)
+        out = expanded
+    return out
+
+
+def _overlay_mask(im: Image.Image, mask_bool: np.ndarray, color: Tuple[int, int, int], alpha: int) -> Image.Image:
+    base = im.convert("RGBA")
+    h, w = mask_bool.shape
+    arr = np.zeros((h, w, 4), dtype=np.uint8)
+    arr[mask_bool] = (color[0], color[1], color[2], alpha)
+    overlay = Image.fromarray(arr)
+    return Image.alpha_composite(base, overlay).convert("RGB")
+
+
+def _overlay_edges(im: Image.Image, edges_bool: np.ndarray, color: Tuple[int, int, int], alpha: int = 255) -> Image.Image:
+    base = im.convert("RGBA")
+    h, w = edges_bool.shape
+    arr = np.zeros((h, w, 4), dtype=np.uint8)
+    arr[edges_bool] = (color[0], color[1], color[2], alpha)
+    overlay = Image.fromarray(arr)
+    return Image.alpha_composite(base, overlay).convert("RGB")
+
+
+def _get_font(size: int) -> ImageFont.ImageFont:
+    try:
+        return ImageFont.truetype("DejaVuSans.ttf", size)
+    except Exception:
+        return ImageFont.load_default()
+
+
+def _text_size(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> Tuple[int, int]:
+    if hasattr(draw, "textbbox"):
+        bb = draw.textbbox((0, 0), text, font=font)
+        return max(1, bb[2] - bb[0]), max(1, bb[3] - bb[1])
+    return draw.textsize(text, font=font)
+
+
+def render_paper_figure(
+    exp_name: str,
+    abl_name: str,
+    item: ItemPaths,
+    metrics: ItemMetrics,
+    out_png: Path,
+    max_pixels: int,
+    topk: int = 5,
+) -> None:
+    """
+    Paper-friendly figure: 4 panels only.
+    Concepts + ROI/crop-related info are written to a sidecar JSON:
+      out_png.with_suffix(".json")
+    """
     im = Image.open(item.input_png).convert("RGB")
-    im_ds, scale = downscale_rgb(im, max_pixels=max_pixels)
+    im_ds, _scale = downscale_rgb(im, max_pixels=max_pixels)
 
-    x1, y1, x2, y2 = metrics.roi_bbox_xyxy
-    # scala bbox
-    x1s = int(round(x1 * scale)); y1s = int(round(y1 * scale))
-    x2s = int(round(x2 * scale)); y2s = int(round(y2 * scale))
-    x1s, y1s, x2s, y2s = clamp_bbox(x1s, y1s, x2s, y2s, im_ds.size[0], im_ds.size[1])
-    bbox_s = (x1s, y1s, x2s, y2s)
-
-    # attn load + normalize + resize nello spazio downscaled (per evitare costi)
-    attn = np.load(item.attn_npy)
-    if attn.ndim == 3:
-        attn = attn.squeeze()
+    attn = _ensure_2d_mask(np.load(item.attn_npy))
     attn01 = normalize01(attn)
     heat = attn_to_heatmap_rgb(attn01).resize(im_ds.size, resample=Image.BILINEAR)
 
-    # pannelli
-    p1 = draw_bbox(im_ds, bbox_s)
-    p2 = draw_bbox(heat, bbox_s)
-    p3 = draw_bbox(blend_heatmap(im_ds, heat, alpha=0.45), bbox_s)
+    bbox_obj = read_json(item.roi_bbox_json)
+    q = _parse_quantile(bbox_obj.get("quantile", bbox_obj.get("threshold", 0.90)))
 
-    # ROI crop + concetti
-    crop = im_ds.crop(bbox_s)
-    crop = crop.resize((max(256, crop.size[0]), max(256, crop.size[1])), resample=Image.BILINEAR)
-    concept_lines = [
-        f"{item.idx}",
-        f"mass_in_roi={metrics.attention_mass_in_roi:.3f}",
-        f"peak_in_roi={int(metrics.peak_in_roi)}",
-        "",
-        "Top concepts:",
-    ]
-    for k, v in metrics.top_concepts[:topk]:
-        concept_lines.append(f"- {k}: {v:.3f}")
-    tb = text_block(concept_lines, width=360, height=crop.size[1])
-    p4 = Image.new("RGB", (crop.size[0] + tb.size[0], crop.size[1]), (255, 255, 255))
-    p4.paste(crop, (0, 0))
-    p4.paste(tb, (crop.size[0], 0))
+    mask = _build_rollout_mask_binary(attn, q)
+    mask_im = _resize_mask(mask, im_ds.size)
 
-    fig = panel_2x2(p1, p2, p3, p4)
+    # Panels (4 only)
+    p1 = im_ds
+    p2 = _overlay_mask(im_ds, mask_im, color=(255, 0, 0), alpha=80)
+    p3 = blend_heatmap(im_ds, heat, alpha=0.45)
+
+    edges = _mask_edges(mask_im)
+    edges = _dilate_mask(edges, steps=1)
+    p4 = _overlay_edges(p3, edges, color=(120, 0, 140), alpha=255)
+
+    panels = [p1, p2, p3, p4]
+    titles = ["Input", "Input + ROI mask", "Input + Attn rollout", "Attn + ROI contour"]
+
+    # Layout
+    n = len(panels)
+    w, h = panels[0].size
+    outer = 12
+    col_gap = 10
+    header_h = 26
+    title_h = 20
+    row_gap = 8
+    total_w = outer * 2 + n * w + (n - 1) * col_gap
+    total_h = outer * 2 + header_h + title_h + row_gap + h
+
+    canvas = Image.new("RGB", (total_w, total_h), (255, 255, 255))
+    d = ImageDraw.Draw(canvas)
+
+    header = f"{exp_name} | {abl_name} | {item.idx}"
+    header_font = _get_font(18)
+    title_font = _get_font(14)
+    d.text((outer, outer), header, fill=(0, 0, 0), font=header_font)
+
+    y_titles = outer + header_h
+    x = outer
+    for t in titles:
+        tw = _text_size(d, t, font=title_font)[0]
+        tx = x + (w - tw) // 2
+        d.text((tx, y_titles), t, fill=(0, 0, 0), font=title_font)
+        x += w + col_gap
+
+    y_panels = outer + header_h + title_h + row_gap
+    x = outer
+    for p in panels:
+        canvas.paste(p, (x, y_panels))
+        x += w + col_gap
+
     out_png.parent.mkdir(parents=True, exist_ok=True)
-    fig.save(out_png, format="PNG", optimize=True)
+    canvas.save(out_png, format="PNG", optimize=True)
+
+    # Sidecar JSON (concepts + ROI info)
+    concept_meta = {}
+    if item.concept_scores_json is not None and item.concept_scores_json.exists():
+        try:
+            cs = read_json(item.concept_scores_json)
+            if isinstance(cs, dict):
+                meta = cs.get("meta")
+                if isinstance(meta, dict):
+                    # keep only lightweight metadata (avoid huge dumps)
+                    for k in ("name", "version", "registry", "concept_set", "concepts_name", "concepts_version"):
+                        if k in meta:
+                            concept_meta[k] = meta.get(k)
+        except Exception:
+            pass
+
+    concepts_payload = []
+    for k, v in (metrics.top_concepts[:topk] if metrics.top_concepts else []):
+        concepts_payload.append({
+            "short_name": str(k),
+            "display_name": concept_display_name(str(k)),
+            "score": float(v),
+            "score_2dp": f"{float(v):.2f}",
+        })
+
+    sidecar = {
+        "exp": exp_name,
+        "ablation": abl_name,
+        "idx": item.idx,
+        "figure_png": str(out_png),
+        "figure_json": str(out_png.with_suffix(".json")),
+        "paths": {
+            "idx_dir": str(item.dir),
+            "input_png": str(item.input_png),
+            "attn_rollout_npy": str(item.attn_npy),
+            "roi_bbox_json": str(item.roi_bbox_json),
+            "concept_scores_json": str(item.concept_scores_json) if item.concept_scores_json is not None else None,
+        },
+        "roi_bbox_xyxy": list(metrics.roi_bbox_xyxy),
+        "attention_mass_in_roi": float(metrics.attention_mass_in_roi),
+        "peak_in_roi": bool(metrics.peak_in_roi),
+        "rollout_quantile": float(q),
+        "concepts_meta": concept_meta,
+        "topk": int(topk),
+        "concepts": concepts_payload,
+    }
+    write_json(out_png.with_suffix(".json"), sidecar)
 
 
 # -------------------------
@@ -424,16 +695,59 @@ def pick_items_for_figures(
     all_item_dirs: List[Path],
     per_ablation_figures: int,
     seed: int,
+    selection_mode: str = "selection",
+    per_class_figures: int = 0,
+    class_source: str = "true",
+    min_concept_score: float = 0.0,
+    min_concept_margin: float = 0.0,
 ) -> List[Path]:
     random.seed(seed)
 
+    if selection_mode == "concept_top":
+        items_dir = run_dir / "items"
+        per_class: Dict[str, List[Tuple[float, Path]]] = {}
+        for d in all_item_dirs:
+            ip = build_item_paths(d)
+            if ip is None or ip.concept_scores_json is None:
+                continue
+            try:
+                cs = read_json(ip.concept_scores_json)
+            except Exception:
+                continue
+            meta = cs.get("meta", {}) if isinstance(cs, dict) else {}
+            src = class_source if class_source in ("true", "pred") else "auto"
+            cls = _item_class_from_meta(meta, src)
+            if not cls:
+                continue
+            scores = _extract_top_scores(cs)
+            if not scores:
+                continue
+            scores.sort(reverse=True)
+            top1 = scores[0]
+            top2 = scores[1] if len(scores) > 1 else 0.0
+            margin = top1 - top2
+            if top1 < min_concept_score or margin < min_concept_margin:
+                continue
+            per_class.setdefault(cls, []).append((margin, items_dir / ip.idx))
+
+        chosen: List[Path] = []
+        for cls, rows in per_class.items():
+            rows.sort(key=lambda r: r[0], reverse=True)
+            take = per_class_figures if per_class_figures > 0 else per_ablation_figures
+            for _margin, p in rows[:take]:
+                chosen.append(p)
+        return chosen
+
+    if selection_mode == "random":
+        if len(all_item_dirs) <= per_ablation_figures:
+            return all_item_dirs
+        return random.sample(all_item_dirs, k=per_ablation_figures)
+
     sel = discover_selection(run_dir)
     if sel:
-        # selection potrebbe contenere symlink o cartelle
         chosen = [p for p in sel if p.name.startswith("idx_")]
         return chosen[:per_ablation_figures]
 
-    # fallback: prendi subset casuale (robusto anche senza xai_summary)
     if len(all_item_dirs) <= per_ablation_figures:
         return all_item_dirs
     return random.sample(all_item_dirs, k=per_ablation_figures)
@@ -508,10 +822,15 @@ def run_postdiag(
     max_metrics_items: int,
     max_pixels: int,
     seed: int,
+    selection_mode: str,
+    per_class_figures: int,
+    class_source: str,
+    min_concept_score: float,
+    min_concept_margin: float,
 ) -> int:
     exps = discover_experiments(models_root)
     if not exps:
-        print(f"Nessuna exp_* trovata in: {models_root}")
+        print(f"No exp_* found in: {models_root}")
         return 2
 
     global_rows: List[dict] = []
@@ -533,7 +852,6 @@ def run_postdiag(
             if not item_dirs:
                 continue
 
-            # campiona per metriche (evita di macinare decine di migliaia di item)
             metrics_sample = item_dirs
             if len(metrics_sample) > max_metrics_items:
                 random.seed(seed)
@@ -548,11 +866,9 @@ def run_postdiag(
             metrics: List[ItemMetrics] = [compute_metrics(ip) for ip in items]
             summ = summarize_metrics(metrics)
 
-            # write per-ablation outputs
             out_abl = out_root / exp.name / abl.name
             write_json(out_abl / "summary.json", summ)
 
-            # per-item csv (solo campione)
             per_item_rows: List[dict] = []
             for m in metrics:
                 per_item_rows.append({
@@ -572,46 +888,58 @@ def run_postdiag(
                 })
             write_csv_rows(out_abl / "summary.csv", per_item_rows)
 
-            # figure selection (shortlist)
-            chosen_dirs = pick_items_for_figures(run_dir, item_dirs, per_ablation_figures, seed)
-            figs_dir = out_abl / "figures"
+            chosen_dirs = pick_items_for_figures(
+                run_dir,
+                item_dirs,
+                per_ablation_figures,
+                seed,
+                selection_mode=selection_mode,
+                per_class_figures=per_class_figures,
+                class_source=class_source,
+                min_concept_score=min_concept_score,
+                min_concept_margin=min_concept_margin,
+            )
+
+            paper_dir = out_abl / "paper"
             montage_tiles: List[Image.Image] = []
 
-            # per evitare doppio compute: mappa idx->metrics (solo se presente nel campione)
             m_by_idx = {m.idx: m for m in metrics}
 
-            for d in chosen_dirs:
+            for fig_idx, d in enumerate(chosen_dirs, start=1):
                 ip = build_item_paths(d)
                 if ip is None:
                     continue
-                if ip.idx in m_by_idx:
-                    mm = m_by_idx[ip.idx]
-                else:
-                    mm = compute_metrics(ip)
+                mm = m_by_idx.get(ip.idx) or compute_metrics(ip)
 
-                out_png = figs_dir / f"{ip.idx}_panel.png"
-                render_item_panel(ip, mm, out_png=out_png, max_pixels=max_pixels, topk=6)
+                paper_png = paper_dir / f"fig_{fig_idx:02d}_{ip.idx}.png"
+                render_paper_figure(
+                    exp_name=exp.name,
+                    abl_name=abl.name,
+                    item=ip,
+                    metrics=mm,
+                    out_png=paper_png,
+                    max_pixels=max_pixels,
+                    topk=5,
+                )
 
-                # per montage: thumbnail
+                # montage thumbnail from paper figure
                 try:
-                    t = Image.open(out_png).convert("RGB")
+                    t = Image.open(paper_png).convert("RGB")
                     t = t.resize((900, int(900 * (t.size[1] / t.size[0]))), resample=Image.BILINEAR)
                     montage_tiles.append(t)
                 except Exception:
                     pass
 
-            # semplice montage verticale
             if montage_tiles:
-                w = max(im.size[0] for im in montage_tiles)
-                h = sum(im.size[1] for im in montage_tiles) + 12 * (len(montage_tiles) - 1)
-                canvas = Image.new("RGB", (w, h), (255, 255, 255))
+                w0 = max(im.size[0] for im in montage_tiles)
+                h0 = sum(im.size[1] for im in montage_tiles) + 12 * (len(montage_tiles) - 1)
+                canvas = Image.new("RGB", (w0, h0), (255, 255, 255))
                 y = 0
                 for im in montage_tiles:
                     canvas.paste(im, (0, y))
                     y += im.size[1] + 12
                 canvas.save(out_abl / "montage.png", format="PNG", optimize=True)
 
-            # global rows
             row = {
                 "exp": exp.name,
                 "ablation": abl.name,
@@ -633,18 +961,50 @@ def run_postdiag(
     write_csv_rows(out_root / "postdiag_global.csv", global_rows)
     write_json(out_root / "postdiag_global.json", global_json)
 
-    print(f"OK: scritto report in {out_root}")
+    print(f"OK: wrote report in {out_root}")
     return 0
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--models-root", type=str, required=True, help="Root che contiene exp_* (timestamp).")
-    ap.add_argument("--out-root", type=str, required=True, help="Output root per report e figure.")
-    ap.add_argument("--per-ablation-figures", type=int, default=6, help="Numero figure per ablation.")
-    ap.add_argument("--max-metrics-items", type=int, default=200, help="Max item per ablation per metriche (campione).")
-    ap.add_argument("--max-pixels", type=int, default=1024, help="Downscale max lato per figure (velocità).")
+    ap.add_argument("--models-root", type=str, required=True, help="Root containing exp_* (timestamp).")
+    ap.add_argument("--out-root", type=str, required=True, help="Output root for report and figures.")
+    ap.add_argument("--per-ablation-figures", type=int, default=6, help="Number of figures per ablation.")
+    ap.add_argument("--max-metrics-items", type=int, default=200, help="Max items per ablation for metrics (sample).")
+    ap.add_argument("--max-pixels", type=int, default=1024, help="Downscale max side for figures (speed).")
     ap.add_argument("--seed", type=int, default=1337)
+    ap.add_argument(
+        "--selection-mode",
+        type=str,
+        default="selection",
+        choices=["selection", "concept_top", "random"],
+        help="Selection method: selection (xai_selection), concept_top (per class), random.",
+    )
+    ap.add_argument(
+        "--per-class-figures",
+        type=int,
+        default=0,
+        help="If >0 and selection-mode=concept_top, number of patches per class.",
+    )
+    ap.add_argument(
+        "--class-source",
+        type=str,
+        default="true",
+        choices=["true", "pred", "auto"],
+        help="Class used for selection (true/pred/auto).",
+    )
+    ap.add_argument(
+        "--min-concept-score",
+        type=float,
+        default=0.0,
+        help="Minimum filter on top-1 concept score (selection-mode=concept_top).",
+    )
+    ap.add_argument(
+        "--min-concept-margin",
+        type=float,
+        default=0.0,
+        help="Minimum filter on margin (top1 - top2) concept (selection-mode=concept_top).",
+    )
     args = ap.parse_args()
 
     models_root = Path(args.models_root).expanduser().resolve()
@@ -658,6 +1018,11 @@ def main() -> int:
         max_metrics_items=max(1, args.max_metrics_items),
         max_pixels=max(128, args.max_pixels),
         seed=args.seed,
+        selection_mode=args.selection_mode,
+        per_class_figures=max(0, args.per_class_figures),
+        class_source=args.class_source,
+        min_concept_score=max(0.0, args.min_concept_score),
+        min_concept_margin=max(0.0, args.min_concept_margin),
     )
 
 
