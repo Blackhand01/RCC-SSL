@@ -18,18 +18,18 @@ def is_main_process() -> bool:
 def get_default_process_group():
     return dist.group.WORLD if is_enabled() else None
 
-# --- Shim per compatibilità DINOv3 ---
-# DINOv3 usa i "subgroup" per training su migliaia di GPU. 
-# Per il tuo caso, il subgroup è uguale al world group (tutte le GPU lavorano insieme).
+# --- Shim for DINOv3 compatibility ---
+# DINOv3 uses "subgroup" for training on thousands of GPUs.
+# In your case, the subgroup equals the world group (all GPUs work together).
 
 def get_process_subgroup():
-    """Restituisce il gruppo di default invece di un sottogruppo specifico."""
-    return None  # PyTorch usa il gruppo di default se questo è None
+    """Return the default group instead of a specific subgroup."""
+    return None  # PyTorch uses the default group if this is None
 
 def get_subgroup_size() -> int:
-    """La dimensione del sottogruppo è la dimensione totale del mondo."""
+    """Subgroup size is the total world size."""
     return get_world_size()
 
 def get_subgroup_rank() -> int:
-    """Il rank nel sottogruppo è il rank globale."""
+    """Rank in the subgroup is the global rank."""
     return get_rank()

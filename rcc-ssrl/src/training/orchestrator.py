@@ -57,7 +57,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback when namespace packag
 from .trainer.loops import SLTrainer, SSLTrainer
 from .utils.viz import plot_confusion, render_all_sl, render_all_ssl, render_ssl_classifier
 
-# ---- modelli (riuso tuoi) ----
+# ---- models (reusing yours) ----
 try:
     from .models.moco_v3 import MoCoV3
     from .models.dino_v3 import DINOv3
@@ -220,8 +220,8 @@ class Orchestrator:
         sched_cfg = (self.cfg["train"].get("scheduler") or {})
         name = sched_cfg.get("name", "").lower()
         if name == "cosine":
-            # Nota: in SSL usiamo 'steps' come unità; in SL 'epochs'
-            return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_units)
+        # Note: in SSL we use 'steps' as unit; in SL 'epochs'
+        return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_units)
         return None
 
     # ------------------------------------------------------------------ SSL path
@@ -274,7 +274,7 @@ class Orchestrator:
         elif hasattr(model, "total_steps"):
             model.total_steps = total_steps
 
-        # Cosine su 'unità' del programma (per SSL=steps, per SL=epochs)
+        # Cosine on 'units' of the program (for SSL=steps, for SL=epochs)
         scheduler = self._build_scheduler(optimizer, total_steps)
         trainer = SSLTrainer(
             model,
@@ -316,7 +316,7 @@ class Orchestrator:
         # best_state = None
         #ssl_cfg = self.cfg["train"]["ssl"]
         ckpt_cfg = (ssl_cfg.get("checkpoint") or {})
-        ckpt_metric = ckpt_cfg.get("metric", "ssl_loss")  # default = comportamento attuale
+        ckpt_metric = ckpt_cfg.get("metric", "ssl_loss")  # default = current behavior
         warmup_epochs = int(ckpt_cfg.get("warmup_epochs", 0))
         eval_every = int(ckpt_cfg.get("eval_every_epochs", 1))
 
@@ -331,7 +331,7 @@ class Orchestrator:
             ckpt_cfg.get("probe_epochs", probe_cfg.get("epochs", 5))
         )
         if ckpt_metric == "probe_val_acc":
-            # riusa la stessa logica degli SL loader
+            # reuse the same logic as SL loaders
             train_loader, val_loader = _with_context(
                 "build_sl_loaders_for_probe",
                 build_sl_loaders,
@@ -438,10 +438,10 @@ class Orchestrator:
                     if probe_loaders is None:
                         raise RuntimeError("probe_val_acc selected but probe_loaders is None")
 
-                    # backbone corrente (per I-JEPA è lo student)
+                    # Current backbone (for I-JEPA it is the student)
                     backbone_module = model.stu if hasattr(model, "stu") else model
 
-                    # estrai feature su train / val
+                    # Extract features on train / val
                     tag = f"{self.model_key}_ep{epoch:03d}"
                     feature_paths = save_features(
                         backbone_module,
@@ -455,7 +455,7 @@ class Orchestrator:
                     Xva = np.load(feature_paths["val_X"], allow_pickle=False)
                     yva = np.load(feature_paths["val_y"], allow_pickle=False)
 
-                    # allena linear probe "leggero"
+                    # Train light linear probe
                     lin_metrics, lin_ckpt = train_linear_probe_torch(
                         Xtr,
                         ytr,
@@ -475,12 +475,12 @@ class Orchestrator:
                         flush=True,
                     )
 
-                    # aggiorna best se migliora
+                    # Update best if improves
                     if cur_acc > best_probe_acc:
                         best_probe_acc = cur_acc
                         best_epoch = epoch
                         best_state = safe_state_dict(model)
-                        # tieni traccia anche della ssl_loss relativa a quell'epoca (opzionale)
+                        # Also track the ssl_loss related to that epoch (optional)
                         best_ssl_loss = loss_epoch
 
             else:
@@ -671,7 +671,7 @@ class Orchestrator:
                     "elapsed_s": round(time.time() - t0_run, 2),
                 },
             )
-            # Stima ETA fine training (lineare sui tempi per epoca)
+            # Estimate ETA end of training (linear on times per epoch)
             if os.environ.get("RANK", "0") == "0":
                 done_epochs = epoch + 1
                 elapsed = time.time() - t0_run

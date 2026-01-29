@@ -17,14 +17,14 @@ def softmax(x: np.ndarray, axis: int = -1) -> np.ndarray:
 
 def load_true_labels_from_predictions_csv(pred_csv: Path) -> np.ndarray:
     """
-    Tenta di leggere la colonna label vera da predictions.csv.
-    Adatta i nomi candidati se nella tua pipeline usate altri header.
+    Try to read the true label column from predictions.csv.
+    Adapt candidate names if your pipeline uses other headers.
     """
     candidates = ["y_true", "true", "label", "target", "gt", "y"]
     with pred_csv.open("r", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         if reader.fieldnames is None:
-            raise RuntimeError(f"{pred_csv} non ha header CSV.")
+            raise RuntimeError(f"{pred_csv} has no CSV header.")
         cols = [c.strip() for c in reader.fieldnames]
         col = None
         for c in candidates:
@@ -33,9 +33,9 @@ def load_true_labels_from_predictions_csv(pred_csv: Path) -> np.ndarray:
                 break
         if col is None:
             raise RuntimeError(
-                f"Non trovo una colonna label vera in {pred_csv}. "
-                f"Colonne trovate: {cols}. "
-                f"Rinomina/aggiungi una colonna tra: {candidates}"
+                f"Cannot find true label column in {pred_csv}. "
+                f"Columns found: {cols}. "
+                f"Rename/add one of: {candidates}"
             )
         y = []
         for row in reader:
@@ -90,8 +90,8 @@ def plot_reliability(conf: np.ndarray, correct: np.ndarray, out_png: Path, n_bin
 
 def plot_risk_coverage(conf: np.ndarray, correct: np.ndarray, out_png: Path, title: str = "") -> None:
     """
-    Coverage = frazione di casi accettati (più confident)
-    Risk = 1 - accuracy sui casi accettati
+    Coverage = fraction of cases accepted (higher confidence)
+    Risk = 1 - accuracy on accepted cases
     """
     order = np.argsort(-conf)  # descending confidence
     conf_s = conf[order]
@@ -102,7 +102,7 @@ def plot_risk_coverage(conf: np.ndarray, correct: np.ndarray, out_png: Path, tit
     risks = []
     accs = []
 
-    # punti a granularità 1% (puoi cambiare)
+    # points at 1% granularity (you can change)
     for k in range(1, 101):
         m = max(1, int(n * (k / 100.0)))
         acc = corr_s[:m].mean()

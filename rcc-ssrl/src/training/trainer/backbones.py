@@ -38,9 +38,9 @@ def _resolve_torchvision_weights(name: str, pretrained: bool):
 
 class ResNetBackbone(nn.Module):
     """
-    ResNet come estrattore di feature con:
-      - forward_global: pooled feature [B, D]
-      - forward_tokens: token spatiali [B, T, C] da un blocco selezionato
+    ResNet as feature extractor with:
+      - forward_global: pooled features [B, D]
+      - forward_tokens: spatial tokens [B, T, C] from selected block
     """
 
     def __init__(self, name: str = "resnet50", pretrained: bool = False, return_tokens_from: str = "layer4"):
@@ -122,12 +122,12 @@ class ViTBackbone(nn.Module):
         self.patch_size = int(patch_sz)
         # Keep a record of intended input size (for downstream logic if needed)
         self.default_img_size = input_size or getattr(self.vit, "img_size", None)
-        # opzionale: congela l'embed dei patch per stabilizzare i primi step
+        # optional: freeze patch embedding to stabilize early steps
         if freeze_patch_embed and hasattr(self.vit, "patch_embed"):
             for p in self.vit.patch_embed.parameters():
                 p.requires_grad = False
-        # (gli altri flag sono placeholder compatibili)
-        # Previeni NaN: clamp LayerScale / attn se presenti
+        # (other flags are compatible placeholders)
+        # Prevent NaN: clamp LayerScale / attn if present
         if hasattr(self.vit, "blocks"):
             for blk in self.vit.blocks:
                 if hasattr(blk, "ls1") and hasattr(blk.ls1, "gamma"):
@@ -187,7 +187,7 @@ def _linear(in_f: int, out_f: int, bias: bool = False) -> nn.Linear:
 
 
 def mlp_head(in_dim: int, hidden: int, out_dim: int, bn_last_affine: bool = False) -> nn.Sequential:
-    """MLP 3-layer con BN e ReLU; ultima BN opzionale affine."""
+    """3-layer MLP with BN and ReLU; last BN optionally affine."""
     return nn.Sequential(
         _linear(in_dim, hidden, bias=False),
         _bn1d(hidden),
@@ -201,7 +201,7 @@ def mlp_head(in_dim: int, hidden: int, out_dim: int, bn_last_affine: bool = Fals
 
 
 def predictor_head(dim: int, hidden: int = 4096) -> nn.Sequential:
-    """MLP predittore stile BYOL/MoCoV3."""
+    """Predictor MLP in BYOL/MoCoV3 style."""
     return nn.Sequential(
         _linear(dim, hidden, bias=False),
         _bn1d(hidden),

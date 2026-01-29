@@ -80,11 +80,11 @@ def sample_center_in_mask(mask: np.ndarray, bbox: Tuple[int,int,int,int],
         trials += 1
     return coords
 
-# ---------- helper: path resolver per ROI ----------
+# ---------- helper: path resolver for ROI ----------
 def resolve_roi_path(rp: str, cls: str, cfg: dict) -> str:
     """
-    Rende 'rp' in path esistente sul FS. Prova diverse radici e sottocartelle comuni.
-    Ritorna stringa vuota se non risolto.
+    Makes 'rp' into an existing path on FS. Tries different roots and common subdirectories.
+    Returns empty string if not resolved.
     """
     p = Path(rp)
     if p.exists():
@@ -112,11 +112,11 @@ def resolve_roi_path(rp: str, cls: str, cfg: dict) -> str:
 
 def get_image_size_any(path_str: str) -> Optional[Tuple[int,int]]:
     """
-    Restituisce (W,H) usando PIL se possibile, altrimenti OpenSlide per WSI (.svs/.scn/.ndpi/.mrxs).
-    Ritorna None se non apribile.
+    Returns (W,H) using PIL if possible, otherwise OpenSlide for WSI files (.svs/.scn/.ndpi/.mrxs).
+    Returns None if not openable.
     """
     path = Path(path_str)
-    # 1) Prova PIL
+    # 1) Try PIL
     try:
         from PIL import Image
         Image.MAX_IMAGE_PIXELS = None
@@ -124,7 +124,7 @@ def get_image_size_any(path_str: str) -> Optional[Tuple[int,int]]:
             return im.size  # (W,H)
     except Exception:
         pass
-    # 2) Prova OpenSlide se è un formato WSI noto
+    # 2) Try OpenSlide if it's a known WSI format
     if path.suffix.lower() in {".svs", ".scn", ".ndpi", ".mrxs"}:
         try:
             import openslide
@@ -142,14 +142,14 @@ def main():
     ap.add_argument("--subset-only", choices=["train","val","test"], default=None)
     ap.add_argument("--only-patient", default=None)
     ap.add_argument("--source", choices=["both","xml","roi"], default="both",
-                    help="Genera da xml_masks (wsi), da roi_svs (roi), o entrambi.")
+                    help="Generate from xml_masks (wsi), from roi_svs (roi), or both.")
     ap.add_argument("--debug", action="store_true")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
     rng = np.random.default_rng(int(cfg.get("generation", {}).get("seed", 1337)))
 
-    # parametri
+    # Parameters
     patch = int(cfg["patch_size_px"])
     gen   = cfg.get("generation", {})
     budgets = gen.get("budget_total", {"train":300000,"val":60000,"test":60000})
@@ -160,7 +160,7 @@ def main():
     max_trials = max(100, max_trials_factor * 50)
     max_mask_pixels = int(gen.get("max_mask_pixels", 40_000_000))
 
-    # path
+    # Path
     folds      = json.loads(Path(cfg["split"]["folds_json"]).read_text())
     out_masks  = Path(cfg["paths"]["out_masks"])
     out_cand   = ensure_dir(Path(cfg["paths"]["out_candidates"]))
@@ -201,7 +201,7 @@ def main():
         n = max(1, len(pats_by_subset.get(s,[])))
         per_patient_cap[s] = int(ceil(budgets.get(s,0)/n) * slack)
 
-    # raccogli per paziente
+    # collect by patient
     by_patient = defaultdict(lambda: {"subset": None, "xml": [], "roi": []})
     with idx_path.open() as fin:
         for line in fin:
@@ -222,7 +222,7 @@ def main():
             else:
                 by_patient[pid]["roi"].append(j)
 
-    # processa pazienti; priorità xml (cc/p) poi ROI
+    # Process patients; priority xml (cc/p) then ROI
     order = sorted(by_patient.keys(), key=lambda p: (len(by_patient[p]["xml"])==0, p))
 
     written_total = 0
@@ -247,7 +247,7 @@ def main():
 
         # ----------- ccRCC / pRCC (xml_masks → origin='wsi') -----------
         if do_xml:
-            # calcola area utile per distribuire quota tra WSI
+            # Calculate useful area to distribute quota among WSIs
             areas = []
             for e in xmls:
                 rid = e["record_id"]; lvl = int(e["level"])
@@ -269,7 +269,7 @@ def main():
                 wsi_left = max(0, per_wsi_cap - cnt_wsi[rid])
                 if wsi_left <= 0: continue
 
-                # quota rispetto alla CAP **per sorgente wsi**
+                # Quota relative to CAP **for wsi source**
                 patient_left_wsi = capP - cnt_patient_src[(subset,pid,"wsi")]
                 if patient_left_wsi <= 0:
                     do_xml = False; break
@@ -319,7 +319,7 @@ def main():
                 if (capP - cnt_patient_src[(subset,pid,"wsi")]) <= 0:
                     do_xml = False
 
-                if not do_xml: continue  # cap wsi raggiunto
+                if not do_xml: continue  # cap wsi reached
 
                 # Not-tumor
                 N,_,_,_ = load_npz_mask(n_npz)
@@ -369,7 +369,7 @@ def main():
                       f"already={cnt_patient_src[(subset,pid,'roi')]}, left={patient_left_roi}")
 
             if patient_left_roi > 0:
-                # shuffle deterministico delle voci ROI del paziente
+                # Deterministic shuffle of patient's ROI entries
                 rois_shuffled = list(rois)
                 if rois_shuffled:
                     rois_shuffled = list(np.array(rois_shuffled)[rng.permutation(len(rois_shuffled))])
@@ -378,7 +378,7 @@ def main():
                         break
                     rid = e["record_id"]; cls = e["class_label"]
                     roi_files = list(e.get("roi_files", []))
-                    # shuffle deterministico dei file ROI
+                    # Deterministic shuffle of ROI files
                     if roi_files:
                         roi_files = list(np.array(roi_files)[rng.permutation(len(roi_files))])
 
@@ -386,7 +386,7 @@ def main():
                         if patient_left_roi <= 0:
                             break
 
-                        # risolvi path (tiene conto delle radici CHROMO/ONCO)
+                        # Resolve path (handles CHROMO/ONCO roots)
                         rp_res = resolve_roi_path(rp, cls, cfg)
                         if not rp_res:
                             if args.debug:
@@ -398,7 +398,7 @@ def main():
                         if roi_left <= 0:
                             continue
 
-                        # ottieni dimensioni via PIL o OpenSlide
+                        # Get dimensions via PIL or OpenSlide
                         size = get_image_size_any(rp_res)
                         if size is None:
                             if args.debug:

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Test-only evaluation per modelli già addestrati (encoder + classifier).
-Patch: salva predictions.csv ARRICCHITO con wds_key + metadati per XAI alignment.
+Test-only evaluation for already trained models (encoder + classifier).
+Patch: saves predictions.csv ENRICHED with wds_key + metadata for XAI alignment.
 """
 import os, sys, json, argparse, logging, random, csv
 from pathlib import Path
@@ -28,7 +28,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# opzionali
+# optional
 try:
     import webdataset as wds
     HAVE_WDS = True
@@ -106,9 +106,9 @@ def load_model_from_repo(repo_root, module_name, class_name, checkpoint, strict,
                 sd = sd[k]; break
         sd = {k.replace("module.", ""): v for k, v in sd.items()} if isinstance(sd, dict) else sd
         missing, unexpected = model.load_state_dict(sd, strict=strict)
-        log.info(f"Checkpoint caricato. Missing:{len(missing)} Unexpected:{len(unexpected)}")
+        log.info(f"Checkpoint loaded. Missing:{len(missing)} Unexpected:{len(unexpected)}")
     else:
-        log.warning("Checkpoint mancante o non leggibile.")
+        log.warning("Checkpoint missing or not readable.")
     return model
 
 def load_fallback_resnet50(checkpoint, strict, num_classes=5, log=None, dropout_p=0.2):
@@ -127,7 +127,7 @@ def load_fallback_resnet50(checkpoint, strict, num_classes=5, log=None, dropout_
         sd = {k.replace("module.", ""): v for k, v in sd.items()}
         missing, unexpected = model.load_state_dict(sd, strict=strict)
         if log: 
-            log.info(f"Checkpoint caricato correttamente. Missing:{len(missing)} Unexpected:{len(unexpected)}")
+            log.info(f"Checkpoint loaded correctly. Missing:{len(missing)} Unexpected:{len(unexpected)}")
     return model
 
 
@@ -147,11 +147,11 @@ def _parse_meta(meta_any):
         return _parse_meta(meta_any[0])
     return {}
 
-# ------------------------ WebDataset loader (grezzo, con __key__) ------------------------
+# ------------------------ WebDataset loader (raw, with __key__) ------------------------
 def make_wds_loader(test_dir, pattern, image_key, meta_key, class_order, preprocess, batch_size, num_workers):
     import os, glob
     if not HAVE_WDS:
-        raise RuntimeError("webdataset non disponibile")
+        raise RuntimeError("webdataset not available")
 
     shard_glob = os.path.join(test_dir, pattern)
     shards = sorted(glob.glob(shard_glob))
@@ -160,7 +160,7 @@ def make_wds_loader(test_dir, pattern, image_key, meta_key, class_order, preproc
 
     seen_keys = set()
     def _is_new(sample):
-        # sample è un dict in questa fase
+        # sample is a dict at this point
         k = sample.get("__key__")
         if k in seen_keys:
             return False
@@ -168,7 +168,7 @@ def make_wds_loader(test_dir, pattern, image_key, meta_key, class_order, preproc
         return True
 
     def _is_valid_tuple(t):
-        # dopo to_tuple: vogliamo (img, meta, key) tutti non-null
+        # after to_tuple: we want (img, meta, key) all non-null
         return (
             isinstance(t, (tuple, list)) and len(t) >= 3
             and (t[0] is not None) and (t[1] is not None) and (t[2] is not None)
@@ -184,7 +184,7 @@ def make_wds_loader(test_dir, pattern, image_key, meta_key, class_order, preproc
         .decode("pil")
         .select(_is_new)
         .to_tuple(image_key, meta_key, "__key__", handler=wds.warn_and_continue)  # -> (img, meta, key)
-        .select(_is_valid_tuple)                                                 # filtra qualsiasi anomalia
+        .select(_is_valid_tuple)                                                 # filter any anomaly
         .map_tuple(preprocess, lambda m: m, lambda k: k)                          # (img_t, meta_raw, key)
         .shuffle(0)
         .repeat(0)
@@ -192,7 +192,7 @@ def make_wds_loader(test_dir, pattern, image_key, meta_key, class_order, preproc
 
     eff_workers = min(num_workers, max(1, len(shards)))
 
-    # batch_size=1 + collate_fn robusto: ritorna direttamente la tupla o None
+    # batch_size=1 + robust collate_fn: returns directly the tuple or None
     def _collate_first(batch):
         if not batch:
             return None
@@ -200,7 +200,7 @@ def make_wds_loader(test_dir, pattern, image_key, meta_key, class_order, preproc
         if not (isinstance(item, (tuple, list)) and len(item) >= 3):
             return None
         img, meta, key = item
-        # Se l'immagine è 3D, aggiungi la batch dim
+        # If the image is 3D, add the batch dimension
         if isinstance(img, torch.Tensor) and img.ndim == 3:
             img = img.unsqueeze(0)  # [1,C,H,W]
         return (img, meta, key)
@@ -208,7 +208,7 @@ def make_wds_loader(test_dir, pattern, image_key, meta_key, class_order, preproc
 
     return DataLoader(
         ds,
-        batch_size=1,  # <<< importante per avere una tupla (img, meta, key)
+        batch_size=1,  # <<< important to have a tuple (img, meta, key)
         num_workers=eff_workers,
         pin_memory=torch.cuda.is_available(),
         collate_fn=_collate_first,
@@ -241,11 +241,11 @@ def main():
     out_root.mkdir(parents=True, exist_ok=True)
     log.info(f"Output dir: {str(out_root)}")
 
-    # classi
+    # class names
     class_names = cfg.get("labels", {}).get("class_order", ["ccRCC","pRCC","CHROMO","ONCO","NOT_TUMOR"])
     class_to_id = {c:i for i,c in enumerate(class_names)}
 
-    # loader TEST
+    # test loader
     backend = cfg["data"]["backend"].lower()
     batch_size = int(cfg["data"]["batch_size"])
     num_workers = int(cfg["data"]["num_workers"])
@@ -267,7 +267,7 @@ def main():
         ds = datasets.ImageFolder(cfg["data"]["imagefolder"]["test_dir"], transform=preprocess)
         test_loader = DataLoader(ds, batch_size=batch_size, num_workers=num_workers, pin_memory=torch.cuda.is_available())
 
-    # modello
+    # model
     model_cfg = cfg["model"]
     model = None
     arch_hint = model_cfg.get("arch_hint", "cnn").lower()
@@ -297,7 +297,7 @@ def main():
             )
     model = model.to(device).eval()
 
-    # === EVALUATION LOOP con salvataggi allineati ===
+    # === EVALUATION LOOP with aligned saves ===
     y_true, y_pred = [], []
     logits_list = []
     rows = []
@@ -333,7 +333,7 @@ def main():
                     "y_pred": int(pred),
                 })
         else:
-            # imagefolder: niente meta/keys → CSV minimale
+            # imagefolder: no meta/keys → minimal CSV
             for x, lab in test_loader:
                 x = x.to(device, non_blocking=True)
                 logits = model(x)
@@ -345,7 +345,7 @@ def main():
     y_pred = np.concatenate([np.atleast_1d(p) for p in y_pred]).astype(int)
     logits_np = np.concatenate(logits_list, axis=0) if len(logits_list)>0 else None
 
-    # === metriche ===
+    # === metrics ===
     metrics = {
         "accuracy": float(accuracy_score(y_true, y_pred)),
         "balanced_accuracy": float(balanced_accuracy_score(y_true, y_pred)),
@@ -391,7 +391,7 @@ def main():
     if logits_np is not None:
         np.save(out_root / "logits_test.npy", logits_np)
 
-    # >>>>>>> CSV con lo STESSO NOME di prima, ma ARRICCHITO <<<<<<<
+    # >>>>>>> CSV with the SAME NAME as before, but ENRICHED <<<<<<<
     with open(out_root / "predictions.csv", "w", newline="") as f:
         if backend == "webdataset":
             fieldnames = ["wds_key", "patient_id", "slide_id", "coords", "y_true", "y_pred"]
@@ -410,7 +410,7 @@ def main():
         log.info(f"[TEST] MacroAUC(OvR)={metrics['macro_auc_ovr']:.4f}")
     log.info("FINITO.")
 
-    # UMAP opzionale
+    # optional UMAP
     if cfg["evaluation"]["umap"]["enabled"] and HAVE_UMAP and logits_np is not None:
         source = cfg["evaluation"]["umap"].get("source","logits")
         data_umap = logits_np

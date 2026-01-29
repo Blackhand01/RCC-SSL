@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-# attiva ambienti
+# Activate environments
 eval "$(micromamba shell hook -s bash)"
 micromamba activate libslide
 source /home/mla_group_01/rcc-ssrl/.venvs/rcc/bin/activate

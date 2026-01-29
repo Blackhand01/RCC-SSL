@@ -30,12 +30,12 @@ export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export NUMEXPR_MAX_THREADS=1
 
-# === Config obbligatoria: deve arrivare da auto_eval (CFG_PATH) ===
+# === Required config: must come from auto_eval (CFG_PATH) ===
 CFG_PATH="${CFG_PATH:-}"
 
 if [[ -z "$CFG_PATH" ]]; then
-  echo "[ERROR] CFG_PATH non impostato." >&2
-  echo "[HINT] Lancia tramite auto_eval.py --submit oppure esporta CFG_PATH a mano." >&2
+  echo "[ERROR] CFG_PATH not set." >&2
+  echo "[HINT] Run via auto_eval.py --submit or export CFG_PATH manually." >&2
   exit 1
 fi
 

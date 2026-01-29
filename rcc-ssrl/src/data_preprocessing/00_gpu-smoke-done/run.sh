@@ -12,8 +12,8 @@ case "${1:-batch}" in
     sbatch gpu_smoke.sbatch
     ;;
   interactive)
-    # Sessione debug su nodo GPU (chiudi con exit)
-    srun -p <gpu_partition> -A <your_account> --gpus=1 --cpus-per-task=4 --mem=16G --time=00:30:00 --pty bash -l  # :contentReference[oaicite:10]{index=10}
+    # Debug session on GPU node (close with exit)
+    srun -p <gpu_partition> -A <your_account> --gpus=1 --cpus-per-task=4 --mem=16G --time=00:30:00 --pty bash -l
     ;;
   *)
     echo "Usage: $0 [batch|interactive]"

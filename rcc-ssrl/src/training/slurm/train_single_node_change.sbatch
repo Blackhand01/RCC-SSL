@@ -68,8 +68,8 @@ export CONFIG_PATH="${CONFIG_PATH}"
 export TRAIN_CONFIG="${CONFIG_PATH}"
 export RUN_CFG="${CONFIG_PATH}"
 
-# Tempo massimo di training in ore (wall-clock), il resto del tempo lo tieni per
-# feature extraction + linear probe + overhead vari.
+# Maximum training time in hours (wall-clock); keep the rest of the time for
+# feature extraction + linear probe + various overhead.
 export MAX_RUNTIME_HOURS="${MAX_RUNTIME_HOURS:-23.0}"
 
 # Quick sanity check on the target node to confirm visibility of the dataset

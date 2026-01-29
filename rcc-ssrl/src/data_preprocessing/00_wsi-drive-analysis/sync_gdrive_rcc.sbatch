@@ -11,7 +11,7 @@
 # --- Fix SCRATCH ---
 export SCRATCH="${SCRATCH:-/beegfs-scratch/$USER}"
 
-# Parametri
+# Parameters
 GDRIVE_FOLDER_ID="${GDRIVE_FOLDER_ID:-1Vr1oH1irxY5UUXdrAgvX4dPpgb8-01Ma}"
 DEST_DIR="${DEST_DIR:-$SCRATCH/workspace/mla_group_01/wsi-ssrl-rcc_project/data/raw}"
 BW_LIMIT="${BW_LIMIT:-0}"

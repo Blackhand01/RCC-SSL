@@ -1,7 +1,7 @@
 experiment:
   name: "eval_transfer_learning"
   seed: 1337
-  outputs_root: "/home/mla_group_01/rcc-ssrl/outputs/mlruns/experiments/exp_20260114-151049/exp_transfer/resnet50"
+  outputs_root: "/home/mla_group_01/rcc-ssrl/outputs/mlruns/experiments/exp_20260122-131927/exp_transfer/resnet50"
 
 runtime:
   device: cuda
@@ -12,7 +12,7 @@ data:
   img_size: 224
   num_workers: 8
   batch_size: 256
-  imagenet_norm: true
+  imagenet_norm: false
   webdataset:
     test_dir: /mnt/beegfs-compat/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_webdataset_final/test
     pattern: shard-*.tar
@@ -25,7 +25,7 @@ labels:
 model:
   name: resnet50_transfer
   arch_hint: cnn
-  checkpoint: /home/mla_group_01/rcc-ssrl/outputs/mlruns/experiments/exp_20260114-151049/exp_transfer/resnet50/checkpoints/resnet50__sl_best_classifier.pt
+  checkpoint: /home/mla_group_01/rcc-ssrl/outputs/mlruns/experiments/exp_20260122-131927/exp_transfer/resnet50/checkpoints/resnet50__sl_best_classifier.pt
   strict_load: false
 
 evaluation:

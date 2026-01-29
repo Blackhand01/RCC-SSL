@@ -3,7 +3,7 @@
 #SBATCH --account=mla_group_01
 #SBATCH --partition=gpu_a40
 #SBATCH --nodes=1
-#SBATCH --gpus=1                    # 3 max che puoi usare ora
+#SBATCH --gpus=1                    # 3 max that you can use now
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
 #SBATCH --time=24:00:00
@@ -44,7 +44,7 @@ export NCCL_IB_DISABLE=0
 export NCCL_P2P_DISABLE=0
 export NCCL_SOCKET_IFNAME=^lo,docker0
 
-# 3) Staging dataset su scratch locale (se disponibile)
+# 3) Stage dataset to local scratch (if available)
 STAGING_DIR=""
 if [[ -n "${SLURM_TMPDIR:-}" && -d "$SLURM_TMPDIR" ]]; then
   STAGING_DIR="$SLURM_TMPDIR"
@@ -75,14 +75,14 @@ PYTHONPATH="${PYTHONPATH}" python -m src.training.utils.preflight || {
 }
 
 # 5) Project paths
-# Cambia questa variabile se vuoi un'altra config
+# Change this variable if you want a different config
 export EXPERIMENT_CONFIG_PATH="${EXPERIMENT_CONFIG_PATH:-${WORKDIR}/src/training/configs/exp_debug_pipeline.yaml}"
 export RUN_INDEX="${RUN_INDEX:--1}"
 
-# 6) DDP: lancia 1 processo per GPU (3 proc)
+# 6) DDP: launch 1 process per GPU (3 proc)
 NPROC="${SLURM_GPUS_ON_NODE:-3}"
 
-# 7) Run con torchrun (standalone su singolo nodo)
+# 7) Run with torchrun (standalone on single node)
 exec torchrun \
   --standalone \
   --nproc_per_node="${NPROC}" \

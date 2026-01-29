@@ -112,12 +112,12 @@ def main():
     paths_cand = Path(cfg["paths"]["out_candidates"])
     D = {s: load_jsonl(paths_cand/f"{s}.jsonl") for s in ("train","val","test")}
 
-    # ===== train: bilanciamento =====
+    # ===== train: balancing =====
     train = D.get("train", pd.DataFrame()).copy()
     cap_factor = float(cfg.get("balance", {}).get("per_patient_cap_factor", 1.5))
 
     if len(train)==0:
-        print("[WARN] train.jsonl vuoto — non seleziono nulla")
+        print("[WARN] train.jsonl empty — not selecting anything")
         selected_train = pd.DataFrame()
         targets = {c:0 for c in CLASSES}
     else:
@@ -165,12 +165,12 @@ def main():
     selected_val  = D.get("val",  pd.DataFrame())
     selected_test = D.get("test", pd.DataFrame())
 
-    # salva JSONL
+    # Save JSONL
     write_jsonl(selected_train, out_dir/"selected_patches_train.jsonl")
     write_jsonl(selected_val,   out_dir/"selected_patches_val.jsonl")
     write_jsonl(selected_test,  out_dir/"selected_patches_test.jsonl")
 
-    # ===== stats serializzabili =====
+    # ===== serializable stats =====
     # nested dict: class_label -> { patient_id -> count }
     if len(selected_train):
         df_pt = (

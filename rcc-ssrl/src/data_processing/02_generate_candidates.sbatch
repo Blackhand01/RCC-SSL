@@ -19,10 +19,10 @@ eval "$(micromamba shell hook -s bash)"
 micromamba activate libslide
 export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
 
-# venv Python del progetto
+# Project Python venv
 source /home/mla_group_01/rcc-ssrl/.venvs/rcc/bin/activate
 
-# ESEMPIO: solo VAL (puoi togliere --subset-only per tutti i subset)
+# EXAMPLE: only VAL (you can remove --subset-only for all subsets)
 python -u /home/mla_group_01/rcc-ssrl/scripts/03_webdataset_v2/generate_candidates.py \
   --config /home/mla_group_01/rcc-ssrl/scripts/03_webdataset_v2/config.yaml \
   "$@"

@@ -53,8 +53,8 @@ except Exception:  # pragma: no cover
 @torch.no_grad()
 def extract_features(backbone: torch.nn.Module, loader, device: torch.device) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Estrae feature normalizzate dal backbone per l'intero loader.
-    Restituisce tuple (features, labels) come matrici NumPy.
+    Extract normalized features from backbone for entire loader.
+    Returns tuple (features, labels) as NumPy arrays.
     """
     backbone.eval().to(device)
     feats: list[np.ndarray] = []
@@ -127,7 +127,7 @@ def visualize_features_umap_pca(X: np.ndarray, y: np.ndarray, out_png: Path, lab
     fig = plt.figure()
     scatter = plt.scatter(emb[:, 0], emb[:, 1], c=y, s=4, alpha=0.7, cmap="tab10")
     if labels is not None and len(labels) > 0:
-        # crea una legenda con i nomi delle classi
+        # create a legend with class names
         import matplotlib.patches as mpatches
         handles = [mpatches.Patch(color=scatter.cmap(scatter.norm(i)), label=labels[i]) for i in range(len(labels))]
         plt.legend(handles=handles, title="Class", bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -171,7 +171,7 @@ def train_linear_probe_torch(
 
     head = nn.Linear(in_dim, num_classes).to(device)
     optimizer = torch.optim.SGD(head.parameters(), lr=lr, momentum=0.9, weight_decay=wd)
-    # Pesi di classe = inv. frequenza (normalizzati)
+    # Class weights = inverse frequency (normalized)
     _, counts = np.unique(ytr, return_counts=True)
     w = counts.max() / np.maximum(counts, 1)
     w = torch.tensor(w / w.mean(), dtype=torch.float32, device=device)

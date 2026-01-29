@@ -19,7 +19,7 @@ def lossfunc(t, s, temp):  # noqa: F811
 
 class SinkhornKnoppTeacher(nn.Module):
     """
-    Versione semplificata: single-GPU, niente n_masked_patches_tensor esplicito.
+    Simplified version: single-GPU, no explicit n_masked_patches_tensor.
     """
 
     @torch.no_grad()
@@ -95,17 +95,17 @@ class iBOTPatchLoss(nn.Module):
         masks_weight=None,
     ):
         """
-        student_patch_tokens_masked: [B*T, K] oppure [B, T, K] flattenato fuori
-        teacher_patch_tokens_masked: stessa shape di student
-        student_masks_flat: bool [B*T] che indica quali patch sono mascherati
+        student_patch_tokens_masked: [B*T, K] or [B, T, K] flattened outside
+        teacher_patch_tokens_masked: same shape as student
+        student_masks_flat: bool [B*T] indicating which patches are masked
         """
         t = teacher_patch_tokens_masked
         s = student_patch_tokens_masked
 
-        # loss per patch (ancora non media): [B*T]
+        # loss per patch (not yet averaged): [B*T]
         loss = lossfunc(t, s, self.student_temp)
 
-        # Seleziona solo i patch mascherati
+        # Select only masked patches
         if student_masks_flat.dtype != torch.bool:
             student_masks_flat = student_masks_flat.bool()
         masked_loss = loss[student_masks_flat]
@@ -114,10 +114,10 @@ class iBOTPatchLoss(nn.Module):
             masked_loss = masked_loss[:n_masked_patches]
 
         if masked_loss.numel() == 0:
-            # nessun patch mascherato (caso limite): loss zero
+            # no masked patches (edge case): loss is zero
             return loss.new_tensor(0.0)
 
-        # media semplice sui patch mascherati (segno meno per avere cross-entropy)
+        # simple average over masked patches (minus sign for cross-entropy)
         return -masked_loss.mean()
 
 

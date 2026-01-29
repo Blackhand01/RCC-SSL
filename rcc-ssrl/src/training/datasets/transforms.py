@@ -57,7 +57,7 @@ def pil_to_unit_tensor(img: Image.Image) -> torch.Tensor:
 
 
 def _rotate90_multi() -> transforms.RandomChoice:
-    # scelte 0/90/180/270, preservano morfologia
+    # choices 0/90/180/270, preserve morphology
     return transforms.RandomChoice([
         transforms.Lambda(lambda im: im),
         transforms.Lambda(lambda im: im.rotate(90, expand=True)),
@@ -83,14 +83,14 @@ class _RandomAdjustSharpness(transforms.RandomAdjustSharpness):
 def _pil_to_unit(im: Image.Image) -> torch.Tensor:
     return pil_to_unit_tensor(coerce_to_pil_rgb(im))
 
-# ---- Stain Normalization / Jitter (fallback se lib non presenti) ----
+# ---- Stain Normalization / Jitter (fallback if libs not available) ----
 class StainNormalizer:
     def __init__(self, method: str = "macenko", enable: bool = False):
         self.enable = bool(enable)
         self.method = (method or "macenko").lower()
         self._impl = None
         if not self.enable: return
-        # prova staintools / torchstain
+        # try staintools / torchstain
         try:
             import staintools  # type: ignore
             self._lib = "staintools"
@@ -113,12 +113,12 @@ class StainNormalizer:
                     N = staintools.StainNormalizer(method=staintools.StainNormalizer.METHOD_VAHADANE)
                 else:
                     N = staintools.StainNormalizer(method=staintools.StainNormalizer.METHOD_MACENKO)
-                # Nota: in assenza di "fit" sul target, si usa auto-fit per immagine
+                # Note: in absence of "fit" on target, use auto-fit per image
                 N.fit(tgt)
                 out = N.transform(tgt)
                 return Image.fromarray(out.astype(np.uint8))
             elif self._lib == "torchstain":
-                # torchstain richiede torch tensori in OD/HE; per brevità: no-op se mancano parametri
+                # torchstain requires torch tensors in OD/HE; for brevity: no-op if missing params
                 return im
         except Exception:
             return im
@@ -168,7 +168,7 @@ class MultiScaleCrops:
                 outs.append(crop)
         return outs or [im.resize((self.size, self.size))]
 
-# ---- Tissue fraction (per filtro sampler) ----
+# ---- Tissue fraction (for sampler filter) ----
 def estimate_tissue_fraction(im: Image.Image, sat_thr: int = 25) -> float:
     hsv = im.convert("HSV")
     s = np.asarray(hsv)[:, :, 1].astype(np.uint8)
@@ -226,7 +226,7 @@ def build_stain_ops(stain_cfg: Dict[str, Any]) -> List[Callable[[Image.Image], I
     jitter = stain_cfg.get("jitter", {}) or {}
     if bool(jitter.get("enable", False)):
         ops.append(HEDColorJitter(delta=float(jitter.get("delta", 0.02)), enable=True))
-    # randstainna stub: se vuoi usare una lib esterna, qui resta disattivato per design no-deps
+    # randstainna stub: if you want to use an external lib, it remains disabled here for design no-deps
     return ops
 
 def ijepa_input_transform(size: int, cfg_aug: Optional[Dict[str, Any]] = None) -> Callable[[Image.Image], torch.Tensor]:
@@ -353,13 +353,13 @@ def multicrop_transform(
         ops.append(transforms.Lambda(lambda im: pil_to_unit_tensor(coerce_to_pil_rgb(im))))
         return transforms.Compose(ops)
 
-    # Global #1: NO solarize; Global #2: solarize con p dedicata
+    # Global #1: NO solarize; Global #2: solarize with dedicated probability
     global_aug1 = _build_aug(global_size, global_scale, do_blur=True, do_solar=False)
-    # usa p dedicata per la seconda global (stile DINO: solarize solo su una vista)
+    # use dedicated probability for the second global (DINO style: solarize only on one view)
     old_sp = float(solarize_prob)
     solarize_prob = float(solarize_prob_g2)
     global_aug2 = _build_aug(global_size, global_scale, do_blur=True, do_solar=True)
-    # ripristina (per sicurezza in caso di chiusure)
+    # restore (for safety in case of closures)
     solarize_prob = old_sp
     local_aug  = _build_aug(local_size,  local_scale,  do_blur=True, do_solar=False)
     return lambda img: ([global_aug1(img), global_aug2(img)], [local_aug(img) for _ in range(n_local)])
@@ -403,8 +403,8 @@ def collate_two_views(batch):
 
 
 def collate_multicrop(batch):
-    # NOTE: 'g' e 'l' sono tensori 3D (C,H,W). 'channels_last' richiede 4D.
-    # Primo: stack -> 4D (N,C,H,W). Poi: applica channels_last in modo sicuro.
+    # NOTE: 'g' and 'l' are 3D tensors (C,H,W). 'channels_last' requires 4D.
+    # First: stack -> 4D (N,C,H,W). Then: safely apply channels_last.
     g_list = [g for sample in batch for g in sample[0][0]]
     l_list = [l for sample in batch for l in sample[0][1]]
 

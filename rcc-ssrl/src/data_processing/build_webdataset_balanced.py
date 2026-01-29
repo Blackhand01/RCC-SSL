@@ -6,7 +6,7 @@ from PIL import Image
 import webdataset as wds
 from tqdm import tqdm
 
-# OpenSlide è opzionale: se non disponibile, gestiamo solo immagini raster
+# OpenSlide is optional: if not available, handle only raster images
 try:
     import openslide
     HAS_OPENSLIDE = True
@@ -18,33 +18,33 @@ def ensure_dir(p: Path):
 
 def read_region_any(slide_path: str, level: int, x: int, y: int, size: int) -> np.ndarray:
     """
-    - Se openslide è disponibile e il file è una WSI supportata => usa read_region.
-    - Altrimenti prova ad aprire con PIL (ROI raster). In tal caso si assume level==0 e si croppa.
+    - If openslide is available and file is a supported WSI => use read_region.
+    - Otherwise try to open with PIL (ROI raster). In that case level==0 is assumed and cropped.
     """
-    # 1) tentativo OpenSlide
+    # 1) attempt OpenSlide
     if HAS_OPENSLIDE:
         try:
             with openslide.OpenSlide(slide_path) as sl:
-                # Verifica livello
+                # Check level
                 if level < 0 or level >= sl.level_count:
-                    # Se livello non valido, ripiega al più vicino (0 generalmente)
+                    # If level is invalid, fallback to nearest (0 generally)
                     level = min(max(level, 0), sl.level_count - 1)
                 ds = sl.level_downsamples[level]
                 # read_region prende coordinate al livello 0 scalate
                 im = sl.read_region((int(round(x * ds)), int(round(y * ds))), level, (size, size)).convert("RGB")
                 return np.array(im)
         except Exception:
-            # cade nel fallback raster sotto
+            # falls through to raster fallback below
             pass
 
-    # 2) fallback immagine raster (ROI)
+    # 2) raster image fallback (ROI)
     try:
         im = Image.open(slide_path).convert("RGB")
-        # Qui assumiamo level==0 e coordinate già a risoluzione immagine
-        # protezione: se crop esce dai bordi, PIL lancia o ritorna shape diversa
+        # Here we assume level==0 and coordinates are already at image resolution
+        # protection: if crop goes beyond borders, PIL raises or returns different shape
         w, h = im.size
         if x < 0 or y < 0 or x + size > w or y + size > h:
-            # niente crop possibile
+            # no crop possible
             raise ValueError(f"Crop out of bounds: {(x,y,size)} on image size {(w,h)}")
         return np.array(im.crop((x, y, x + size, y + size)))
     except Exception as e:
@@ -94,8 +94,8 @@ def main():
     maxcount = int(cfg.get("wds", {}).get("samples_per_shard", 5000))
 
     if not HAS_OPENSLIDE:
-        print("[WARN] OpenSlide non disponibile: le WSI verranno tentate ma probabilmente falliranno; "
-              "si procederà solo con ROI raster.",
+        print("[WARN] OpenSlide not available: WSIs will be attempted but will likely fail; "
+              "proceeding only with raster ROI.",
               file=sys.stderr)
 
     for subset in args.splits:
@@ -108,11 +108,11 @@ def main():
 
         dst = ensure_dir(out_root / subset)
 
-        # Opzionale: skip se già ci sono shard (euristica)
+        # Optional: skip if shards already exist (heuristic)
         if args.skip_existing:
             existing = list(dst.glob("shard-*.tar"))
             if existing:
-                print(f"[SKIP] {subset}: shard già presenti ({len(existing)} file). Usa senza --skip-existing per rigenerare.")
+                print(f"[SKIP] {subset}: shards already present ({len(existing)} files). Use without --skip-existing to regenerate.")
                 continue
 
         writer = wds.ShardWriter(str(dst / "shard-%06d.tar"), maxcount=maxcount)
@@ -129,7 +129,7 @@ def main():
                 x, y, level = int(it["coords"]["x"]), int(it["coords"]["y"]), int(it["coords"]["level"])
 
                 arr = read_region_any(src, level, x, y, ps)
-                # filtro: scarta patch che non matchano la size richiesta
+                # filter: discard patches that don't match the required size
                 if arr.shape[0] != ps or arr.shape[1] != ps:
                     continue
 
@@ -143,17 +143,17 @@ def main():
                     "coords": it["coords"],
                     "roi_coverage": it.get("roi_coverage", {}),
                     "origin": it.get("origin", "wsi"),
-                    # opzionale: mantieni anche record_id per tracciabilità
+                    # optional: also keep record_id for traceability
                     "record_id": it.get("record_id", ""),
                 }
                 save_sample(writer, key, arr, meta, img_fmt=img_fmt)
                 n += 1
             except Exception as e:
                 errors += 1
-                # mostra solo alcuni errori per non inondare il log
+                # show only some errors to avoid flooding the log
                 if errors <= 20:
                     print(f"[ERR] {subset} key={it.get('key','?')} src={it.get('source_abs_path','?')} -> {e}", file=sys.stderr)
-                    # opzionale: stampa stacktrace le prime volte
+                    # optional: print stacktrace the first times
                     traceback.print_exc(limit=1)
                 pbar.set_postfix({"ok": n, "err": errors})
 

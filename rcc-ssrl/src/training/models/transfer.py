@@ -26,4 +26,4 @@ def build_resnet_transfer(name: str, num_classes: int, weights_tag="DEFAULT",
     if bn_eval_freeze and freeze_backbone:
         for mod in m.modules():
             if isinstance(mod, nn.BatchNorm2d): mod.eval()
-    return m, tfm
+    return m, None

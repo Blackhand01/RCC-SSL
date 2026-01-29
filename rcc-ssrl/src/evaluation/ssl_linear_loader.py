@@ -82,7 +82,7 @@ class _VitBackbone(nn.Module):
         super().__init__()
         if not HAVE_TIMM:
             raise RuntimeError("timm is required for ViT backbones. Install it with `pip install timm`.")
-        # dynamic_img_size=True: utile per inference/XAI con size variabili
+        # dynamic_img_size=True: useful for inference/XAI with variable sizes
         self.model = timm.create_model(name, pretrained=False, num_classes=0, dynamic_img_size=True)  # type: ignore
         self.out_dim = int(self.model.num_features)  # type: ignore[attr-defined]
         self.pool: VitPool = pool
@@ -90,7 +90,7 @@ class _VitBackbone(nn.Module):
     def forward_global(self, x: torch.Tensor) -> torch.Tensor:
         feats = self.model.forward_features(x)  # type: ignore[attr-defined]
 
-        # timm può restituire tuple/list/dict a seconda del modello/versione
+        # timm may return tuple/list/dict depending on model/version
         if isinstance(feats, (tuple, list)) and len(feats) > 0:
             feats = feats[0]
         if isinstance(feats, dict):

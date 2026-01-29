@@ -122,7 +122,7 @@ def render_all_ssl(csv_path: Path | str, plots_dir: Path | str, model_key: str) 
         prefixed(plots_root, model_key, "ssl_losses", "png"),
         model_key,
     )
-    # grafici diagnostici extra
+    # Extra diagnostic plots
     figures["ssl_similarities"] = _lineplot(
         _load_df(csv_path),
         "step",
@@ -186,8 +186,8 @@ def render_ssl_classifier(csv_path: Path | str, plots_dir: Path | str, model_key
 
 def tta_predict_simple(model, img: "torch.Tensor", *, rotations=(0,90,180,270), flips=("h","v")):
     """
-    TTA leggero: rotazioni 90°k e flip H/V; media softmax delle predizioni.
-    img: (1,C,H,W) o (C,H,W)
+    Light TTA: 90°k rotations and H/V flips; average softmax of predictions.
+    img: (1,C,H,W) or (C,H,W)
     """
     import torch
     if img.ndim == 3: img = img.unsqueeze(0)

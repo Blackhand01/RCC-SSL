@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #SBATCH -J gpu-smoke
-#SBATCH -p gpu_a40                  # verrà sovrascritto dal wrapper con --partition
-#SBATCH --gpus=1                    # oppure: --gres=gpu:1 (vedi wrapper)
+#SBATCH -p gpu_a40                  # will be overwritten by wrapper with --partition
+#SBATCH --gpus=1                    # or: --gres=gpu:1 (see wrapper)
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=00:05:00
 #SBATCH -o %x.%j.out
 #SBATCH -e %x.%j.err
-# #SBATCH -A mla_group_01           # decommenta se richiesto
+# #SBATCH -A mla_group_01           # uncomment if required
 
 set -euo pipefail
 
@@ -22,16 +22,16 @@ echo "==[SLURM JOB DESCR]========================================="
 scontrol show job "${SLURM_JOB_ID}" | egrep -i "JobId=|UserId=|JobState=|Partition=|Nodes=|NodeList=|TRES=|Gres=|GresUsed=|Mem="
 echo "============================================================="
 
-# Ambiente modulo (adatta alle versioni del cluster)
+# Module environment (adapt to cluster versions)
 module purge
 module load miniconda3/3.13.25
 
-# Attiva conda in modo portabile
+# Activate conda in a portable way
 eval "$(conda shell.bash hook)"
 
-# Fail-fast se l'env non esiste (NON creare env sul nodo GPU!)
+# Fail-fast if env doesn't exist (DON'T create env on GPU node!)
 if ! conda env list | awk '{print $1}' | grep -qx train; then
-  echo "[ERR] Conda env 'train' non trovato. Esegui il setup sul login node (vedi istruzioni)."
+  echo "[ERR] Conda env 'train' not found. Run setup on login node (see instructions)."
   exit 2
 fi
 conda activate train
@@ -41,11 +41,11 @@ echo "[ENV] CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-unset}"
 command -v nvidia-smi >/dev/null 2>&1 && {
   nvidia-smi -L || true
   nvidia-smi --query-gpu=index,name,memory.total,driver_version --format=csv || true
-} || echo "nvidia-smi non disponibile"
+} || echo "nvidia-smi not available"
 python3 -c "import torch; print('PyTorch', torch.__version__, 'CUDA available=', torch.cuda.is_available(), 'GPU count=', torch.cuda.device_count())"
 echo "============================================================="
 
-# --- esecuzione test ---
+# --- run test ---
 python3 -u gpu_smoke.py
 
 echo "==[POST] scontrol (final)==================================="

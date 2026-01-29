@@ -13,37 +13,37 @@ def parse_args():
         "--run-root",
         type=str,
         required=True,
-        help="Root della run SSL (cartella che contiene checkpoints/, metrics/, plots/).",
+        help="Root of the SSL run (folder containing checkpoints/, metrics/, plots/).",
     )
     p.add_argument(
         "--model-key",
         type=str,
         default="i_jepa",
-        help="Prefix usato per i file di features (default: i_jepa).",
+        help="Prefix used for feature files (default: i_jepa).",
     )
     p.add_argument(
         "--epochs",
         type=int,
         default=50,
-        help="Numero di epoche per il linear probe.",
+        help="Number of epochs for the linear probe.",
     )
     p.add_argument(
         "--lr",
         type=float,
         default=0.05,
-        help="Learning rate del linear probe.",
+        help="Learning rate of the linear probe.",
     )
     p.add_argument(
         "--weight-decay",
         type=float,
         default=0.0,
-        help="Weight decay L2 del linear probe.",
+        help="L2 weight decay of the linear probe.",
     )
     p.add_argument(
         "--batch-size",
         type=int,
         default=512,
-        help="Batch size del linear probe.",
+        help="Batch size of the linear probe.",
     )
     return p.parse_args()
 
@@ -63,9 +63,9 @@ def train_linear_probe_standalone(
     model_key: str,
 ):
     """
-    Versione minimale di train_linear_probe_torch:
-    - nessun uso di torch.optim (evita torch._dynamo / onnx / transformers).
-    - SGD manuale sui pesi del linear head.
+    Minimal version of train_linear_probe_torch:
+    - no use of torch.optim (avoids torch._dynamo / onnx / transformers).
+    - manual SGD on the linear head weights.
     """
     Xtr = np.asarray(Xtr, dtype=np.float32)
     Xva = np.asarray(Xva, dtype=np.float32)
@@ -73,7 +73,7 @@ def train_linear_probe_standalone(
     yva = np.asarray(yva, dtype=np.int64)
 
     if Xtr.size == 0 or Xva.size == 0:
-        raise RuntimeError("Feature arrays vuote, impossibile allenare il probe.")
+        raise RuntimeError("Empty feature arrays, unable to train the probe.")
 
     device = torch.device("cuda", 0) if torch.cuda.is_available() else torch.device("cpu")
 
@@ -83,7 +83,7 @@ def train_linear_probe_standalone(
 
     head = nn.Linear(in_dim, num_classes).to(device)
 
-    # Pesi di classe = inv. frequenza (normalizzati)
+    # Class weights = inverse frequency (normalized)
     _, counts = np.unique(ytr, return_counts=True)
     w = counts.max() / np.maximum(counts, 1)
     w = torch.tensor(w / w.mean(), dtype=torch.float32, device=device)
@@ -110,7 +110,7 @@ def train_linear_probe_standalone(
         fcsv.write("epoch,train_loss,val_loss,val_acc,lr\n")
 
         for epoch in range(max(1, n_epochs)):
-            # -------------------- TRAIN --------------------
+            # -------------------- TRAINING --------------------
             head.train()
             total_loss = 0.0
             total_count = 0
@@ -120,7 +120,7 @@ def train_linear_probe_standalone(
                 logits = head(xb)
                 loss = criterion(logits, yb)
 
-                # L2 weight decay manuale
+                # Manual L2 weight decay
                 if wd > 0.0:
                     l2 = 0.0
                     for p in head.parameters():
@@ -130,7 +130,7 @@ def train_linear_probe_standalone(
 
                 loss.backward()
 
-                # SGD manuale: p = p - lr * grad
+                # Manual SGD: p = p - lr * grad
                 with torch.no_grad():
                     for p in head.parameters():
                         if p.grad is not None:
@@ -191,9 +191,9 @@ def main():
     run_root = Path(args.run_root).resolve()
     ckpt_dir = run_root / "checkpoints"
     metrics_dir = run_root / "metrics"
-    plots_dir = run_root / "plots"  # non usato, ma manteniamo la struttura
+    plots_dir = run_root / "plots"  # unused, but we keep the structure
 
-    # Carica features (quelle finali)
+    # Load features (the final ones)
     feat_dir = ckpt_dir / "features"
     Xtr = np.load(feat_dir / f"{args.model_key}_train_X.npy", allow_pickle=False)
     ytr = np.load(feat_dir / f"{args.model_key}_train_y.npy", allow_pickle=False)

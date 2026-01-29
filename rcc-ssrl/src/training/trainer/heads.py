@@ -19,7 +19,7 @@ __all__ = ["train_linear_head"]
 
 def _load_parquet(path: Path) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    Carica un file parquet prodotto da save_parquet e restituisce tensori (features, labels).
+    Load a parquet file produced by save_parquet and return tensors (features, labels).
     """
     df = pd.read_parquet(path)
     labels = torch.tensor(df["label"].to_numpy(), dtype=torch.long)
@@ -35,8 +35,8 @@ def train_linear_head(
     lr: float = 1e-2,
 ) -> Dict[str, object]:
     """
-    Addestra una testa lineare (torch.nn.Linear) sulle feature salvate.
-    Ritorna statistiche per logging e lo state_dict del modello migliore.
+    Train a linear head (torch.nn.Linear) on saved features.
+    Returns statistics for logging and state_dict of the best model.
     """
     Xtr, Ytr = _load_parquet(train_pq)
     Xva, Yva = _load_parquet(val_pq)

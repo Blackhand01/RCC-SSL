@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-EXPERIMENT_DIR="/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/ablation_final/exp_20251209_234722_ibot"
+EXPERIMENT_DIR="/mnt/beegfs-compat/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/ablation_final/exp_supervised"
 
 python3 /home/mla_group_01/rcc-ssrl/src/post_processing/viz_ablation_dashboard.py \
   --experiment_dir "$EXPERIMENT_DIR" \

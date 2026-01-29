@@ -23,8 +23,8 @@ import math
 
 class MoCoV3(SSLBaseModel):
     """
-    MoCo v3 “no-queue”: due viste globali, encoder a momentum (teacher) + predictor.
-    Negativi = in-batch. Loss simmetrizzata: ctr(q1,k2) + ctr(q2,k1).
+    MoCo v3 "no-queue": two global views, momentum encoder (teacher) + predictor.
+    Negatives = in-batch. Symmetrized loss: ctr(q1,k2) + ctr(q2,k1).
     """
     def __init__(self, backbone_q: nn.Module, backbone_k: nn.Module,
                  proj_q: nn.Module, proj_k: nn.Module, pred_q: nn.Module,
@@ -75,7 +75,7 @@ class MoCoV3(SSLBaseModel):
             t_start  = sched.get("start", t_default)
             t_end    = sched.get("end",   t_default)
             t_warm   = sched.get("warmup_frac", 0.0)
-            # Coercioni sicure: se i campi sono None o stringhe vuote, usa i default
+            # Safe coercions: if fields are None or empty strings, use defaults
             def _safe_float(v, d): 
                 try:
                     return float(v if v is not None and v != "" else d)
@@ -87,7 +87,7 @@ class MoCoV3(SSLBaseModel):
                 warmup_frac=_safe_float(t_warm, 0.0),
             )
         clip_qk_val = mcfg.get("clip_qk", 50.0)
-        # Se è None/invalid, ripiega su 50.0 per stabilità numerica
+        # If None/invalid, fall back to 50.0 for numeric stability
         try:
             clip_qk_val = 50.0 if clip_qk_val is None else float(clip_qk_val)
         except (TypeError, ValueError):
@@ -98,7 +98,7 @@ class MoCoV3(SSLBaseModel):
             momentum=cfg["train"]["ssl"].get("ema_momentum",0.996),
             temp_teacher_sched=Ts,
             ema_to_one=bool(mcfg.get("ema_to_one", True)),
-            use_multicrop=bool(mcfg.get("use_multicrop", False)),  # accettato ma ignoriamo le local per MoCo
+            use_multicrop=bool(mcfg.get("use_multicrop", False)),  # accepted but ignore local crops for MoCo
             total_steps=total_steps,
             clip_qk=float(clip_qk_val),
             sync_bn=bool(mcfg.get("sync_bn", False)),
@@ -108,7 +108,7 @@ class MoCoV3(SSLBaseModel):
     def _bootstrap(self) -> None:
         copy_weights_and_freeze(self.backbone_k, self.backbone_q)
         copy_weights_and_freeze(self.proj_k, self.proj_q)
-        # Converti BN in SyncBN solo su projector/predictor quando in DDP
+        # Convert BN to SyncBN only on projector/predictor when in DDP
         if self._sync_bn_enabled:
             try:
                 if torch.distributed.is_available() and torch.distributed.is_initialized():
@@ -135,7 +135,7 @@ class MoCoV3(SSLBaseModel):
     def _info_nce_sym(self, q1, q2, k1, k2) -> torch.Tensor:
         lab = torch.arange(q1.size(0), device=q1.device)
         Tt = self._teacher_temp()
-        # clamp per stabilità numerica
+        # clamp for numeric stability
         l12 = F.cross_entropy(torch.clamp(cosine_logits(q1, k2, Tt), -self.clip_qk, self.clip_qk), lab)
         l21 = F.cross_entropy(torch.clamp(cosine_logits(q2, k1, Tt), -self.clip_qk, self.clip_qk), lab)
         return (l12 + l21)
@@ -162,7 +162,7 @@ class MoCoV3(SSLBaseModel):
             ema_update(self.backbone_k, self.backbone_q, self._ema_momentum())
             k1 = self.proj_k(self.backbone_k.forward_global(x1))
             k2 = self.proj_k(self.backbone_k.forward_global(x2))
-        # normalizza e clampa per robustezza
+        # normalize and clamp for robustness
         q1 = torch.nn.functional.normalize(q1, dim=-1)
         q2 = torch.nn.functional.normalize(q2, dim=-1)
         k1 = torch.nn.functional.normalize(k1.detach(), dim=-1)
@@ -170,11 +170,11 @@ class MoCoV3(SSLBaseModel):
         loss_main = self._info_nce_sym(q1, q2, k1, k2)
         loss = loss_main
 
-        # metriche diagnostiche
+        # diagnostic metrics
         with torch.no_grad():
             Tt = self._teacher_temp()
             pos_sim = float((q1 * k2).sum(dim=-1).mean().item())
-            # media SOLO sugli off-diagonali (negativi)
+            # average ONLY on off-diagonals (negatives)
             sim_mat = q1 @ k2.t()
             off = ~torch.eye(sim_mat.shape[0], dtype=torch.bool, device=sim_mat.device)
             neg_sim = float(sim_mat[off].mean().item())

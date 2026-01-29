@@ -19,10 +19,10 @@ eval "$(micromamba shell hook -s bash)"
 micromamba activate libslide
 export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
 
-# venv Python del progetto
+# Project Python venv
 source /home/mla_group_01/rcc-ssrl/.venvs/rcc/bin/activate
 
-# Costruisci WDS: togli --limit per full run; aggiungi --skip-existing se vuoi proteggere shard già creati
+# Build WDS: remove --limit for full run; add --skip-existing if you want to protect already created shards
 python -u /home/mla_group_01/rcc-ssrl/scripts/03_webdataset_v2/build_webdataset_balanced.py \
   --config /home/mla_group_01/rcc-ssrl/scripts/03_webdataset_v2/config.yaml \
   --splits train val test \

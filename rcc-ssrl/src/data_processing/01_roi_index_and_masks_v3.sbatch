@@ -14,7 +14,7 @@ export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export NUMEXPR_MAX_THREADS=1
 
-# OpenSlide (C lib) via micromamba
+# OpenSlide (C lib) with micromamba
 eval "$(micromamba shell hook -s bash)"
 micromamba activate libslide
 export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib:${LD_LIBRARY_PATH:-}"

@@ -12,4 +12,4 @@ def build_resnet_scratch(name: str, num_classes: int, dropout_p: float=0.0):
     elif name=="resnet50_scratch": m = models.resnet50(weights=None)
     else: raise ValueError("name must be resnet34_scratch|resnet50_scratch")
     m.fc = _head(m.fc.in_features, num_classes, dropout_p)
-    return m, None  # (model, transforms) per simmetria con transfer
+    return m, None  # (model, transforms) for symmetry with transfer

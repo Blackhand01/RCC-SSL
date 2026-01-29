@@ -6,7 +6,7 @@ from typing import Dict, Optional, Union
 import yaml
 
 # ---------------------------------------------------------------------
-# Config path & RUN_INDEX (leggibili da ENV, con default sensati)
+# Config path & RUN_INDEX (readable from ENV, with sensible defaults)
 # ---------------------------------------------------------------------
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CFG = REPO_ROOT / "src" / "training" / "configs" / "ablations" / "exp_debug_pipeline.yaml"
@@ -74,9 +74,9 @@ def _load_wds_from_yaml(include_path: Path) -> Optional[Dict[str, Dict[str, str]
 
 def _infer_from_outputs_group() -> tuple[Optional[Path], Optional[Path]]:
     """
-    Se OUTPUTS_GROUP_DIR è settata (da launch_ssl_ablations.sh),
-    prova a risalire a outputs_root e project_root.
-    Atteso: .../outputs/mlruns/experiments/<group_name>
+    If OUTPUTS_GROUP_DIR is set (from launch_ssl_ablations.sh),
+    attempt to derive outputs_root and project_root.
+    Expected: .../outputs/mlruns/experiments/<group_name>
     """
     og = _env_path("OUTPUTS_GROUP_DIR")
     if not og:
@@ -93,15 +93,15 @@ def _infer_from_outputs_group() -> tuple[Optional[Path], Optional[Path]]:
 
 def get_all():
     """
-    Ritorna tutti i path risolti, scegliendo prima BeeGFS (veloce, condiviso),
-    con fallback alla copia locale nella repo solo se necessario.
+    Return all resolved paths, preferring BeeGFS (fast, shared),
+    with fallback to local copy in repo only if necessary.
     """
     env_project_root, env_outputs_root = _env_path("PROJECT_ROOT"), _env_path("OUTPUTS_ROOT")
     og_outputs_root, og_project_root   = _infer_from_outputs_group()
 
-    # Roots preferite su BeeGFS, con fallback locale
+    # Preferred roots on BeeGFS, with local fallback
     beegfs_project = SCRATCH_ROOT / "wsi-ssrl-rcc_project"
-    home_project   = HOME_ROOT / "rcc-ssrl"  # fallback minimale
+    home_project   = HOME_ROOT / "rcc-ssrl"  # minimal fallback
 
     project_root = _first_existing(
         env_project_root,
@@ -115,7 +115,7 @@ def get_all():
         project_root / "outputs" / "mlruns",
     ) or (project_root / "outputs" / "mlruns")
 
-    # WebDataset shards: prima BeeGFS, poi fallback locale nella repo
+    # WebDataset shards: first BeeGFS, then local fallback in repo
     wds_env_root = (
         _env_path("RCC_DATASET_ROOT")
         or _env_path("RCC_WDS_ROOT")
@@ -142,14 +142,14 @@ def get_all():
             _dataset_root(wds_home_root) / name,
         )
 
-    # Usata come hint se tutte le dir mancano: preferiamo rispettare eventuali override da ENV
+    # Used as hint if all dirs are missing: we prefer to respect any ENV overrides
     wds_root_hint = wds_env_root or _dataset_root(wds_beegfs_root) or _dataset_root(wds_home_root)
 
     wds_train = _wds_dir("train")
     wds_val   = _wds_dir("val")
     wds_test  = _wds_dir("test")
 
-    # Se mancano gli shard ovunque, lasciamo che l'alto livello tiri un errore chiaro
+    # If shards are missing everywhere, we let the higher level throw a clear error
     wds_map = {
         # "rcc_v2": {
         #     "train_dir": str(wds_train or wds_beegfs / "train"),

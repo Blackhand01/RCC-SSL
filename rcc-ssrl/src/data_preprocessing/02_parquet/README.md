@@ -1,6 +1,6 @@
 # 02_parquet — Build Parquet & Stats
 
-## Uso rapido
+## Rapid usage
 ```bash
 # default:
 #  metadata:  /home/mla_group_01/rcc-ssrl/configs/rcc_metadata.csv

@@ -27,7 +27,7 @@ else
   python -m pip install -U pip setuptools wheel
 fi
 
-# Requisiti minimi
+# Minimum requirements
 REQ="$(dirname "$0")/requirements.txt"
 if [[ -f "$REQ" ]]; then
   python -m pip install -r "$REQ"

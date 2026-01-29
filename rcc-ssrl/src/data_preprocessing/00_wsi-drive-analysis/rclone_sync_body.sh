@@ -16,7 +16,7 @@ CONF="$RCLONE_CONFIG_DIR/rclone.conf"
 
 mkdir -p "$DEST_DIR"
 
-# Usa rclone di sistema o scarica al volo
+# It use rclone of the system or download it 
 if ! command -v rclone >/dev/null 2>&1; then
   TMPBIN="${TMPDIR:-/tmp}/rclone"
   curl -fsSL https://downloads.rclone.org/rclone-current-linux-amd64.zip -o "$TMPBIN.zip"

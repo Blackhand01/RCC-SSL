@@ -15,8 +15,8 @@ from src.training.trainer.backbones import (
 from src.training.utils.torch_ops import copy_weights_and_freeze, ema_update
 from src.training.trainer.loops import SSLBaseModel
 
-# --- IMPORTA LE LOSS UFFICIALI ---
-# Assicurati di aver copiato i file dalla repo dinov3/loss/ in src/training/loss/
+# --- IMPORT OFFICIAL LOSSES ---
+# Make sure you have copied the files from dinov3/loss/ repo to src/training/loss/
 from src.training.loss.dino_clstoken_loss import DINOLoss
 from src.training.loss.ibot_patch_loss import iBOTPatchLoss
 from src.training.loss.koleo_loss import KoLeoLoss
@@ -25,8 +25,8 @@ from src.training.loss.gram_loss import GramLoss
 
 class DINOHead(nn.Module):
     """
-    Head standard DINOv3 (MLP + Weight Norm opzionale).
-    Sostituisce mlp_head per conformità con l'inizializzazione ufficiale.
+    Standard DINOv3 Head (MLP + optional Weight Norm).
+    Replaces mlp_head for compliance with official initialization.
     """
     def __init__(
         self,
@@ -77,15 +77,15 @@ class SimpleMaskGenerator:
         self.mask_ratio = mask_ratio
 
     def __call__(self, batch_size, device):
-        # Sample ratio casuale
+        # Sample random ratio
         ratio = torch.empty(1).uniform_(*self.mask_ratio).item()
         num_masked = int(self.num_patches * ratio)
         
-        # Genera rumore e ordina per selezionare i patch da mascherare
+        # Generate noise and sort to select patches to mask
         noise = torch.rand(batch_size, self.num_patches, device=device)
         mask = torch.zeros(batch_size, self.num_patches, dtype=torch.bool, device=device)
         
-        # I primi 'num_masked' indici sono mascherati (True)
+        # First 'num_masked' indices are masked (True)
         ids_shuffle = torch.argsort(noise, dim=1)
         ids_masked = ids_shuffle[:, :num_masked]
         mask.scatter_(1, ids_masked, True)
@@ -98,13 +98,13 @@ class DINOv3(SSLBaseModel):
         student_backbone: nn.Module,
         teacher_backbone: nn.Module,
         embed_dim: int,
-        # Config parametri
+        # Config parameters
         out_dim: int = 65536,
         hidden_dim: int = 2048,
         bottleneck_dim: int = 256,
         teacher_temp: float = 0.07,
         student_temp: float = 0.1,
-        # Pesi Loss
+        # Loss weights
         w_dino: float = 1.0,
         w_ibot: float = 1.0,
         w_koleo: float = 0.1,
@@ -135,7 +135,7 @@ class DINOv3(SSLBaseModel):
         self.ibot_head_tea = copy.deepcopy(self.ibot_head)
 
         # --- Losses ---
-        # Sinkhorn-Knopp per DINO
+        # Sinkhorn-Knopp for DINO
         self.dino_loss_fn = DINOLoss(out_dim, student_temp=student_temp)
         # iBOT Loss
         self.ibot_loss_fn = iBOTPatchLoss(out_dim, student_temp=student_temp)
@@ -146,23 +146,24 @@ class DINOv3(SSLBaseModel):
         self.dino_loss_fn.init_weights()
         self.ibot_loss_fn.init_weights()
 
-        # Pesi
+        # Weights
         self.w_dino = w_dino
         self.w_ibot = w_ibot
         self.w_koleo = w_koleo
         self.w_gram = w_gram
 
-        # Parametri Teacher
+        # Teacher parameters
         self.teacher_temp = teacher_temp
         self.ema_m = ema_momentum
 
-        # Gram Params
+        # Gram Parameters
         self.gram_teacher: Optional[nn.Module] = None
         self.gram_start_frac = gram_start_frac
         self.gram_teacher_update_every = gram_teacher_update_every
         self.total_steps: Optional[int] = None
         
-        # Mask generator (fallback se il dataloader non fornisce maschere)
+        # Mask generator
+        # Fallback mask generator if dataloader doesn't provide masks
         self.mask_gen = SimpleMaskGenerator(input_size=input_size, patch_size=patch_size)
 
         self._bootstrap()
@@ -197,11 +198,11 @@ class DINOv3(SSLBaseModel):
 
     @torch.no_grad()
     def _bootstrap(self):
-        # 1) inizializza le head dello student
+        # 1) initialization of student's heads
         self.dino_head.init_weights()
         self.ibot_head.init_weights()
 
-        # 2) copia backbone e head nello teacher + congela
+        # 2) copy backbone and head to teacher + freeze
         copy_weights_and_freeze(self.tea, self.stu)
         copy_weights_and_freeze(self.dino_head_tea, self.dino_head)
         copy_weights_and_freeze(self.ibot_head_tea, self.ibot_head)
@@ -230,10 +231,9 @@ class DINOv3(SSLBaseModel):
 
     def _apply_pixel_masking(self, images, masks):
         """
-        Poiché i backbone timm non supportano nativamente il 'drop' dei token,
-        applichiamo il mascheramento a livello di pixel (zeroing out).
+        Apply masking at pixel level since timm backbones don't natively support token dropping.
         images: [B, 3, H, W]
-        masks: [B, N_patches] (booleano, True=masked)
+        masks: [B, N_patches] (boolean, True=masked)
         """
         B, C, H, W = images.shape
         P = self.patch_size
@@ -241,18 +241,18 @@ class DINOv3(SSLBaseModel):
         m = masks.reshape(B, 1, H//P, W//P).float()
         # Upsample mask to pixel level [B, 1, H, W] via nearest neighbor
         m_pixel = F.interpolate(m, size=(H, W), mode='nearest')
-        
-        # Apply mask: masked pixels -> 0 (o mean, qui usiamo 0)
+
+        # Apply mask: masked pixels -> 0 (or mean, here we use 0)
         # iBOT logic: student sees masked image
         return images * (1 - m_pixel)
 
     def training_step(self, batch: Dict[str, Any], global_step: int) -> Dict[str, Any]:
         images = batch["images"]
 
-        # Gestione input: [Global, Local]
+        # input: [Global, Local]
         if isinstance(images, (list, tuple)):
             global_crops = images[0]                # [B_global, 3, 224, 224]
-            local_crops = images[1] if len(images) > 1 else None  # [B_local, 3, 96, 96] oppure None
+            local_crops = images[1] if len(images) > 1 else None  # [B_local, 3, 96, 96] or None
         else:
             global_crops = images
             local_crops = None
@@ -260,26 +260,26 @@ class DINOv3(SSLBaseModel):
         B_global = global_crops.shape[0]
         device = global_crops.device
 
-        # 1) Maschere patch per iBOT (solo sui global)
-        masks = self.mask_gen(B_global, device)  # [B_global, N_patches] con N_patches = (224/16)^2 = 196
+        # 1) masked patches for iBOT (only on global)
+        masks = self.mask_gen(B_global, device)  # [B_global, N_patches] with N_patches = (224/16)^2 = 196
 
-        # 2) Aggiorna teacher con EMA
+        # 2) Update teacher with EMA
         self._update_teacher()
 
         # ------------------------------------------------------------------
-        # 3) TEACHER: global features + patch tokens (senza CLS)
+        # 3) TEACHER: global features + patch tokens (without CLS)
         # ------------------------------------------------------------------
         with torch.no_grad():
-            # Feature globali (per DINO CLS loss)
+            # Global Features (for DINO CLS loss)
             tea_feat_g = self.tea.forward_global(global_crops)   # [B_global, D]
 
-            # Token (ViT: include CLS + patch) → usiamo solo patch per iBOT/Gram
+            # Token (ViT: include CLS + patch) → patch only for iBOT/Gram
             tea_tokens_all = self.tea.forward_tokens(global_crops)  # [B_global, T, D] con T=197 per ViT-S/16
             if tea_tokens_all.shape[1] == self.mask_gen.num_patches + 1:
-                # ViT-style: primo token = CLS, rimanenti = patch
+                # ViT-style: primo token = CLS, remain = patch
                 tea_tokens_p = tea_tokens_all[:, 1:, :]   # [B_global, 196, D]
             else:
-                # ResNet o altri backbone senza CLS
+                # ResNet or other backbone without CLS
                 tea_tokens_p = tea_tokens_all            # [B_global, N_patches_qualunque, D]
 
             # ---- DINO teacher (CLS head) ----
@@ -299,10 +299,10 @@ class DINOv3(SSLBaseModel):
         # ------------------------------------------------------------------
         # 4) STUDENT: global features (masked + local) + patch tokens (masked)
         # ------------------------------------------------------------------
-        # 4a) Applica maschera ai global per iBOT (zeroing pixels)
+        # 4a) Applied mask on global for iBOT (zeroing pixels)
         masked_global = self._apply_pixel_masking(global_crops, masks)  # [B_global, 3, 224, 224]
 
-        # 4b) Feature globali student
+        # 4b) Global features student (masked global + local)
         stu_feat_g = self.stu.forward_global(masked_global)  # [B_global, D]
 
         if local_crops is not None:
@@ -312,7 +312,7 @@ class DINOv3(SSLBaseModel):
             stu_feat_l = None
             stu_feat_all = stu_feat_g  # [B_global, D]
 
-        # 4c) Token patch student per iBOT/Gram (solo global masked)
+        # 4c) Token patch student for iBOT/Gram (only global masked)
         stu_tokens_all = self.stu.forward_tokens(masked_global)  # [B_global, T, D]
         if stu_tokens_all.shape[1] == self.mask_gen.num_patches + 1:
             stu_tokens_p = stu_tokens_all[:, 1:, :]  # [B_global, N_patches, D] → 196
@@ -324,23 +324,23 @@ class DINOv3(SSLBaseModel):
         stu_ibot_out = self.ibot_head(stu_tokens_p)     # [B_global, N_patches, K]
 
         # ------------------------------------------------------------------
-        # 5) LOSS DINO (global + local con teacher media)
+        # 5) LOSS DINO (global + local with average teacher) 
         # ------------------------------------------------------------------
         loss_dict: Dict[str, float] = {}
 
-        # Student logits separati
+        # Student logits 
         stu_cls_g = stu_cls_out[:B_global]                 # [B_global, K]
         stu_cls_l = stu_cls_out[B_global:] if stu_feat_l is not None else None
 
-        # 5a) Global-to-Global (batch allineato)
+        # 5a) Global-to-Global 
         loss_dino = self.dino_loss_fn(
             stu_cls_g.unsqueeze(0),        # [1, B_global, K]
             tea_cls_probs.unsqueeze(0),    # [1, B_global, K]
         )
 
-        # 5b) Local-to-Global: usa media del teacher come target per i local
+        # 5b) Local-to-Global: use average teacher as target for local
         if stu_cls_l is not None and stu_cls_l.numel() > 0:
-            # tea_cls_probs: [B_global, K] → media sul batch
+            # tea_cls_probs: [B_global, K] → average over batch
             tea_mean = tea_cls_probs.mean(dim=0, keepdim=True)       # [1, K]
             tea_mean_exp = tea_mean.expand(stu_cls_l.shape[0], -1)   # [B_local, K]
 
@@ -354,9 +354,9 @@ class DINOv3(SSLBaseModel):
         loss_dict["dino_loss"] = float(loss_dino.detach())
 
         # ------------------------------------------------------------------
-        # 6) LOSS iBOT (patch) – SOLO PATCH TOKENS, SHAPE ALLINEATA
+        # 6) LOSS iBOT (patch) – ONLY PATCH TOKENS, SHAPE 
         # ------------------------------------------------------------------
-        # masks: [B_global, N_patches] (bool) → stessa dim di stu_ibot_out / tea_ibot_probs
+        # masks: [B_global, N_patches] (bool) → same dim of stu_ibot_out / tea_ibot_probs
         student_masks = masks  # [B_global, N_patches], True = masked
 
         loss_ibot = self.ibot_loss_fn(
@@ -368,14 +368,14 @@ class DINOv3(SSLBaseModel):
         loss_dict["ibot_loss"] = float(loss_ibot.detach())
 
         # ------------------------------------------------------------------
-        # 7) KoLeo Loss su feature globali (CLS)
+        # 7) KoLeo Loss on global features (CLS)
         # ------------------------------------------------------------------
         loss_koleo = self.koleo_loss_fn(stu_feat_all)  # [B_global(+local), D]
         loss_total += self.w_koleo * loss_koleo
         loss_dict["koleo_loss"] = float(loss_koleo.detach())
 
         # ------------------------------------------------------------------
-        # 8) Gram Loss sui patch tokens (teacher vs student)
+        # 8) Gram Loss on patch tokens (teacher vs student)
         # ------------------------------------------------------------------
         gram_active = False
         if self.w_gram > 0.0 and self.total_steps:
@@ -393,10 +393,10 @@ class DINOv3(SSLBaseModel):
                 else:
                     tea_gram_tokens = tea_gram_tokens_all             # [B_global, N_patches_qualunque, D]
 
-            # Usa gli stessi patch tokens dello studente usati per iBOT
+            # Use the same patch tokens of the student used for iBOT
             stu_gram_tokens = stu_tokens_p  # [B_global, N_patches, D]
 
-            # Eventuale riallineamento spaziale se N_patches differisce (non nel tuo setup ViT)
+            # If size mismatch (e.g., different #patches), interpolate teacher tokens
             if stu_gram_tokens.shape[1] != tea_gram_tokens.shape[1]:
                 Dim = stu_gram_tokens.shape[-1]
                 Side_S = int(math.sqrt(stu_gram_tokens.shape[1]))

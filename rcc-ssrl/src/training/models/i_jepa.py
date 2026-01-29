@@ -14,10 +14,10 @@ from src.training.trainer.backbones import resolve_backbone_from_model_cfg, get_
 
 class IJEPA(nn.Module):
     """
-    I-JEPA adattato alla tua pipeline:
-    - Teacher: vede tutta l'immagine (full tokens).
-    - Student: vede SOLO i token di contesto (masking prima dei blocchi ViT).
-    - Loss pesata con maschera di tessuto (ignora patch di puro sfondo).
+    I-JEPA adapted to your pipeline:
+    - Teacher: sees entire image (full tokens).
+    - Student: sees ONLY context tokens (masking before ViT blocks).
+    - Loss weighted with tissue mask (ignore pure background patches).
     """
 
     def __init__(
@@ -41,7 +41,7 @@ class IJEPA(nn.Module):
         self.stu = get_backbone(backbone_name, pretrained=False, **backbone_params)
         self.embed_dim = self.stu.out_dim
 
-        # Richiede ViTBackbone (con .vit)
+        # Requires ViTBackbone (with .vit attribute)
         if not hasattr(self.stu, "vit"):
             raise TypeError(
                 f"IJEPA requires a ViTBackbone with attribute 'vit', "
@@ -62,14 +62,14 @@ class IJEPA(nn.Module):
             num_heads=predictor_num_heads,
         )
 
-        # 4. Positional Embeddings per il predictor
+        # 4. Positional Embeddings for the predictor
         self.num_patches = (img_size // patch_size) ** 2
         self.predictor_pos_embed = nn.Parameter(
             torch.zeros(1, self.num_patches, predictor_embed_dim)
         )
         torch.nn.init.trunc_normal_(self.predictor_pos_embed, std=0.02)
 
-        # Parametri vari
+        # Various parameters
         self.num_target_masks = num_target_masks
         self.target_scale_range = target_scale_range
         self.context_scale_range = context_scale_range
@@ -79,7 +79,7 @@ class IJEPA(nn.Module):
         self.ema_decay = ema_decay
         self.background_std_threshold = background_std_threshold
 
-    # ------------------------------------------------------------------ factory da config
+    # ------------------------------------------------------------------ factory from config
     @classmethod
     def from_config(cls, cfg: Dict[str, Any]) -> IJEPA:
         model_cfg = cfg["model"]
@@ -125,7 +125,7 @@ class IJEPA(nn.Module):
     # ------------------------------------------------------------------ API trainer
     def training_step(self, batch: Dict[str, Any], global_step: int) -> Dict[str, Any]:
         images = batch["images"]
-        if isinstance(images, list):  # compat con altri loader
+        if isinstance(images, list):  # compat with other loader
             images = images[0]
         metrics = self(images)
         return {
@@ -133,10 +133,10 @@ class IJEPA(nn.Module):
             "loss_components": metrics,
         }
 
-    # ------------------------------------------------------------------ maschera tessuto vs sfondo
+    # ------------------------------------------------------------------ mask tissue vs background
     def _get_tissue_mask(self, images: torch.Tensor) -> torch.Tensor:
         """
-        Ritorna una maschera [B, Num_Patches] = 1 se il patch contiene tessuto, 0 se sfondo.
+        Returns a mask [B, Num_Patches] = 1 if patch contains tissue, 0 if background.
         """
         B, C, H, W = images.shape
         P = self.patch_size
@@ -149,28 +149,28 @@ class IJEPA(nn.Module):
         tissue_mask = (patch_std > self.background_std_threshold).float()
         return tissue_mask  # [B, N]
 
-    # ------------------------------------------------------------------ forward student mascherato
+    # ------------------------------------------------------------------ forward masked student
     def _forward_masked_student(
         self, images: torch.Tensor, context_indices: torch.Tensor
     ) -> torch.Tensor:
         """
-        Forward dello studente SOLO sui patch di contesto.
+        Student forward pass ONLY on context patches.
         - images: [B, 3, H, W]
-        - context_indices: [B, N_ctx] indici di patch da tenere (0..N_patches-1)
-        Ritorna: [B, N_ctx, D]
+        - context_indices: [B, N_ctx] patch indices to keep (0..N_patches-1)
+        Returns: [B, N_ctx, D]
         """
         vit = self.stu.vit
         B = images.shape[0]
 
-        # 1. Patch embedding (timm gestisce già forma corretta)
-        x = vit.patch_embed(images)  # tipicamente [B, N, D]
+        # 1. Patch embedding (timm already handles correct shape)
+        x = vit.patch_embed(images)  # typically [B, N, D]
 
-        # 2. Positional embedding + (eventuale) CLS + pos_drop
-        # usa direttamente la logica interna di timm (gestisce anche resize dinamici)
+        # 2. Positional embedding + (optional) CLS + pos_drop
+        # Use timm's internal logic directly (also handles dynamic resizes)
         if hasattr(vit, "_pos_embed"):
             x = vit._pos_embed(x)
         else:
-            # fallback ultra difensivo (non dovrebbe servire per ViT timm)
+            # ultra defensive fallback (should not be needed for timm ViT)
             pos_embed = vit.pos_embed
             if getattr(vit, "cls_token", None) is not None:
                 cls_token = vit.cls_token.expand(B, -1, -1)
@@ -183,7 +183,7 @@ class IJEPA(nn.Module):
         if hasattr(vit, "pos_drop"):
             x = vit.pos_drop(x)
 
-        # 3. Separa CLS / patch tokens
+        # 3. Separate CLS / patch tokens
         has_cls = getattr(vit, "cls_token", None) is not None
         if has_cls:
             cls_tok = x[:, :1, :]       # [B, 1, D]
@@ -192,13 +192,13 @@ class IJEPA(nn.Module):
             cls_tok = None
             patch_tok = x               # [B, N, D]
 
-        # 4. Mascheramento via gather (teniamo solo i token di contesto)
+        # 4. Masking via gather (keep only context tokens)
         N_ctx = context_indices.shape[1]
         D = patch_tok.shape[-1]
         gather_idx = context_indices.unsqueeze(-1).expand(-1, -1, D)  # [B, N_ctx, D]
         ctx_tok = torch.gather(patch_tok, dim=1, index=gather_idx)    # [B, N_ctx, D]
 
-        # 5. Ricostruisci sequenza da dare ai blocchi
+        # 5. Reconstruct sequence to pass to blocks
         if has_cls:
             x_ctx = torch.cat([cls_tok, ctx_tok], dim=1)  # [B, 1+N_ctx, D]
         else:
@@ -210,7 +210,7 @@ class IJEPA(nn.Module):
         if hasattr(vit, "norm") and vit.norm is not None:
             x_ctx = vit.norm(x_ctx)
 
-        # 7. Rimuovi CLS (ritorniamo solo patch di contesto)
+        # 7. Remove CLS (return only context patches)
         if has_cls:
             x_ctx = x_ctx[:, 1:, :]
 
@@ -225,19 +225,19 @@ class IJEPA(nn.Module):
             self.update_teacher()
             self.tea.eval()
 
-        # 1. Maschera tessuto
+        # 1. Tissue mask
         tissue_mask = self._get_tissue_mask(images)  # [B, N_patches]
 
-        # 2. Maschere di contesto e target (indici per-sample)
+        # 2. Context and target masks (indices per-sample)
         context_indices, target_indices_list = self._generate_masks(B, device)
 
-        # 3. Teacher: full image tokens (senza leakage)
+        # 3. Teacher: full image tokens (without leakage)
         with torch.no_grad():
             full_teacher_tokens = self.tea.forward_tokens(images)  # [B, T, D]
             full_teacher_tokens = F.layer_norm(
                 full_teacher_tokens, (full_teacher_tokens.size(-1),)
             )
-            # Gestione CLS vs no-CLS
+            # CLS vs no-CLS handling
             if full_teacher_tokens.shape[1] == self.num_patches + 1:
                 full_teacher_tokens = full_teacher_tokens[:, 1:, :]
             elif full_teacher_tokens.shape[1] != self.num_patches:
@@ -250,7 +250,7 @@ class IJEPA(nn.Module):
         context_tokens = self._forward_masked_student(images, context_indices)
         # context_tokens: [B, N_ctx, D]
 
-        # 5. Predictor loop con filtro tessuto
+        # 5. Predictor loop with tissue filter
         loss = 0.0
         valid_targets_count = 0
         pred_tokens: Optional[torch.Tensor] = None  # per dummy loss
@@ -263,7 +263,7 @@ class IJEPA(nn.Module):
                 full_teacher_tokens, dim=1, index=gather_idx
             )  # [B, N_tgt, D]
 
-            # Positional embedding per il predictor
+            # Positional embedding for the predictor
             pred_D = self.predictor.embed_dim
             pos_idx = target_indices.unsqueeze(-1).expand(-1, -1, pred_D)
             pos_embed_expand = self.predictor_pos_embed.expand(B, -1, -1)
@@ -274,7 +274,7 @@ class IJEPA(nn.Module):
             # Predizione
             pred_tokens = self.predictor(context_tokens, curr_target_pos)  # [B, N_tgt, D]
 
-            # Filtro tessuto: gather sulla tissue_mask
+            # Tissue filter: gather on tissue_mask
             curr_tissue_mask = torch.gather(
                 tissue_mask, dim=1, index=target_indices
             )  # [B, N_tgt]
@@ -293,7 +293,7 @@ class IJEPA(nn.Module):
         if valid_targets_count > 0:
             loss = loss / valid_targets_count
         else:
-            # immagine tutta sfondo: dummy loss per mantenere il grafo
+            # all background image: dummy loss to maintain graph
             if pred_tokens is None:
                 loss = (full_teacher_tokens * 0.0).sum()
             else:
@@ -301,18 +301,18 @@ class IJEPA(nn.Module):
 
         return {"loss": loss, "ssl_loss": loss}
 
-    # ------------------------------------------------------------------ maschere target/context per-sample
+    # ------------------------------------------------------------------ target/context masks per-sample
     def _generate_masks(
         self, batch_size: int, device: torch.device
     ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
         """
-        Genera:
+        Generate:
         - context_indices: [B, N_ctx]
-        - target_indices_list: lista di num_target_masks tensori [B, N_tgt]
+        - target_indices_list: list of num_target_masks tensors [B, N_tgt]
 
-        Strategia:
-        - stessa dimensione dei blocchi (scale/aspect) per tutto il batch,
-          ma posizioni top/left diverse per ogni sample.
+        Strategy:
+        - same block size (scale/aspect) for entire batch,
+          but different top/left positions for each sample.
         """
         H = W = self.grid_size
         N = self.num_patches
@@ -372,17 +372,17 @@ class IJEPA(nn.Module):
         )
         possible_mask.scatter_(1, ctx_idx_all, True)
 
-        # Evita overlap con target
+        # Avoid overlap with targets
         valid_mask = possible_mask & (~union_targets)
 
         num_valid = valid_mask.sum(dim=1)  # [B]
         min_valid = int(num_valid.min().item())
 
         if min_valid <= 0:
-            # fallback: usiamo ctx_idx_all (può contenere overlap)
+            # fallback: we use ctx_idx_all (may contain overlap)
             context_indices = ctx_idx_all
         else:
-            # Prendiamo i primi min_valid indici validi per ciascun sample
+            # Take first min_valid valid indices for each sample
             scores = valid_mask.float()  # True=1, False=0
             sorted_idx = torch.argsort(scores, dim=1, descending=True)
             context_indices = sorted_idx[:, :min_valid]  # [B, min_valid]

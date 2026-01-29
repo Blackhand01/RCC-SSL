@@ -13,5 +13,5 @@ umap-learn>=0.5.5
 matplotlib>=3.7
 seaborn>=0.13
 
-# opzionale per viT da timm (se vuoi alternative a torchvision vit)
+# optional for ViT from timm (if you want alternatives to torchvision vit)
 timm>=0.9.8

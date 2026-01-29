@@ -63,7 +63,7 @@ def build_ssl_loader(
     wds_cfg = data_cfg["webdataset"]
     shards = list_shards(wds_cfg[f"{split}_dir"])
     dataset = make_wds(shards, wds_cfg["shuffle_shards"], wds_cfg["shuffle_samples"])
-    # filtro tessuto (se richiesto)
+    # tissue filter (if requested)
     dataset = _maybe_filter_tissue(dataset, sampler_cfg or {})
 
     img_size = int(data_cfg.get("img_size", 224))
@@ -72,7 +72,7 @@ def build_ssl_loader(
     use_mc_moco = bool((model_cfg.get("ssl", {}) or {}).get("use_multicrop", False)) if mode == "moco_v3" else False
 
     if (mode in ("moco_v3",) and not use_mc_moco) or (mode == "ibot" and not use_mc_ibot):
-        # Preferisci le aug top-level se fornite (Macenko/HED/rotate90 ecc.)
+        # Prefer top-level augmentations if provided (Macenko/HED/rotate90 etc.)
         ssl_aug_legacy = (model_cfg.get("ssl", {}) or {}).get("aug", {})
         if cfg_aug_top:
             transform = two_view_transform(
@@ -140,7 +140,7 @@ def build_ssl_dataset(cfg: Dict[str, Any], mode: str, *, use_mc_moco: bool = Fal
     dataset = make_wds(shards, wds_cfg["shuffle_shards"], wds_cfg["shuffle_samples"])
 
     if (mode in ("moco_v3",) and not use_mc_moco) or (mode == "ibot" and not use_mc_ibot):
-        # preferenza per aug top-level; retro-compat con model.ssl.aug
+        # preference for top-level augmentations; backward-compat with model.ssl.aug
         ssl_aug = (model_cfg.get("ssl", {}) or {}).get("aug", {})
         cfg_aug = aug_top if aug_top else {"base": {}, "stain": {}}
         # merge semplice: i key presenti in model.ssl.aug sovrascrivono

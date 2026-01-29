@@ -8,10 +8,10 @@ def main():
     print("CUDA available:", cuda_ok)
     ngpu = torch.cuda.device_count()
     print("GPU count:", ngpu)
-    # Rispetta eventuale binding di SLURM/CUDA_VISIBLE_DEVICES
+    # Respect SLURM/CUDA_VISIBLE_DEVICES binding if set
     dev_index = int(os.environ.get("LOCAL_RANK", "0"))
     if ngpu > 0:
-        # Se SLURM ha impostato bind, l'indice 0 è la tua GPU allocata
+        # If SLURM has set binding, index 0 is your allocated GPU
         torch.cuda.set_device(dev_index if dev_index < ngpu else 0)
         device = torch.device("cuda")
         print("Using device:", torch.cuda.get_device_name(torch.cuda.current_device()))
@@ -22,10 +22,10 @@ def main():
         device = torch.device("cpu")
         print("Falling back to CPU.")
 
-    # Modello dummy piccolo
+    # Small dummy model
     model = nn.Sequential(nn.Linear(1024, 2048), nn.ReLU(), nn.Linear(2048, 1024)).to(device)
     x = torch.randn(256, 1024, device=device)
-    # Mini warmup/forward
+    # Mini warmup/forward pass
     iters = 50 if cuda_ok else 5
     t0 = time.time()
     with torch.no_grad():

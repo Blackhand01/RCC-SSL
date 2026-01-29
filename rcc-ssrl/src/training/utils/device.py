@@ -27,25 +27,25 @@ def device_from_env(allow_cpu: bool = False) -> torch.device:
         cvd = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
         lr_str = os.environ.get("LOCAL_RANK") or os.environ.get("SLURM_LOCALID")
 
-        # Preferisci sempre LOCAL_RANK (impostato da torchrun)
+        # Always prefer LOCAL_RANK (set by torchrun)
         if lr_str is not None:
             try:
                 lr = int(lr_str)
                 tokens: List[str] = [t.strip() for t in cvd.split(",") if t.strip()] if cvd else []
                 if tokens:
-                    # Mappa per posizione dentro CUDA_VISIBLE_DEVICES
+                    # Map by position within CUDA_VISIBLE_DEVICES
                     try:
                         mapped = int(tokens[lr])
                         return torch.device("cuda", mapped)
                     except (ValueError, IndexError):
-                        # token non numerici (es. MIG) o lista corta -> usa indice logico
+                        # non-numeric tokens (e.g., MIG) or short list -> use logical index
                         return torch.device("cuda", lr % max(1, torch.cuda.device_count()))
-                # niente CVD: usa indice logico
+                # no CVD: use logical index
                 return torch.device("cuda", lr % max(1, torch.cuda.device_count()))
             except (TypeError, ValueError):
                 pass
 
-        # Nessun LOCAL_RANK: prendi il primo token numerico da CVD, altrimenti 0
+        # No LOCAL_RANK: pick first numeric token from CVD, otherwise 0
         if cvd:
             for tok in cvd.split(","):
                 tok = tok.strip()

@@ -65,7 +65,7 @@ def infer_model_family(run_dir: Path) -> str:
       ...
     """
     s = str(run_dir).lower()
-    for k in ("moco_v3", "dino_v3", "ibot", "i_jepa", "ijepa"):
+    for k in ("moco_v3", "dino_v3", "ibot", "i_jepa", "ijepa","supervised", "transfer"):
         if k in s:
             return "i_jepa" if k in ("ijepa", "i_jepa") else k
     # fallback: exp_<name>_ablXX
@@ -230,26 +230,23 @@ def is_run_dir(p: Path) -> bool:
 
 def discover_runs(experiments_root: Path) -> List[Path]:
     """
-    Discover run dirs under:
-      ablation_final/exp_YYYY..._model/exp_model_ablXX
+    Recursively find all folders starting with 'exp_' 
+    that contain results (metrics/final_metrics.json).
     """
+    # If the root itself is a run folder, return it
     if is_run_dir(experiments_root):
         return [experiments_root]
 
     runs: List[Path] = []
-    for exp in experiments_root.glob("exp_*"):
-        if not exp.is_dir():
-            continue
-        for run in exp.glob("exp_*"):
-            if is_run_dir(run):
-                runs.append(run)
+    
+    # Search throughout directory tree for each 'exp_*' folder
+    for p in experiments_root.rglob("exp_*"):
+        if is_run_dir(p):
+            # Add only if it's actually a results folder
+            runs.append(p)
 
-    if not runs:
-        for run in experiments_root.rglob("exp_*"):
-            if is_run_dir(run):
-                runs.append(run)
-
-    return sorted(runs)
+    # Remove any duplicates and sort
+    return sorted(list(set(runs)))
 
 
 def better_patch_selected_by_macro_f1(a: Row, b: Row) -> bool:
@@ -355,7 +352,7 @@ def write_latex_patient_table(rows: List[Row], out_tex: Path) -> None:
     """
     Patient-only LaTeX table (booktabs + resizebox), with Accuracy as first metric.
     Columns: Model | Acc | Macro-F1 | AUROC | PR-AUC | MinRecall(T) | N_pat(T)
-    (BalAcc patient-level puoi aggiungerla se vuoi, ma così di solito ci sta bene.)
+    (You can add patient-level BalAcc if you want, but usually it fits well this way.)
     """
     out_tex.parent.mkdir(parents=True, exist_ok=True)
 

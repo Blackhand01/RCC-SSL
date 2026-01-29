@@ -19,8 +19,8 @@ __all__ = ["SSLBaseModel", "SLBaseModel", "SSLTrainer", "SLTrainer"]
 # -----------------------------------------------------------------------------
 class SSLBaseModel(nn.Module):
     """
-    Contratto base per modelli SSL.
-    Richiede:
+    Base contract for SSL models.
+    Requires:
       - from_config(cls, cfg) -> model
       - training_step(batch, global_step) -> {'loss_total': Tensor, 'loss_components': dict}
     """
@@ -29,7 +29,7 @@ class SSLBaseModel(nn.Module):
         super().__init__()
 
     @classmethod
-    def from_config(cls, cfg: Dict[str, Any]) -> "SSLBaseModel":  # pragma: no cover - interfaccia
+    def from_config(cls, cfg: Dict[str, Any]) -> "SSLBaseModel":  # pragma: no cover - interface
         raise NotImplementedError
 
     def training_step(self, batch: Dict[str, Any], global_step: int) -> Dict[str, Any]:  # pragma: no cover
@@ -47,13 +47,13 @@ class SSLBaseModel(nn.Module):
 
 
 class SLBaseModel(nn.Module):
-    """Contratto base per modelli supervisionati."""
+    """Base contract for supervised models."""
 
     def __init__(self):
         super().__init__()
 
     @classmethod
-    def from_config(cls, cfg: Dict[str, Any]) -> "SLBaseModel":  # pragma: no cover - interfaccia
+    def from_config(cls, cfg: Dict[str, Any]) -> "SLBaseModel":  # pragma: no cover - interface
         raise NotImplementedError
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:  # pragma: no cover
@@ -89,7 +89,7 @@ def _should_log(idx: int, total: Optional[int], every: Optional[int]) -> bool:
 
 
 class _EMAMetrics:
-    """Accumulatore semplice di medie ed EMA."""
+    """Simple accumulator for averages and EMA."""
 
     def __init__(self, alpha: float = 0.1):
         self.alpha = alpha
@@ -109,7 +109,7 @@ class _EMAMetrics:
 # SSL Trainer
 # -----------------------------------------------------------------------------
 class SSLTrainer:
-    """Loop di training per SSL con callback step-level e logging compatto."""
+    """Training loop for SSL with step-level callbacks and compact logging."""
 
     def __init__(
         self,
@@ -237,7 +237,7 @@ class SSLTrainer:
             if step_callback:
                 step_callback(gstep, stats)
 
-        # flush step finale se rimangono grad non applicati
+        # flush final step if pending gradients remain
         if self._pending_grads:
             if self.grad_clip_max > 0.0:
                 clip_grad_norm_(self.model.parameters(), self.grad_clip_max)
@@ -291,7 +291,7 @@ class SSLTrainer:
 # SL Trainer (AMP-friendly)
 # -----------------------------------------------------------------------------
 class SLTrainer:
-    """Loop SL con AMP opzionale, logging a ETA e scheduler per-epoch."""
+    """SL training loop with optional AMP, ETA logging, and per-epoch scheduler."""
 
     def __init__(
         self,
@@ -315,9 +315,9 @@ class SLTrainer:
 
     # ---- AMP helpers --------------------------------------------------------
     def _init_amp(self, enabled: bool):
-        """Crea GradScaler e context manager autocast (torch>=2: torch.amp)."""
+        """Create GradScaler and autocast context manager (torch>=2: torch.amp)."""
         try:
-            import torch.amp as _amp  # PyTorch ≥ 2
+            import torch.amp as _amp  # PyTorch >= 2
 
             scaler = _amp.GradScaler("cuda", enabled=enabled)
             ctx = lambda: _amp.autocast(device_type="cuda", enabled=enabled)
@@ -330,7 +330,7 @@ class SLTrainer:
             return scaler, ctx
 
     def _ensure_device(self, device: torch.device) -> None:
-        """Sposta componenti su device e adegua AMP se CPU."""
+        """Move components to device and adjust AMP if CPU."""
         if self._current_device == device:
             return
         self.model = self.model.to(device, non_blocking=True)
@@ -342,16 +342,16 @@ class SLTrainer:
 
     # ---- batch & step -------------------------------------------------------
     def _unpack_batch(self, batch: Dict[str, Any], device: torch.device) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Supporta sia dict SL canonico sia un fallback compat."""
+        """Support both canonical SL dict and a compatibility fallback."""
         if "inputs" in batch and "targets" in batch:
             x = batch["inputs"].to(memory_format=torch.channels_last)
             return x.to(device, non_blocking=True), batch["targets"].to(device, non_blocking=True)
-        # compat: alcuni loader forniscono "images"/"label"
+        # compat: some loaders provide "images"/"label"
         x = batch["images"][0].to(memory_format=torch.channels_last)
         return x.to(device, non_blocking=True), batch["label"].to(device, non_blocking=True)
 
     def _update_optim(self, loss: torch.Tensor) -> None:
-        """Applica step con/without GradScaler a seconda di AMP."""
+        """Apply step with/without GradScaler depending on AMP."""
         self.optimizer.zero_grad(set_to_none=True)
         if self._amp_enabled and self.scaler is not None:
             self.scaler.scale(loss).backward()
@@ -362,7 +362,7 @@ class SLTrainer:
             self.optimizer.step()
 
     def _run_step(self, batch: Dict[str, Any], device: torch.device, train: bool) -> Tuple[float, float, int]:
-        """Esegue un passo (fw/bw opz.) e restituisce (loss, acc, n)."""
+        """Execute one step (fw/bw optional) and return (loss, acc, n)."""
         inputs, targets = self._unpack_batch(batch, device)
         autocast = self._autocast_ctx()
         with torch.set_grad_enabled(train):
@@ -371,7 +371,7 @@ class SLTrainer:
                 loss = self.criterion(logits, targets)
             if train:
                 self._update_optim(loss)
-        logits = logits.float()  # per argmax stabile anche in half
+        logits = logits.float()  # for stable argmax even in half precision
         acc = (logits.argmax(1) == targets).float().mean().item()
         return float(loss.detach()), acc, targets.size(0)
 
@@ -383,7 +383,7 @@ class SLTrainer:
         train: bool = True,
         expected_total: Optional[int] = None,
     ) -> Dict[str, float]:
-        """Esegue un'epoch su loader; logga ETA e restituisce medie pesate."""
+        """Run one epoch on loader; log ETA and return weighted averages."""
         self._ensure_device(device)
         self.model.train(mode=train)
 

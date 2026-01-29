@@ -81,8 +81,8 @@ train:
     steps_per_epoch: 4450
     checkpoint:
       metric: probe_val_acc  # ssl_loss | final_epoch | probe_val_acc | ssl_loss_after_warmup
-      warmup_epochs: 20              # usato solo per *_after_warmup / probe_val_acc
-      eval_every_epochs: 1          # per probe_val_acc: frequenza di valutazione
+      warmup_epochs: 20             
+      eval_every_epochs: 1          
       probe_epochs: 15  
     batch_size: 64
     accumulate_steps: 16

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-v3: indicizzazione XML e salvataggio maschere con scrittura ATOMICA in rcc_masks_v3
-Fix: tmp nello stesso dir, flush+fsync, os.replace, retry su FS shared.
+v3: XML indexing and mask saving with ATOMIC writing in rcc_masks_v3
+Fix: tmp in same dir, flush+fsync, os.replace, retry on shared FS.
 """
 import os, io, json, time, math, argparse
 from pathlib import Path
@@ -10,7 +10,7 @@ from typing import Optional, List, Tuple
 import numpy as np, pandas as pd, yaml
 from lxml import etree
 
-# frena thread BLAS
+# Limit BLAS threads
 os.environ.setdefault("OMP_NUM_THREADS","1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS","1")
 os.environ.setdefault("MKL_NUM_THREADS","1")
@@ -21,28 +21,28 @@ def norm(s): return (s or "").strip().lower()
 
 def atomic_save_npz(dst: Path, arrays: dict, max_retries: int = 4, sleep_base: float = 0.15) -> int:
     """
-    Scrive dst (.npz) in modo atomico: tmp nello STESSO dir, flush+fsync, os.replace.
-    Ritorna dimensione file finale in byte.
+    Write dst (.npz) atomically: tmp in SAME dir, flush+fsync, os.replace.
+    Returns final file size in bytes.
     """
     dst.parent.mkdir(parents=True, exist_ok=True)
-    # tmp unico per evitare collisioni
+    # Unique tmp to avoid collisions
     tag = f"{os.getpid()}_{int(time.time()*1e6)}"
     tmp = dst.parent / f"{dst.name}.{tag}.tmp"
     attempt = 0
     while True:
         try:
             with open(tmp, "wb") as f:
-                # uso savez_compressed su file handle esplicito
+                # Use savez_compressed on explicit file handle
                 np.savez_compressed(f, **arrays)
                 f.flush()
                 os.fsync(f.fileno())
-            # rename atomico nella stessa partizione
+            # Atomic rename in same partition
             os.replace(tmp, dst)
             sz = dst.stat().st_size
             return sz
         except Exception as e:
             attempt += 1
-            # pulizia tmp se esiste
+            # Cleanup tmp if exists
             try:
                 if tmp.exists(): tmp.unlink(missing_ok=True)
             except Exception:
@@ -76,9 +76,9 @@ def choose_level_safe(slide, target_mpp: float, patch_px: int, max_side: int, mi
 
 def xml_regions(xml_path: Path) -> List[dict]:
     """
-    Ritorna lista di dict con coordinate LIVELLO 0:
+    Returns list of dicts with level 0 coordinates:
       { label_text: str, points: [(x,y),...], meta:{source:"asap|aperio|leica", name, group, type} }
-    Supporta:
+    Supports:
       - ASAP: <Annotation ... PartOfGroup="necrosis"> <Coordinates><Coordinate .../></Coordinates></Annotation>
       - Aperio-like: <Region Text="tumor"><Vertex X=... Y=.../></Region>
       - Leica-like:  <Coordinates><Coordinate X=... Y=.../></Coordinates>
@@ -87,7 +87,7 @@ def xml_regions(xml_path: Path) -> List[dict]:
     regions = []
 
     # ---- ASAP ----
-    # Esempio: <Annotation Name="Annotation 0" Type="Spline" PartOfGroup="necrosis" ...>
+    # Example: <Annotation Name="Annotation 0" Type="Spline" PartOfGroup="necrosis" ...>
     for ann in root.xpath(".//Annotation"):
         group = ann.get("PartOfGroup") or ""
         name  = ann.get("Name") or ""
@@ -118,8 +118,8 @@ def xml_regions(xml_path: Path) -> List[dict]:
                 "meta": {"source":"aperio"}
             })
 
-    # ---- Leica-like fallback: <Coordinates><Coordinate .../></Coordinates> senza label ----
-    # NB: se arriva qui senza label, la map_group restituirà None e verrà ignorato
+    # ---- Leica-like fallback: <Coordinates><Coordinate .../></Coordinates> without label ----
+    # NB: if it reaches here without label, map_group will return None and will be ignored
     if not regions:
         for poly in root.xpath(".//Coordinates"):
             pts=[]
@@ -136,7 +136,7 @@ def xml_regions(xml_path: Path) -> List[dict]:
 
 def map_group(label_map: dict, label_text: str) -> Optional[str]:
     lt = norm(label_text)
-    # match “contains” contro liste estese (ita/eng)
+    # Match "contains" against extended lists (ita/eng)
     for k in label_map.get("tumor", []):
         if norm(k) in lt and k:
             return "tumor"
@@ -187,8 +187,8 @@ def resolve_xml_path(xml_name: str, cls_label: str, rel_path: Path, roots: dict)
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
-    ap.add_argument("--resume", action="store_true", help="Append/skip già presenti in masks_index.jsonl")
-    ap.add_argument("--rewrite-xml-masks", action="store_true", help="Rigenera anche se esistono .npz")
+    ap.add_argument("--resume", action="store_true", help="Append/skip already present in masks_index.jsonl")
+    ap.add_argument("--rewrite-xml-masks", action="store_true", help="Regenerate even if .npz exist")
     args = ap.parse_args()
     cfg = yaml.safe_load(Path(args.config).read_text())
 
@@ -225,7 +225,7 @@ def main():
             xml_name  = str(r.get("annotation_xml","") or "")
 
             if cls not in ("ccRCC","pRCC"):
-                # per v3: indicizziamo solo XML (ROI CHROMO/ONCO non toccate qui)
+                # For v3: we index only XML (CHROMO/ONCO ROI not touched here)
                 continue
 
             if args.resume and (record_id in seen_ids) and not args.rewrite_xml_masks:
@@ -285,7 +285,7 @@ def main():
                     "class_label":cls, "wsi_rel_path":str(rel), "level":int(level),
                     "npz_sizes":{"tumor": int(sz_t), "not_tumor": int(sz_n)}
                 }
-                # evita duplicati in resume senza rewrite
+                # Avoid duplicates in resume without rewrite
                 if (not args.resume) or args.rewrite_xml_masks or (record_id not in seen_ids):
                     fout.write(json.dumps(meta)+"\n"); written += 1
 

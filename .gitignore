@@ -211,5 +211,6 @@ rcc-ssrl/src/xai-backup/
 .triton
 rcc-ssrl/outputs/
 rcc-ssrl/src/explainability/output/
-rcc-ssrl/src/explainability/output copy
 rcc-ssrl/src/explainability/docs/
+rcc-ssrl/docs/output
+rcc-ssrl/docs/ablation_showcase

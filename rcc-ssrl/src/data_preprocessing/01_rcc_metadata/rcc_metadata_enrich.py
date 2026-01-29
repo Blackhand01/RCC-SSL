@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Enrichment metadata.csv -> rcc_metadata.csv (una riga per WSI)
-- NO path/slide_id nei campi output (solo filename/dir sorgente)
-- Solo byte/proprietà della WSI (no XML)
-- Conteggi ROI da XML: xml_roi_tumor, xml_roi_not_tumor, xml_roi_total
+Enrichment metadata.csv -> rcc_metadata.csv (one row for each WSI)
+- NO path/slide_id in the output field(only filename/dir as in input)
+- Only byte/propriety of the WSI (no XML)
+-Sum ROI da XML: xml_roi_tumor, xml_roi_not_tumor, xml_roi_total
 """
 import argparse, os, re, sys
 from pathlib import Path
@@ -58,24 +58,22 @@ def xml_roi_counts(xml_path: Path):
         nreg = len(regions) if regions else 1  # fallback: at least 1 if annotation exists
         total += nreg
 
-        # ASAP: conta come not_tumor se PartOfGroup in NOT_TUMOR_KEYS
         if group and any(k in group for k in NOT_TUMOR_KEYS):
             not_tumor += nreg
         elif group and any(k in group for k in TUMOR_KEYS):
             tumor += nreg
-        # Aperio: regole precedenti
+        # Aperio
         elif ("non" in name or "not" in name) and ("tumor" in name or "tumour" in name):
             not_tumor += nreg
         elif any(k in name for k in NOT_TUMOR_KEYS) and not any(k in name for k in TUMOR_KEYS):
             not_tumor += nreg
         elif any(k in name for k in TUMOR_KEYS):
             tumor += nreg
-        # else: ignora, solo nel totale
 
     return (tumor, not_tumor, total)
 
 def safe_wsi_props(wsi_path: Path):
-    """Ritorna proprietà SOLO della WSI (size,dims,levels,mpp,vendor,objective)."""
+    """Return propriety ONLY of the WSI (size,dims,levels,mpp,vendor,objective)."""
     size_bytes = wsi_path.stat().st_size if wsi_path.exists() else None
     vendor = width0 = height0 = level_count = mpp_x = mpp_y = objective = None
 
@@ -95,7 +93,7 @@ def safe_wsi_props(wsi_path: Path):
         except Exception:
             pass
 
-    # Fallback per TIFF (solo dimensioni) se mancano dims
+    # Fallback per TIFF 
     if (width0 is None or height0 is None) and tifffile is not None and wsi_path.suffix.lower() in {".tif",".tiff"}:
         try:
             with tifffile.TiffFile(str(wsi_path)) as tf:
@@ -117,13 +115,11 @@ def safe_wsi_props(wsi_path: Path):
 def find_xml_for_row(raw_root: Path, wsi_path: Path, xml_name: Optional[str]):
     """Risolvi il path XML: 1) stesso dir della WSI se esiste, 2) ricerca globale by name."""
     if not xml_name:
-        # tenta nome WSI.<xml>
         cand = wsi_path.with_suffix(".xml")
         return cand if cand.exists() else None
     cand = (wsi_path.parent / xml_name)
     if cand.exists():
         return cand
-    # ultima spiaggia: cerca per nome nell'albero RAW
     hits = list(raw_root.rglob(xml_name))
     return hits[0] if hits else None
 
@@ -139,13 +135,11 @@ def main():
     meta_csv = Path(args.metadata_csv).resolve()
 
     df = pd.read_csv(meta_csv)
-    # colonne attese di base
     base_cols = ["subtype","patient_id","wsi_filename","annotation_xml","num_annotations","roi_files","num_rois","source_dir"]
     missing = [c for c in base_cols if c not in df.columns]
     if missing:
         raise SystemExit(f"[ERROR] metadata.csv missing columns: {missing}")
 
-    # Prepara carrier output
     out_rows = []
 
     for _, r in df.iterrows():
@@ -157,7 +151,6 @@ def main():
         num_rois    = r.get("num_rois")
         src_dir     = r.get("source_dir")
 
-        # path interni (NON verranno esportati nell'output)
         wsi_path = (raw_root / str(src_dir) / str(wsi_name)).resolve()
         xml_path = find_xml_for_row(raw_root, wsi_path, str(xml_name) if pd.notna(xml_name) else None)
 
@@ -171,7 +164,7 @@ def main():
         tumor, not_tumor, total = xml_roi_counts(xml_path) if xml_path else (0,0,0)
 
         out_rows.append({
-            # --- chiavi principali ---
+            # --- Principal keys ---
             "subtype": subtype,
             "patient_id": patient_id,
             "wsi_filename": wsi_name,
@@ -180,7 +173,7 @@ def main():
             "num_rois": int(num_rois) if pd.notna(num_rois) else 0,
             "source_dir": src_dir,
 
-            # --- SOLO WSI (no path, no xml bytes) ---
+            # --- ONLY WSI (no path, no xml bytes) ---
             **props,
 
             # --- XML derived stats ---
@@ -191,7 +184,7 @@ def main():
 
     out = pd.DataFrame(out_rows)
 
-    # Ordine colonne finale
+    # Final column order
     cols = [
         "subtype","patient_id","wsi_filename","annotation_xml","roi_files","num_rois","source_dir",
         "wsi_size_bytes","vendor","width0","height0","level_count","mpp_x","mpp_y","objective_power",
