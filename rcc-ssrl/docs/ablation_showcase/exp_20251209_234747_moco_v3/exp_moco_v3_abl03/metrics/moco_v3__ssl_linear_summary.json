@@ -1,0 +1,10 @@
+{
+  "checkpoint": "checkpoints/moco_v3__ssl_linear_best.pt",
+  "features": {
+    "train_X": "checkpoints/features/moco_v3_train_X.npy",
+    "train_y": "checkpoints/features/moco_v3_train_y.npy",
+    "val_X": "checkpoints/features/moco_v3_val_X.npy",
+    "val_y": "checkpoints/features/moco_v3_val_y.npy"
+  },
+  "val_acc": 0.798358224222586
+}

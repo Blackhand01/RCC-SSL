@@ -1,0 +1,5 @@
+{
+  "best_epoch": 22,
+  "ssl_backbone_path": "checkpoints/i_jepa__ssl_best.pt",
+  "ssl_loss": 0.15106577094853593
+}

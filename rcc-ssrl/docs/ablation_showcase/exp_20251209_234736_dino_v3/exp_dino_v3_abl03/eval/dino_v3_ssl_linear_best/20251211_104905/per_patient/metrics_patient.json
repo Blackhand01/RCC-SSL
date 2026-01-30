@@ -1,0 +1,93 @@
+{
+  "class_names": [
+    "ccRCC",
+    "pRCC",
+    "CHROMO",
+    "ONCO",
+    "NOT_TUMOR"
+  ],
+  "method": "prob_sum",
+  "exclude": "NOT_TUMOR (fixed)",
+  "metrics": {
+    "n_patients_total": 14,
+    "n_patients_tumor_eval": 12,
+    "n_patients_non_tumor_only_skipped": 2,
+    "accuracy": 0.75,
+    "balanced_accuracy": 0.8928571428571428,
+    "macro_f1": 0.7859848484848485,
+    "_cm": [
+      [
+        4,
+        2,
+        1,
+        0
+      ],
+      [
+        0,
+        3,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        1,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        1
+      ]
+    ],
+    "_labels": [
+      "ccRCC",
+      "pRCC",
+      "CHROMO",
+      "ONCO"
+    ],
+    "_report": {
+      "ccRCC": {
+        "precision": 1.0,
+        "recall": 0.5714285714285714,
+        "f1-score": 0.7272727272727273,
+        "support": 7.0
+      },
+      "pRCC": {
+        "precision": 0.6,
+        "recall": 1.0,
+        "f1-score": 0.75,
+        "support": 3.0
+      },
+      "CHROMO": {
+        "precision": 0.5,
+        "recall": 1.0,
+        "f1-score": 0.6666666666666666,
+        "support": 1.0
+      },
+      "ONCO": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1-score": 1.0,
+        "support": 1.0
+      },
+      "accuracy": 0.75,
+      "macro avg": {
+        "precision": 0.775,
+        "recall": 0.8928571428571428,
+        "f1-score": 0.7859848484848485,
+        "support": 12.0
+      },
+      "weighted avg": {
+        "precision": 0.8583333333333334,
+        "recall": 0.75,
+        "f1-score": 0.7506313131313131,
+        "support": 12.0
+      }
+    },
+    "macro_auc_ovr": 0.9201058201058201,
+    "macro_auprc": 0.8979308390022676,
+    "top2_accuracy": 1.0
+  }
+}

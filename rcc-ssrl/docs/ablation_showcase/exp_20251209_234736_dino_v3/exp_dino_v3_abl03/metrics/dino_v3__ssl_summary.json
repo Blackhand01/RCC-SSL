@@ -1,0 +1,5 @@
+{
+  "best_epoch": 15,
+  "ssl_backbone_path": "checkpoints/dino_v3__ssl_best.pt",
+  "ssl_loss": 16.57570224719101
+}
