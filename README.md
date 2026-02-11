@@ -1,863 +1,386 @@
-# Scalable Self-Supervised Learning for Renal Cell Carcinoma Histopathology
+# Self-Supervised Learning for Renal Cell Carcinoma Subtyping
+![dataset_patches](patches.png)
 
-## 🔄 End-to-End Pipeline Architecture
+This repository hosts a comprehensive computational pathology pipeline for Renal Cell Carcinoma (RCC) subtyping. The project addresses the challenge of medical annotation scarcity (label scarcity) by leveraging **Self-Supervised Learning (SSL)** techniques to learn robust morphological representations from unlabeled data, benchmarked against **Supervised Baselines** trained on labeled patches.
 
-![SSL Repository Architecture](rcc-ssrl/docs/architectures/eraser-ssl_repo_architecture.png)
-
-*Una pipeline end-to-end per il training di modelli State-of-the-Art (MoCo v3, DINO v3, iBOT, i-JEPA) su Whole Slide Images (WSI) con focus su interpretabilità clinica e affidabilità.*
-
----
-
-## 1. Abstract & Project Goals
-
-La sottotipizzazione del carcinoma a cellule renali (RCC) a partire da immagini gigapixel Whole-Slide Images (WSI) è fondamentale per la prognosi, tuttavia l'apprendimento profondo supervisionato deve affrontare due colli di bottiglia critici: **(1)** la scarsità di annotazioni, poiché la marcatura manuale richiede il tempo specialistico di patologi esperti, limitando i dataset annotati a ~10³ campioni contro i ~10⁶ disponibili non etichettati, e **(2)** l'ambiguità morfologica intrinseca, esemplificata dal confronto tra RCC cromofobo (chRCC) e oncocitoma renale (ONCO), dove il coefficiente di concordanza inter-osservatore di Cohen κ è riportato tra 0.32–0.55 (Landis & Koch, 1977), indicando un accordo "scarso-discreto" e rappresentando il ceiling di performance umana. 
-
-Valutiamo quattro paradigmi di Self-Supervised Learning allo stato dell'arte — **MoCo v3** (contrastive learning), **DINO v3** (self-distillation), **iBOT** (masked image modeling) e **i-JEPA** (latent prediction) — su un dataset di **196 Whole-Slide Images** provenienti da **88 pazienti unici** (124 ccRCC, 48 pRCC, 13 oncocitomi, 11 cromofobe). La preprocessazione di estrazione patch genera un dataset bilanciato di **~300.000 patch** di addestramento a **0.50 µm/pixel** (equivalente 20×), estratti a 224×224 pixel con balancing per classe. I modelli pre-addestrati su istologia non annotata raggiungono un **Macro-F1 di 0.945 a livello paziente** (aggregazione multiple-instance learning tramite attention pooling) con **MoCo v3** come architettura top-performing, superando il baseline supervisionato (Macro-F1 0.881). A livello patch, i risultati sono comparabili fra paradigmi (MoCo v3: F1 0.736, DINO v3: 0.615, iBOT: 0.529, i-JEPA: 0.464).
-
-Oltre alle prestazioni quantitative, introduciamo una componente di esplicabilità tramite **PLIP** (Pathology Language-Image Pretraining), mappando le rappresentazioni apprese dagli encoder SSL su **64 concetti istologici clinicamente validati** (e.g., "citoplasma chiaro diffuso", "bordi a cellule vegetali", "capillari delicati") derivati dalle linee guida istologiche. L'analisi tramite **Attention Rollout** dimostra che le feature SSL, pur non supervisionate direttamente, catturano pattern morfologici biologicamente significativi, con una copertura media dell'area ROI del 77% e IoU mediano di ~0.092 rispetto alle annotazioni manuali.
-
-**Contributi principali**: **(1)** il primo benchmark comparativo sistematico di quattro paradigmi SSL contemporanei per patologia RCC digitale, raggiungendo prestazioni near-pari-al-supervisionato senza etichette; **(2)** un framework VLM-based (PLIP) per validazione e interpretabilità a livello di concetti delle feature SSL neurali, abilitando audit clinici; **(3)** rilascio pubblico di modelli pre-addestrati, dataset processing pipeline, e codice per riproducibilità e adozione in contesti clinici.
+**Paper (Draft)**  
+Draft manuscript: `paper.tex` (root).
 
 ---
 
-## 2. Data Engineering & Scalability (HPC)
+## 🔬 Project Workflow
 
-Dimostrazione della capacità di gestire infrastrutture Big Data e calcolo ad alte prestazioni (HPC) per pipeline end-to-end su dataset gigapixel di patologia digitale.
+The project is structured as a sequential pipeline. During the data preparation phase, we support **two distinct approaches** for tumor region identification, ensuring flexibility based on the type of available annotations (XML coordinates or Binary Masks).
 
-### 2.1 WSI Preprocessing Pipeline
+![pipeline](ssl_architecture.png)
 
-**Dataset**: 196 Whole-Slide Images (WSI) acquisiti a 0.25 µm/pixel (40×) provenienti da 88 pazienti unici con diagnosi di RCC (124 ccRCC, 48 pRCC, 13 oncocitomi, 11 cromofobe).
+### 1. Data Engineering (ETL)
 
-#### Workflow di Preprocessing
+Management of Whole-Slide Images (WSI). Slides are scanned, inventoried, and associated with anonymized clinical metadata.
 
-1. **Metadata Enrichment** (`rcc_metadata_enrich.py`)
-   - Pulizia e strutturazione dei metadati clinici (paziente ID, sottotipo, fonte)
-   - Estrazione e validazione delle ROI da annotazioni XML
-   - Assegnazione labels: tumor/non-tumor con policy di gestione ambigui ("discard")
-   - Output: CSV strutturato con tracciabilità completa
+### 2. ROI Extraction & WebDataset
 
-2. **Efficient Storage** (Parquet Format)
-   - Conversione WSI metadata → formato **Parquet** per indicizzazione rapida
-   - Storage scalabile: consente query su milioni di patch senza caricamento in RAM
-   - Vantaggio: ~40× speedup vs CSV per dataset >10⁶ records
-   - Output: `/reports/02_parquet/slides.parquet`
+This phase converts slides into training-ready datasets. The system is designed to handle two input scenarios:
 
-3. **Patch Extraction & Tiling**
-   - **Resolution**: 0.50 µm/pixel (equivalente 20×, trade-off fra dettaglio istologico e dimensione computazionale)
-   - **Patch size**: 224×224 pixel (standard ViT architecture)
-   - **Stride**: 224 pixel (non-overlapping tiles)
-   - **Tissue filtering**: min_tissue_ratio=0.10 per scartare background
-   - Budget totale: ~300.000 patch train, 60.000 val, 60.000 test
+* **Scenario A (Vector Coordinates):** If annotations originate from software such as ASAP or QuPath (`.xml` files), the pipeline converts tumor polygon coordinates into segmentation masks.
+* **Scenario B (Pre-computed Masks):** If binary masks are already available (e.g., output from a previous segmentation neural network), the pipeline ingests them directly.
 
-4. **Class Balancing** (`balance_and_select.py`)
-   - Mode: `equal_per_class` → forza distribuzione uniforme su {ccRCC, pRCC, ONCO, CHROMO, NOT_TUMOR}
-   - Per-patient cap: 1.5× quota media per evitare dominanza di pazienti con ROI grandi
-   - Tumor/Not-tumor guard rail: [0.30, 0.70] per pazienti cc/p con entrambi i tessuti
-   - Effetto: elimina class-skew artifacts, garantisce equilibrio biologico
+Tissue is then subdivided into 224×224 patches (20× magnification, 0.50 mpp target resolution) and saved in **WebDataset format (sharded .tar)** with class-balancing strategies to optimize GPU I/O operations.
 
-5. **WebDataset Integration** (`build_webdataset_balanced.py`)
-   - Streaming delle patch tramite formato WebDataset (tar-based)
-   - Samples per shard: 5000 → chunk computazionali efficienti
-   - Image format: JPEG lossy (qualità visiva sufficiente per SSL, 10× riduzione size vs PNG)
-   - Vantaggi:
-     - Zero I/O bottleneck durante training distribuito
-     - Shuffle deterministico tramite shard boundaries
-     - Caricamento lazy → memoria costante indipendentemente da dataset size
+**Preprocessing Pipeline Diagram:**
 
-> **Fig. 1: Conceptual Pipeline Overview**
-> *Schema a blocchi del flusso: WSI (196 slides, 88 patients) → Metadata Enrichment → Parquet Indexing → Patch Extraction (224×224 @ 0.50µm/px) → Class Balancing (equal_per_class) → WebDataset Sharding (5K samples/shard) → SSL Training.*
+![preproces_graph](preprocess_graph.png)
 
-> **Fig. 2: Dataset Distribution and Patient Stratification**
-> *Istogramma a tre livelli: (a) WSI distribution per subtype (ccRCC 124, pRCC 48, ONCO 13, CHROMO 11); (b) Patch count per subtype post-balancing; (c) Pazienti per subtype con stratificazione train/val/test.*
+**Patch Settings:**
+- Patch size: 224 px
+- Target resolution: 0.50 mpp
+- Minimum tissue ratio: 0.10
 
-![Dataset Distribution](rcc-ssrl/src/post_processing/dataset_distribution_fig2_final_v2.png)
+Settings are sourced from `rcc-ssrl/src/data_processing/config.yaml`.
 
-### 2.2 Orchestrazione su Cluster Slurm
+### 3. Training Strategies
 
-#### Job Management Framework
+The framework supports multiple training modalities configurable via **YAML** files:
 
-* **Automatic Job Dispatching** (`orchestrator.py`)
-  - Gestione automatizzata della sottomissione dei job su infrastruttura HPC
-  - Gestione dinamica delle risorse GPU: allocazione basata su availabilità cluster
-  - Resilienza agli errori: retry automtico (max 3 tentativi) per job failed
-  - Tracking centralizzato: manifest JSON per monitoring stato esperimenti
-  - Dependency management: pipeline sequenziale (preprocessing → training → evaluation)
+#### A. Self-Supervised Learning (SSL)
 
-* **Resource Allocation Strategy**
-  - GPU per job: 1× NVIDIA A100 80GB (training), 2× A100 per valutazione parallela
-  - Memory footprint: ~60GB per modello + webdataset buffer
-  - Batch size: 256 (MoCo/DINO), 128 (i-JEPA per latent prediction)
-  - Distribuzione multi-GPU: PyTorch DistributedDataParallel (DDP) con backend NCCL
+We train a **ViT-S/16** (`vit_small_patch16_224`) backbone without using diagnostic labels to learn tissue morphology.
 
-* **Monitoring & Logging** (`launch_training.py`)
-  - MLflow tracking: iperparametri, metriche (loss, accuracy, F1), checkpoints
-  - Experiment versioning: tag per modello, dataset version, seed
-  - Tensorboard integration: visualizzazione loss curves, embedding projections
-  - Slack alerts: notifiche su job completion/failure
+* **Methods:** MoCo v3, DINO v3, iBOT, I-JEPA.
+* **Objective:** Create a robust and generalizable feature extractor.
+* **Implementation:** Backbones defined in `rcc-ssrl/src/training/trainer/backbones.py`.
+
+#### B. Supervised Learning (Baseline)
+
+We train **ResNet-50** architectures in classical supervised manner, utilizing diagnostic labels (ccRCC, pRCC, chRCC, onco) with Cross-Entropy Loss.
+
+* **Supervised (Scratch):** Training from random initialization (`rcc-ssrl/src/training/models/supervised.py`).
+* **Transfer Learning:** Fine-tuning from ImageNet pre-trained weights (`rcc-ssrl/src/training/models/transfer.py`).
+* **Purpose:** Establish the **Upper Bound** of achievable performance with full supervision.
+
+### 4. Downstream & Explainability
+
+* **Evaluation:** Comparison between Linear Probe (on SSL features) and Supervised models at both patch-level and patient-level.
+* **Orchestrator:** A custom engine manages the lifecycle of training, validation, checkpointing, and logging for all paradigms.
+* **XAI Pipeline:** Latent space analysis via semantic projections (PLIP concept scoring) and spatial interpretability (attention rollout maps).
 
 ---
 
-## 3. Self-Supervised Learning Framework
+## 📊 Dataset Overview
 
-Benchmark comparativo di quattro paradigmi SSL SOTA su istologia RCC, con studio sistematico di ablazione.
+The dataset comprises histological whole-slide images from RCC patients, with the following distribution:
 
-### 3.1 SSL Backbones
+* **Total WSIs:** 196 slides from 88 patients
+* **Subtype Distribution:**
+  - ccRCC: 124 slides
+  - pRCC: 48 slides
+  - ONCO: 13 slides
+  - CHROMO: 11 slides
+* **Patch Labels:** Includes `NOT_TUMOR` class for patch-level evaluation
 
-Implementazione di quattro architetture SOTA ottimizzate per dati istopatologici. Ciascuno rappresenta una famiglia di approcci SSL:
+Counts are sourced from `rcc-ssrl/src/data_preprocessing/reports/02_parquet/slides.csv`
 
-#### **MoCo v3** - Contrastive Learning
-- **Principio**: Momentum Contrast - apprende similarity fra augmentazioni della stessa patch
-- **Componenti**:
-  - Query encoder + Key encoder (momentum update)
-  - Contrastive head: 2048→256 dim, cosine similarity loss
-  - Queue buffer: 65.536 negative samples per batch
-- **Iperparametri sperimentali**:
-  - Learning rate: [0.001, 0.01, 0.1] (ablation)
-  - Temperature τ: 0.07 (standard)
-  - Momentum m: 0.999
-- **Risultati**: Macro-F1 **0.945 patient-level, 0.736 patch-level** → **TOP-1 per patch**, stabilità cross-batch
-- **Perché eccelle**: Texture forti in istologia (capillari, lipidi, nuclei) sono catturate efficacemente da contrastive learning
-
-#### **DINO v3** - Self-Distillation
-- **Principio**: Knowledge distillation - lo studente apprende dalle soft target del teacher (EMA)
-- **Componenti**:
-  - Vision Transformer (ViT) student + teacher networks
-  - Distillation head: 2048→256 (student), 2048→256 (teacher)
-  - Centering + sharpening per evitare collapse
-- **Iperparametri sperimentali**:
-  - Temperature τ_s: [0.05, 0.1, 0.15] (student, più cold)
-  - Temperature τ_t: [0.07, 0.1] (teacher)
-  - Weight decay: [0.04, 0.1, 0.4]
-  - Warmup epochs: 10
-- **Risultati**: Macro-F1 **0.786 patient-level, 0.615 patch-level** → Buono per clustering, meno discriminativo
-- **Perché è utile**: Autorappresentazione semantica naturale, buono per visualizzazioni UMAP
-
-#### **iBOT** - Masked Image Modeling
-- **Principio**: Masked Autoencoder - predice patch mancanti (15% mascherati) dal contesto
-- **Componenti**:
-  - Vision Transformer encoder + decoder lightweight
-  - Masked image modeling head: ricostruisce patch masked → 768 dim
-  - Momentum-based consistency (come BYOL)
-- **Iperparametri sperimentali**:
-  - Mask ratio: [0.4, 0.65, 0.75] (% patch mascherati)
-  - Reconstruction loss weight: [0.1, 0.5, 1.0]
-  - Decoder depth: [2, 4, 6] layers
-- **Risultati**: Macro-F1 **0.612 patient-level, 0.529 patch-level** → Moderato, localized features
-- **Perché include**: Complementare a contrastive (cattura local context meglio), utile per rare RCC variants
-
-#### **i-JEPA** - Latent Prediction
-- **Principio**: Joint Embedding Predictive Architecture - predice feature latenti di patch non mascherati da contesto
-- **Componenti**:
-  - Context encoder + target encoder (non aggiornati via backprop per target)
-  - Predictor MLP: latent→latent per minimizzare L2 distance
-  - Stop-gradient su target encoder (no collapse)
-- **Iperparametri sperimentali**:
-  - Predictor depth: [2, 4, 8] layer MLP
-  - Predictor width: [256, 512, 1024] hidden dim
-  - Context patch coverage: [0.85, 0.9, 0.95]
-  - Mask ratio (target): [0.05, 0.1, 0.15]
-- **Risultati**: Macro-F1 **0.354 patient-level, 0.464 patch-level** → Più debole su RCC
-- **Perché include**: Approccio innovativo, utile per feature globali ma meno discriminativo su task medico
-
-> **Summary Table: SSL Architecture Comparison (Patient-level F1)**
-
-| Paradigm | Macro-F1 Patient | Macro-F1 Patch | Rank | Strength | Weakness |
-|----------|------------------|----------------|------|----------|----------|
-| **MoCo v3** | **0.945** | **0.736** | 1st | Discriminative, stable | Requires large batch/queue |
-| **DINO v3** | 0.786 | 0.615 | 2nd | Semantic clustering | Less discriminative |
-| **iBOT** | 0.612 | 0.529 | 3rd | Local context | Moderate performance |
-| **i-JEPA** | 0.354 | 0.464 | 4th | Novel architecture | Weak on histology |
-| Supervised (baseline) | 0.881 | 0.819 | — | Upper bound | Requires labels |
-
-### 3.2 Systematic Ablation Study
-
-Framework sistematico di ricerca per quantificare sensibilità agli iperparametri e identificare configurazioni ottimali.
-
-#### **Automated Config Generation** (`generate_ssl_ablation_configs.py`)
-
-- **Template-based generation**: Definizione astratta di experimenti in JSON
-  ```json
-  {
-    "model": "moco_v3",
-    "ablations": [
-      {"lr": 0.001, "tau": 0.07, "m": 0.999},
-      {"lr": 0.01, "tau": 0.07, "m": 0.999},
-      {"lr": 0.1, "tau": 0.07, "m": 0.999}
-    ]
-  }
-  ```
-- **Scope totale**: 
-  - MoCo v3: 19 ablations
-  - DINO v3: 23 ablations
-  - iBOT: 37 ablations
-  - i-JEPA: 27 ablations
-  - **Total: 106 esperimenti** generati dinamicamente
-
-#### **Launch Orchestration** (`launch_ssl_ablations.sh`)
-
-- **Job submission batch**: Sottomissione massiva a Slurm con dipendenze
-  ```bash
-  # Launch MoCo ablations: abl01-abl20
-  for ablation in {01..20}; do
-    sbatch --job-name=moco_v3_abl${ablation} \
-           --dependency=singleton \
-           train_moco_v3.sbatch $ablation
-  done
-  ```
-- **Manifest tracking** (JSON): Centralizza job metadata
-  ```json
-  {
-    "experiment_id": "exp_20251109_181540_moco_v3",
-    "model": "moco_v3",
-    "ablations": [
-      {"abl01": "job_id_12345", "status": "running"},
-      {"abl02": "job_id_12346", "status": "completed"}
-    ]
-  }
-  ```
-- **Best model selection**: Script `build_main_results_table.py` seleziona per modello il best ablation by **patch-level Macro-F1** (tie-breaker: AUROC > PR-AUC > MinRecall > BalAcc)
-
-#### **Ablation Results Summary**
-
-| Model | N Ablations | Best Ablation | Patch F1 | Patient F1 | Primary Hyperparameter |
-|-------|------------|---------------|----------|-----------|------------------------|
-| MoCo v3 | 19 | abl03 | 0.736 | 0.945 | lr=0.01, τ=0.07 |
-| DINO v3 | 23 | abl03 | 0.615 | 0.786 | τ_s=0.05, τ_t=0.1 |
-| iBOT | 37 | abl04 | 0.529 | 0.612 | mask_ratio=0.65 |
-| i-JEPA | 27 | abl03 | 0.464 | 0.354 | context_coverage=0.9 |
-
-#### **Key Findings from Ablation**
-
-1. **Learning rate sensitivity**: MoCo più stabile across LR range [0.001-0.1]; DINO preferisce lr=0.01
-2. **Temperature effects**: Contrastive τ=0.07 optimal (standard); DINO richiede τ_s<τ_t per stability
-3. **Mask ratio (iBOT)**: Optimal a ~0.65 (goldilocks zone fra information e challenge)
-4. **Batch size impact**: 256 (MoCo/DINO) >> 128 (i-JEPA) per discriminatività
-
-> **Fig. 5: Automated Ablation Framework Architecture**
-> *Workflow: JSON ablation definitions → auto config generation → batch Slurm submission → MLflow tracking → best model selection by patch-F1.*
->
-> *Nota: Le configurazioni di ablazione vengono gestite tramite script automatico nel repository.*
-
-> **Fig. 6: Hyperparameter Sensitivity Analysis**
-> *Quattro grafici (MoCo, DINO, iBOT, i-JEPA): Patch-F1 vs iperparametro primario. MoCo mostra stabilità; DINO più sharper peaks; iBOT/i-JEPA degradano fuori range ottimale.*
-
-### 3.3 Tracciabilità Dati Sezione 3
-
-**Verificabilità e Audit Trail** per garantire assenza di incongruenze:
-
-| Dato Riportato | File Sorgente | Ubicazione | Status |
-|----------------|---------------|-----------|--------|
-| **F1 Scores** (4 modelli) | `main_results_best.csv` | `/evaluation/results/models_results_compare_table/` | ✅ Verificato |
-| **N. Ablations** (MoCo:19, DINO:23, iBOT:37, i-JEPA:27) | `xai_postdiag_summary.json` | `/explainability/output/` | ✅ Verificato |
-| **Total ablations: 106** | Somma manuale | (19+23+37+27) | ✅ Verificato |
-| **Patch size: 224×224** | `config.yaml` | `/data_processing/` | ✅ Verificato |
-| **MPP: 0.5 µm/px** | `config.yaml` | `/data_processing/` | ✅ Verificato |
-| **Balancing mode: equal_per_class** | `config.yaml` | `/data_processing/` | ✅ Verificato |
-
-**Timestamp dati**: Dataset evaluation completato 2025-12-31T01:10:59
+⚠️ **Dataset Note:** The original dataset is proprietary (owned by Politecnico di Torino). However, the pipeline is data-agnostic and can be adapted to other histological datasets.
 
 ---
 
-## 4. Evaluation & Clinical Reliability
+## 📂 Repository Structure
 
-Oltre l'accuratezza: focus sull'affidabilità del modello in contesti medici. Valutazione quantitativa su metriche clinicamente rilevanti.
+The code is organized modularly in `src/`:
 
-## 4. Evaluation & Clinical Reliability
+```text
+rcc-ssrl/src/
+├── data_preprocessing/          # PHASE 1: Data and Metadata Ingestion
+│   ├── 00_wsi-drive-analysis/   # Scripts for filesystem scanning and WSI inventory
+│   ├── 01_rcc_metadata/         # Clinical/pathological metadata enrichment
+│   │   └── rcc_metadata_enrich.py
+│   └── 02_parquet/              # Tabular dataset index creation (slides.parquet)
+│       └── parquet_build.py
+│
+├── data_processing/             # PHASE 2: Image Manipulation and WebDataset
+│   ├── roi_index_and_masks_v3.py       # Dual-Input logic (XML parser & Mask loader)
+│   ├── generate_candidates.py          # Valid patch coordinate identification
+│   ├── balance_and_select.py           # Class balancing (sampling)
+│   └── build_webdataset_balanced.py    # Physical dataset creation (.tar)
+│
+├── training/                    # PHASE 3: Training Loop
+│   ├── configs/                 # Hierarchical configurations (Experiment, Model, Data)
+│   │   └── ablations/           # SSL and supervised experiment configs
+│   ├── models/                  # SSL and SL architectures (MoCo, DINO, iBOT, I-JEPA, Supervised, Transfer)
+│   ├── loss/                    # Loss functions (InfoNCE, KoLeo, iBOT Patch Loss, etc.)
+│   ├── trainer/                 # Lightning modules, Backbones, and Projection Heads
+│   │   └── backbones.py         # ViT-S/16 implementation
+│   ├── orchestrator.py          # Manages training, validation, and checkpoint loops
+│   └── launch_training.py       # Main entry point for training
+│
+├── evaluation/                  # PHASE 4: Validation and Metrics
+│   ├── eval.py                  # Script for Linear Probing and Test Set evaluation
+│   ├── configs/                 # Evaluation configuration files
+│   └── tools/                   # Calibration metrics, risk-coverage, patient aggregation, and result tables
+│       ├── batch_patient_aggregation.py
+│       ├── calibration_and_coverage.py
+│       └── auto_eval.py
+│
+└──explainability/              # PHASE 5: Explainable AI
+   ├── spatial/                 # Attention Rollout map generation
+   ├── concept/                 # PLIP Concept Scoring and semantic analysis
+   └── run_xai_pipeline.sh      # XAI automation script
 
-Oltre l'accuratezza: focus sull'affidabilità del modello in contesti medici. Valutazione quantitativa su metriche clinicamente rilevanti (calibration, risk-coverage, aggregation MIL).
-
-### 4.1 Calibration & Risk-Coverage Analysis
-
-**Motivazione Clinica**: In diagnostica, un modello che "sa di non sapere" è più affidabile di uno confidente su decisioni errate. Quantifichiamo questa affidabilità tramite calibration curves ed Expected Calibration Error (ECE).
-
-#### **Calibration Metrics** (`calibration_and_coverage.py`)
-
-Misura della corrispondenza fra confidenza del modello e accuratezza reale:
-
-- **Expected Calibration Error (ECE)**: Media pesata della deviazione fra confidenza e accuratezza
-  - Formula: ECE = Σ |conf(bin_i) - acc(bin_i)| × #samples(bin_i) / N_total
-  - Intervallo: [0, 1], ideale < 0.1
-  - **Best model (MoCo v3)**: ECE ≈ 0.08 (ben calibrato)
-  - **Transfer learning baseline**: ECE ≈ 0.12 (over-confident su pRCC)
-
-- **Brier Score**: Loss quadratico medio fra prediction probability e ground truth
-  - Formula: BS = (1/N) Σ (p_i - y_i)²
-  - MoCo v3 patch-level: 0.182 (file: `/evaluation/results/models_results_compare_table/main_results_all.csv`)
-
-- **Maximum Calibration Error (MCE)**: Worst-case deviation nella bin più malcalibrata
-  - MoCo v3: MCE ≈ 0.15 (acceptabile per task medico)
-
-#### **Risk-Coverage Trade-off** 
-
-Analizza come la precisione aumenta quando il modello si astiene da decisioni a bassa confidenza:
-
-**MoCo v3 - Risk-Coverage Curve:**
-
-![Risk-Coverage MoCo v3](rcc-ssrl/src/evaluation/results/moco_v3_best_calibration/risk_coverage_patch.png)
-
-- **Coverage**: % di campioni su cui il modello emette predizione
-- **Risk**: 1 - Accuracy sui campioni coperti (quantifica errori relativi)
-- **Risk-Coverage Curve** (`risk_coverage_patch.png`):
-  - A confidence threshold θ=0.90: Coverage 65%, Risk 5% → Model accetta solo predizioni sicure
-  - A θ=0.70: Coverage 95%, Risk 18% → Coverage quasi completa, errori accettabili
-  - **Applicazione clinica**: Patologi ricevono alert only per casi Risk > 10%
-
-#### **Per-Class Calibration**
-
-Verifica che il modello sia calibrato uniformemente su tutti i 4 RCC subtypes:
-
-- **ccRCC**: ECE 0.07 (ben calibrato)
-- **pRCC**: ECE 0.12 (slightly over-confident)
-- **CHROMO**: ECE 0.09 (discreto)
-- **ONCO**: ECE 0.15 (under-confident per low-frequency class)
-
-**Insight**: ONCO (13 WSI, rara) è meno calibrata. Soluzione: aumentare oncocitoma in dataset futuro.
-
-**MoCo v3 - Reliability Diagram:**
-
-![Reliability Diagram MoCo v3](rcc-ssrl/src/evaluation/results/moco_v3_best_calibration/reliability_patch.png)
-
-**DINO v3 - Risk-Coverage Curve:**
-
-![Risk-Coverage DINO v3](rcc-ssrl/src/evaluation/results/dino_v3_best_calibration/risk_coverage_patch.png)
-
-**DINO v3 - Reliability Diagram:**
-
-![Reliability Diagram DINO v3](rcc-ssrl/src/evaluation/results/dino_v3_best_calibration/reliability_patch.png)
-
-### 4.2 Patient-Level Aggregation (Multiple Instance Learning)
-
-**Problema**: Una singola WSI contiene 500-5000 patch. Come aggregare patch-level predictions in diagnosi final di paziente?
-
-#### **Multiple Instance Learning (MIL) Framework**
-
-Approccio weakly-supervised standard per istologia gigapixel:
-
-- **Standard MIL Assumption**: Se uno qualsiasi dei bag members è positivo, il bag è positivo
-  - Non applicabile qui (non è diagnosi binaria; abbiamo 4 classi)
-
-- **Attention-based Aggregation** (`batch_patient_aggregation.py`):
-  ```python
-  # Per paziente p, calcola weighted average dei patch predictions
-  # w_i = attention_weight(patch_i) ∈ [0,1]
-  # y_patient = argmax( Σ w_i × p(class|patch_i) )
-  ```
-  - **Attention weights**: Apprendibilità durante training tramite attention module
-  - Interpretabilità: identifica patch "più discriminativi" per diagnosi
-  - Output: Confidence score per paziente = max(softmax aggregated logits)
-
-#### **Aggregation Results**
-
-| Aggregation Method | Patient Accuracy | Macro-F1 Patient | Mechanism |
-|-------------------|-------------------|------------------|-----------|
-| **Attention Pooling (MoCo v3)** | **0.917** | **0.945** | Learned weighted average |
-| Mean Pooling | 0.833 | 0.881 | Unweighted average |
-| Max Pooling | 0.750 | 0.786 | Takes most confident patch |
-| Majority Vote | 0.667 | 0.800 | Patch-level majority |
-| Supervised (full labels)** | 0.833 | 0.881 | Fully supervised training |
-
-**Best: Attention pooling + MoCo v3 = 0.945 Macro-F1**, supera baseline supervised!
-
-#### **Per-Patient Diagnostic Details**
-
-Tracciamento paziente-specifico (n=12 pazienti test, 4 subtypes × 3 pazienti):
-
-- **ccRCC pazienti** (3):
-  - Confidence media: 94.2% (alta)
-  - Min recall: 100% (nessun false negative)
-  
-- **pRCC pazienti** (3):
-  - Confidence media: 87.1% (moderata)
-  - Min recall: 66.7% (1 FN su 3)
-  
-- **CHROMO pazienti** (3):
-  - Confidence media: 81.5% (bassa)
-  - Min recall: 0% (confuso con ONCO - morfologia simile!)
-  
-- **ONCO pazienti** (3):
-  - Confidence media: 72.3% (bassa)
-  - Min recall: 0% (confuso con CHROMO)
-
-**Insight clinico**: CHROMO vs ONCO è il task più difficile (κ umana = 0.32). SSL raggiunge 72-81% confidence, non confidential diagnosis ma utile per triage.
-
-### 4.3 Tracciabilità Dati Sezione 4
-
-**Verificabilità delle metriche di affidabilità:**
-
-| Metrica | File Sorgente | Ubicazione | Valore | Status |
-|---------|---------------|-----------|--------|--------|
-| **ECE (MoCo v3, patch)** | CSV di calibration analysis | `/evaluation/results/` | 0.08 | ✅ Da generare* |
-| **Patient Accuracy (MoCo v3)** | `main_results_best.csv` | `/evaluation/results/models_results_compare_table/` | 0.917 | ✅ Verificato |
-| **Macro-F1 Patient (MoCo v3)** | `main_results_best.csv` | `/evaluation/results/models_results_compare_table/` | 0.945 | ✅ Verificato |
-| **Attention Pooling Method** | `batch_patient_aggregation.py` | `/evaluation/tools/` | Weighted average | ✅ Codice |
-| **Risk-Coverage Curve** | `risk_coverage_patch.png` | `/evaluation/results/` | θ=0.70: Cov 95%, Risk 18% | ✅ Output |
-| **Per-class ECE** | Calibration analysis | `/evaluation/results/` | Ranges [0.07-0.15] | ✅ Da verificare |
-
-*Nota: Alcuni valori ECE specifici potranno essere rigenerati dal codice `calibration_and_coverage.py` fornito nel repo.
-
-**Timestamp baseline**: Training completato 2025-12-31, evaluation 2026-01-10
+```
 
 ---
 
----
+## 🚀 Reproducibility Guide
 
-## 5. Explainable AI (XAI) & Clinical Interpretation
+### 0. Computational Resources and Execution Environment
 
-Interpretazione dei meccanismi decisionali tramite due approcci complementari: visualizzazione di attenzione (spatial) e allineamento semantico (concept-based).
+Experiments were conducted on the Politecnico di Torino HPC infrastructure, managed via Slurm Workload Manager. The following sections detail the hardware specifications and runtime configurations used for model training (SSL and Baseline):
 
-### 5.1 Attention Rollout - Spatial Explanation
+#### 0.1 Hardware Configuration
 
-**Obiettivo**: Identificare quali regioni della WSI influenzano la predizione del modello.
+* **GPU Accelerators**: Nodes equipped with NVIDIA A40 (48 GB VRAM).
+  * Job configuration: 1 GPU per experiment (default configuration), with scalability via `torchrun`.
+  * Slurm partition: `gpu_a40`.
 
-#### **Attention Rollout Algorithm** (`attention_rollout.py`)
+* **Processors (CPU)**: 8 cores/vCPUs assigned per task (`--cpus-per-task=8`) to ensure optimal throughput for data loading via WebDataset.
 
-Visualizza l'aggregazione della matrice di attenzione multi-head through strati Transformer:
+* **System Memory (RAM)**: 64 GB allocated per node (`--mem=64G`) to handle batch caching and dataloader overhead.
 
-- **Input**: Attention maps da tutti gli strati ViT (depth=12 per ViT-Base)
-- **Process**: Propaga attenzione layer-by-layer, moltiplicando matrici per rollout effect
-- **Output**: Single 2D attention map che evidenzia patch importanti
-- **Interpretazione**: Valori alti = patch discriminativi per la classe predetta
+#### 0.2 Runtime Configuration
 
-#### **Quantitative Metrics per Attention Maps**
+* **Time limit**: Jobs are configured with a wall-clock time limit of 24 hours (`-t 24:00:00`), sufficient for SSL model convergence (MoCo v3, DINO v3) on histological datasets of the considered size.
 
-Verifichiamo che le mappe di attenzione identifichino davvero le aree clinicamente rilevanti:
-
-| Metrica | File Sorgente | Valore | Interpretazione |
-|---------|---------------|--------|-----------------|
-| **Attention ROI Fraction (mean)** | `xai_postdiag_summary.json` | **77%** ± 19% | 77% della attention mass cade dentro manuale ROI |
-| **Attention IoU@90%** | `xai_postdiag_summary.json` | **0.092** ± 0.007 | Intersection-over-Union fra attenzione e ROI boundary |
-| **Top-scoring patch overlap** | Calibration analysis | ~85% | Patch con attenzione max corrisponde istologia tumorale |
-| **Spurious attention ratio** | Visual inspection | <5% | Solo 5% attenzione su artefatti |
-
-**Interpretazione**: MoCo v3 scopre automaticamente le aree tumorali senza supervisione!
-
-#### **Clinical Validation**
-
-Patologi revisionano 10 WSI selezionate: 9/10 (90%) concordano che attenzione maps identificano zone diagnosticamente rilevanti.
-
-> **Fig. 9: Spatial Attention Maps (Attention Rollout)**
-> *Galleria 3×4: (sinistra) Originale H&E, (centro) Manual ROI annotations, (destra) Model attention heatmap.*
-
-### 5.2 Concept-Based Explanations via PLIP
-
-**Motivazione**: Mappe di attenzione spiegano DOVE il modello guarda, non COSA vede. PLIP traduce latenti in linguaggio medico.
-
-#### **PLIP Framework** (Pathology Language-Image Pretraining)
-
-- **Modello base**: Vision-Language model pre-addestrato su testi patologici
-- **Process**: Patch embeddings → CLIP space → cosine similarity con 64 concept embeddings
-- **Output**: Concept scores ∈ [0,1] per patch
-
-#### **64 Concetti Istologici RCC**
-
-Derivati da WHO guidelines:
-- ccRCC (20): "clear cytoplasm", "delicate capillary", "alveolar pattern", etc.
-- pRCC (18): "papillary fronds", "type 1/2 cytology", etc.
-- CHROMO (12): "plant-cell border", "binucleate cells", etc.
-- ONCO (14): "granular cytoplasm", "low nuclear ratio", etc.
-
-#### **Concept Scoring Results**
-
-| Model | Top Concept (ccRCC) | Score | Top Concept (pRCC) | Score |
-|-------|-------------------|-------|-------------------|---------| 
-| **MoCo v3** | "clear cytoplasm" | **0.876** | "papillary fronds" | **0.812** |
-| DINO v3 | "clear cytoplasm" | 0.734 | "type 1 papillary" | 0.698 |
-| iBOT | "mixed cytoplasm" | 0.621 | "papillary pattern" | 0.589 |
-| i-JEPA | "eosinophilic cells" | 0.512 | "fibrovascular core" | 0.481 |
-
-> **Fig. 10: Concept-Based Alignment (PLIP Scoring)**
-> *Heatmap 64 concetti × 4 classi. MoCo mostra struttura block-diagonal (diagonale strong, off-diagonal weak).*
-
-### 5.3 Tracciabilità Dati Sezione 5
-
-| Metrica XAI | File Sorgente | Ubicazione | Valore | Status |
-|-----------|---------------|-----------|--------|--------|
-| **Attention ROI Fraction** | `xai_postdiag_summary.json` | `/explainability/output/` | 77% ± 19% | ✅ Verificato |
-| **Attention IoU@90%** | `xai_postdiag_summary.json` | `/explainability/output/` | 0.092 ± 0.007 | ✅ Verificato |
-| **N. Concetti PLIP** | `concepts_list.yaml` | `/explainability/configs/` | 64 | ✅ Verificato |
+* **Distributed training framework**: Training utilizes `torchrun` in DDP (Distributed Data Parallel) mode, automatically managing inter-GPU communication even in single-node configurations (`--standalone`).
 
 ---
 
-## 6. Experimental Results & Comprehensive Benchmarking
+### 1. Installation
 
-Sintesi quantitativa e qualitativa dei quattro paradigmi SSL su RCC pathology.
-
-### 6.1 Main Performance Table
-
-**Table I: Comprehensive Performance Metrics**
-
-| Model | Patch Acc | Patch F1 | Patient Acc | Patient F1 | AUROC Patient | ECE |
-|-------|-----------|----------|-------------|-----------|---------------|------|
-| **MoCo v3** | 0.750 | **0.736** | **0.917** | **0.945** | **0.984** | **0.082** |
-| DINO v3 | 0.607 | 0.615 | 0.750 | 0.786 | 0.920 | 0.091 |
-| iBOT | 0.618 | 0.529 | 0.833 | 0.612 | 0.967 | 0.105 |
-| i-JEPA | 0.490 | 0.464 | 0.417 | 0.354 | 0.829 | 0.127 |
-| **Supervised (upper bound)** | 0.813 | 0.819 | 0.833 | 0.881 | 0.960 | 0.079 |
-| Transfer Learning | 0.600 | 0.595 | 0.667 | 0.800 | 0.984 | 0.108 |
-
-**Key Observations**:
-- ✅ MoCo v3 supera supervised a livello paziente (0.945 vs 0.881)
-- ✅ MoCo v3 supera transfer learning: F1 0.736 vs 0.595
-- ✅ ECE di MoCo comparable a supervised
-
-### 6.2 Ablation Study Summary
-
-**Table II: Ablation Results (Best per Model)**
-
-| Model | Ablation | Iperparametri Ottimali | Patch F1 | Patient F1 | Stabilità |
-|-------|----------|----------------------|----------|-----------|-----------|
-| **MoCo v3** | abl03 | lr=0.01, τ=0.07, batch=256 | 0.736 | 0.945 | ✅ Stabile |
-| DINO v3 | abl03 | τ_s=0.05, τ_t=0.1, batch=256 | 0.615 | 0.786 | ⚠️ Sensibile |
-| iBOT | abl04 | mask_ratio=0.65, decoder_depth=4 | 0.529 | 0.612 | ⚠️ High variance |
-| i-JEPA | abl03 | context_coverage=0.9, depth=4 | 0.464 | 0.354 | ❌ Instabile |
-
-### 6.3 Per-Subtype Performance
-
-| Subtype | N Test | MoCo F1 | DINO F1 | iBOT F1 | i-JEPA F1 | Difficulty |
-|---------|--------|---------|---------|---------|-----------|-----------|
-| ccRCC | 3 | **0.97** | 0.89 | 0.71 | 0.50 | Easy |
-| pRCC | 3 | **0.96** | 0.78 | 0.67 | 0.41 | Moderate |
-| CHROMO | 3 | **0.88** | 0.67 | 0.52 | 0.30 | Hard |
-| ONCO | 3 | **0.91** | 0.72 | 0.55 | 0.28 | Hard |
-| **Macro** | 12 | **0.945** | 0.786 | 0.612 | 0.354 | — |
-
-### 6.4 Tracciabilità Dati Sezione 6
-
-| Risultato | File Sorgente | Ubicazione | Verificato |
-|-----------|---------------|-----------|------------|
-| **Table I (Main Results)** | `main_results_best.csv` | `/evaluation/results/models_results_compare_table/` | ✅ |
-| **Table II (Ablation)** | `main_results_all.csv` | `/evaluation/results/models_results_compare_table/` | ✅ |
-| **Per-subtype breakdown** | `main_results_best.csv` | `/evaluation/results/models_results_compare_table/` | ✅ |
-
-**Timestamp**: Evaluation completata 2026-01-10.
-
----
-
-## 7. Setup & Reproducibility
-
-* **Environment**: Configurazione tramite `environment.yml`.
-* **Quick Start**:
 ```bash
-# Generazione configurazioni di ablazione
-python src/training/scripts/generate_ssl_ablation_configs.py
+git clone https://github.com/Blackhand01/RCC-SSL.git
+cd RCC-SSL
+conda create -n rcc-ssl python=3.9
+conda activate rcc-ssl
 
-# Lancio del training su Slurm
-./src/training/scripts/launch_ssl_ablations.sh dino_v3
-
+# Install dependencies for all pipeline stages
+pip install -r rcc-ssrl/src/training/requirements.txt
+pip install -r rcc-ssrl/src/data_preprocessing/01_rcc_metadata/requirements.txt
+pip install -r rcc-ssrl/src/data_preprocessing/02_parquet/requirements.txt
+pip install -r rcc-ssrl/src/evaluation/requirements_eval.txt
 ```
 
-
-
 ---
 
----
+### 2. Data Preparation (Flexible)
 
-## APPENDIX A. Architetture dei Modelli Self-Supervised Learning Implementati
+The pipeline requires defining tumor Regions of Interest (ROI). The preprocessing workflow is structured in sequential steps:
 
-### A.1 Panoramica dei Paradigmi SSL
+#### 2.1 Prepare Metadata
 
-Questo repository implementa quattro paradigmi Self-Supervised Learning (SSL) allo stato dell'arte per l'apprendimento di rappresentazioni da patch di istologia RCC non etichettate. Ogni paradigma adotta un principio diverso di contrasto o predizione per imparare feature discriminative senza supervisione:
+Create a `metadata.csv` for your WSIs with the following required columns:
+- `subtype`: RCC subtype label (ccRCC, pRCC, CHROMO, ONCO)
+- `patient_id`: Anonymous patient identifier
+- `wsi_filename`: Filename of the whole-slide image
+- `annotation_xml`: Path to XML annotation file (if using Scenario A)
+- `num_annotations`: Number of annotations
+- `roi_files`: Path to pre-computed ROI masks (if using Scenario B)
+- `num_rois`: Number of ROI masks
+- `source_dir`: Directory containing the WSI
 
-#### **A.1.1 MoCo v3 - Momentum Contrast (Contrastive Learning)**
+See `rcc-ssrl/src/data_preprocessing/01_rcc_metadata/README.md` for detailed specifications.
 
-**Principio Base**: Imparare rappresentazioni contrastando istanze positive (augmentazioni della stessa immagine) contro negative (altre istanze nel batch).
+#### 2.2 Enrich Metadata and Build Index
 
-**Architettura**:
-- **Encoder**: ViT-Base (12 layer, 768 dim hidden) con patch embedding 16×16
-- **Projection Head**: MLP 2-layer (768 → 2048 → 128) per mappare nell'embedding space
-- **Momentum Encoder**: Copia dello encoder aggiornata con momentum τ=0.99
-- **Queue**: Buffer circolare di dimensione 65,536 negativi storici
-- **Loss Function**: NT-Xent (InfoNCE) con temperatura τ=0.07
+```bash
+# Enrich metadata with file system information
+python rcc-ssrl/src/data_preprocessing/01_rcc_metadata/rcc_metadata_enrich.py \
+  --raw-dir <RAW_WSI_ROOT> \
+  --report-dir <REPORT_DIR> \
+  --metadata-csv <METADATA_CSV>
 
-**Principali Iperparametri**:
+# Build slides.parquet index
+python rcc-ssrl/src/data_preprocessing/02_parquet/parquet_build.py \
+  --metadata <REPORT_DIR>/rcc_metadata.csv \
+  --inventory <REPORT_DIR>/wsi_inventory.csv \
+  --output-dir <REPORT_DIR>/02_parquet \
+  --csv-also
+```
+
+#### 2.3 Configure Processing Pipeline
+
+Edit `rcc-ssrl/src/data_processing/config.yaml` with your paths and data splits:
+
 ```yaml
-learning_rate: 0.01
-batch_size: 256
-weight_decay: 1e-4
-warmup_epochs: 10
-tau_momentum: 0.99
+paths:
+  out_masks: /path/to/masks
+  out_candidates: /path/to/candidates
+  out_balanced: /path/to/balanced
+  out_webdataset: /path/to/rcc_webdataset_final
+
+split:
+  folds_json: /path/to/folds.json
 ```
 
-**Vantaggi per RCC Pathology**:
-- ✅ Stabile e robusto su piccoli dataset istologici
-- ✅ Migliori risultati empirici in letteratura per medical imaging
-- ✅ Memory-efficient (queue storica vs on-batch contrast)
-- ✅ Raggiunge F1 patch 0.736 (best tra paradigmi implementati)
+#### 2.4 Generate ROI Masks and WebDataset Shards
 
-**Riferimento Paper**: [MoCo v3: An Empirical Study of Representation Learning with Momentum Contrast](rcc-ssrl/docs/papers/MocoV3.pdf)
+Execute the preprocessing pipeline sequentially:
 
----
+```bash
+# Step 1: Generate ROI masks from XML annotations or load pre-computed masks
+python rcc-ssrl/src/data_processing/roi_index_and_masks_v3.py \
+  --config rcc-ssrl/src/data_processing/config.yaml
 
-#### **A.1.2 DINO v3 - Vision Transformer Self-Distillation**
+# Step 2: Generate candidate patch coordinates
+python rcc-ssrl/src/data_processing/generate_candidates.py \
+  --config rcc-ssrl/src/data_processing/config.yaml \
+  --source both
 
-**Principio Base**: Un teacher network (media mobile) distilla conoscenza in uno student network tramite KL divergence su distribuzioni softmax. Nessun explicit contrastive loss.
+# Step 3: Balance class distribution
+python rcc-ssrl/src/data_processing/balance_and_select.py \
+  --config rcc-ssrl/src/data_processing/config.yaml
 
-**Architettura**:
-- **Student Encoder**: ViT-Base con dropout stochastic depth
-- **Teacher Encoder**: Copia esponenziale mobile del student (momentum τ_t=0.99)
-- **Projection Heads**: Shared MLP per student e teacher, output dimension=65,536 (vocab-like)
-- **Multi-crop Strategy**: 2 global crops (full image) + 8 local crops (96×96 px) per patch
-- **Loss**: KL divergence con temperature annealing (τ_s=0.05 student, τ_t=0.1 teacher)
-
-**Principali Iperparametri**:
-```yaml
-learning_rate: 0.01
-batch_size: 256
-teacher_momentum: 0.99
-tau_student: 0.05
-tau_teacher: 0.1
-warmup_epochs: 10
+# Step 4: Create WebDataset shards (.tar files)
+python rcc-ssrl/src/data_processing/build_webdataset_balanced.py \
+  --config rcc-ssrl/src/data_processing/config.yaml
 ```
 
-**Vantaggi per RCC Pathology**:
-- ✅ Multi-crop strategy cattura feature a scale diverse (utile per histology multi-magnification)
-- ✅ Non richiede explicit negative sampling (computazionalmente efficiente)
-- ✅ Self-distillation produce cluster significativi nello spazio latente
-- ✅ Raggiunge F1 patch 0.615 (secondo miglior paradigma)
-
-**Riferimento Paper**: [DINO v2: Learning Visual Features without Supervision](rcc-ssrl/docs/papers/DinoV3.pdf)
-
 ---
 
-#### **A.1.3 iBOT - Image BERT with Online Tokenizer**
+### 3. Training Experiments
 
-**Principio Base**: Masked Image Modeling (MIM): predire token di patch mascherate tramite decoder. Approccio auto-regressivo ispirato a BERT per visione.
+Training is configured via **YAML** files. Set the dataset root environment variable and launch experiments using the `launch_training.py` script.
 
-**Architettura**:
-- **Encoder**: ViT-Base con patch embedding 16×16
-- **Tokenizer (Online)**: Learned quantization layer che discretizza patch embeddings
-- **Decoder**: Transformer leggero (4 layer) che ricostruisce token dalle patch non-mascherate
-- **Masking Strategy**: Mask ratio=0.65 → 65% patch mascherate, 35% visibili
-- **Loss**: Cross-entropy classification su token predetti
-
-**Principali Iperparametri**:
-```yaml
-learning_rate: 0.0005
-batch_size: 256
-mask_ratio: 0.65
-decoder_depth: 4
-decoder_heads: 16
-warmup_epochs: 5
+```bash
+export RCC_DATASET_ROOT=/path/to/rcc_webdataset_final
 ```
 
-**Vantaggi per RCC Pathology**:
-- ✅ Auto-supervised (nessun contrastive negatives → meno hyperparameter tuning)
-- ✅ Mask ratio ottimale (0.65) bilancia challenge vs information
-- ✅ Decoder lightweight riduce overhead computazionale
-- ✅ Raggiunge F1 patch 0.529 (terzo paradigma)
+#### 3.1 Self-Supervised Learning (SSL)
 
-**Insight Ablation**: Valori mask_ratio < 0.50 → underfitting; > 0.75 → reconstruction troppo facile
+Train SSL models with different paradigms:
 
-**Riferimento Paper**: [iBOT: Image BERT Pre-Training with Online Tokenizer](rcc-ssrl/docs/papers/iBOT.pdf)
+```bash
+# MoCo v3
+python rcc-ssrl/src/training/launch_training.py \
+  --config rcc-ssrl/src/training/configs/ablations/moco_v3/exp_moco_v3_abl03.yaml
 
----
+# DINO v3
+python rcc-ssrl/src/training/launch_training.py \
+  --config rcc-ssrl/src/training/configs/ablations/dino_v3/exp_dino_v3_abl03.yaml
 
-#### **A.1.4 i-JEPA - Image Joint-Embedding Predictive Architecture**
+# iBOT
+python rcc-ssrl/src/training/launch_training.py \
+  --config rcc-ssrl/src/training/configs/ablations/ibot/exp_ibot_abl04.yaml
 
-**Principio Base**: Predict latent (non pixel) di una context view basato su una target view. Latent prediction invece di pixel reconstruction.
-
-**Architettura**:
-- **Context Encoder**: ViT-Base che processa context crops (75% dell'immagine)
-- **Target Encoder**: ViT-Base frozen che processa target crops (25% dell'immagine)
-- **Predictor**: MLP 2-layer che mappa context embeddings → target embeddings
-- **Loss**: MSE nello spazio latente (non pixel space)
-- **Context Coverage**: 90% della patch visibile nel context crop
-
-**Principali Iperparametri**:
-```yaml
-learning_rate: 0.0003
-batch_size: 128  # Inferiore a contrastive (predizione latente è più hard)
-context_coverage: 0.90
-target_coverage: 0.25
-predictor_depth: 4
-warmup_epochs: 10
+# I-JEPA
+python rcc-ssrl/src/training/launch_training.py \
+  --config rcc-ssrl/src/training/configs/ablations/i_jepa/exp_i_jepa_abl03.yaml
 ```
 
-**Vantaggi per RCC Pathology**:
-- ✅ Predizione latente (non pixel) → feature più astratte e semantiche
-- ✅ Computazionalmente efficiente (no momentum encoder, no queue)
-- ❌ **Trade-off**: Meno stabile su small datasets istologici
-- ❌ Raggiunge F1 patch 0.464 (più basso, ma comunque positivo)
+#### 3.2 Supervised Baselines
 
-**Insight Ablation**: Context coverage < 0.80 → target troppo visibile (trivial prediction); > 0.95 → insufficiente context.
+Train supervised models from scratch and with ImageNet initialization:
 
-**Riferimento Paper**: [i-JEPA: The Image Joint-Embedding Predictive Architecture](rcc-ssrl/docs/papers/Jepa.pdf)
+```bash
+# Supervised (ResNet-50 from scratch)
+python rcc-ssrl/src/training/launch_training.py \
+  --config rcc-ssrl/src/training/configs/ablations/supervised/exp_supervised.yaml
 
----
+# Transfer Learning (ResNet-50 ImageNet pre-trained)
+python rcc-ssrl/src/training/launch_training.py \
+  --config rcc-ssrl/src/training/configs/ablations/transfer/exp_transfer.yaml
+```
 
-### A.2 Visualizzazioni Architetturali
-
-#### **Architettura MoCo v3**
-
-![MoCo v3 Architecture](rcc-ssrl/docs/architectures/eraser-moco.png)
-
-*Flusso: Immagine → Augmentazione → Encoder (student) → Projection head → Embedding 128-dim. In parallelo: Momentum encoder (EMA) → Queue storica di negativi. Loss: NT-Xent tra (q, k+) vs (q, k-).*
+*The `orchestrator.py` module automatically detects the training mode (SSL or Supervised) from the configuration file and adapts the training loop accordingly (loss function, metrics, logging).*
 
 ---
 
-#### **Architettura DINO v3**
+### 4. Evaluation and Patient-Level Aggregation
 
-![DINO v3 Architecture](rcc-ssrl/docs/architectures/eraser-dino.png)
+#### 4.1 Linear Probing (SSL Models)
 
-*Flusso: Immagine → Multi-crop (2 global + 8 local) → Student ViT → Projection head → softmax distribution 65k-dim. Teacher: EMA del student. Loss: KL divergence tra student (τ_s=0.05) e teacher (τ_t=0.1) output.*
+For SSL models, assess feature quality via linear probing on frozen representations:
 
----
+```bash
+python rcc-ssrl/src/evaluation/eval.py \
+  --config <EVAL_CONFIG_YAML>
+```
 
-#### **Architettura iBOT**
+**Note:** Evaluation configuration YAMLs in `rcc-ssrl/src/evaluation/configs/` contain absolute paths and must be adapted to your environment. Alternatively, generate new configurations automatically:
 
-![iBOT Architecture](rcc-ssrl/docs/architectures/eraser-ibot.png)
+```bash
+python rcc-ssrl/src/evaluation/tools/auto_eval.py
+```
 
-*Flusso: Immagine → Patch embedding → Online Tokenizer (discretization) → Mask 65% patch → Encoder ViT processa patch non-mascherate → Decoder predice token mascherate. Loss: Cross-entropy su token.*
+#### 4.2 Patient-Level Aggregation
 
----
+Aggregate patch-level predictions to patient-level diagnosis using probability summation:
 
-#### **Architettura i-JEPA**
+```bash
+python rcc-ssrl/src/evaluation/tools/batch_patient_aggregation.py \
+  --mlruns-root <MLRUNS_ROOT> \
+  --method prob_sum
+```
 
-![i-JEPA Architecture](rcc-ssrl/docs/architectures/eraser-ijepa.png)
-
-*Flusso: Immagine → Context view (90%) + Target view (25%) → Context encoder (trainable) → Predictor MLP → predice target embeddings. Target encoder (frozen, EMA). Loss: MSE latente (non pixel).*
-
----
-
-### A.3 Confronto Comparativo dei Paradigmi
-
-| Aspetto | MoCo v3 | DINO v3 | iBOT | i-JEPA |
-|---------|---------|---------|------|--------|
-| **Principio** | Contrastive | Self-distillation | Masked Image Modeling | Latent Prediction |
-| **Loss Function** | NT-Xent (InfoNCE) | KL divergence | Cross-entropy | MSE latente |
-| **Requires Negatives** | ✅ Sì (queue) | ❌ No | ❌ No | ❌ No |
-| **Momentum Encoder** | ✅ Sì | ✅ Sì | ❌ No | ✅ Sì (target) |
-| **Multi-crop Strategy** | ❌ No | ✅ Sì (10 crops) | ❌ No | ❌ No |
-| **Stability (small dataset)** | ⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐ |
-| **Computational Cost** | Medium | Low | Low | Very Low |
-| **Patch F1 (RCC Histology)** | **0.736** | 0.615 | 0.529 | 0.464 |
-| **Patient F1** | **0.945** | 0.786 | 0.612 | 0.354 |
-| **Ablations nel repo** | 19 | 23 | 37 | 27 |
-
-**Conclusion**: **MoCo v3** emerge come architettura ottimale per RCC histopathology nel nostro setting, grazie a:
-1. **Robustezza**: Contrastive learning + momentum encoder stabile su ~300K patch
-2. **Scalabilità**: Queue storica riduce memoria pur mantenendo discriminatività
-3. **Empirical Performance**: +10.6% paziente-level F1 rispetto supervised baseline
+**Important:** Patch-level metrics include the `NOT_TUMOR` class. Patient-level metrics are tumor-only and exclude `NOT_TUMOR` as defined in the aggregation script.
 
 ---
 
-### A.4 Riferimenti ai Paper Originali
+### 5. Explainability (XAI Pipeline)
 
-Tutti i paradigmi implementati si basano su paper seminal in self-supervised learning:
+Generate interpretability analyses including attention rollout maps and PLIP concept scoring:
 
-1. **MoCo v3**: [He et al., "An Empirical Study of Training End-to-End Vision Transformers with Momentum Contrast for Image Classification", ICCV 2023](rcc-ssrl/docs/papers/MocoV3.pdf)
+```bash
+bash rcc-ssrl/src/explainability/run_xai_pipeline.sh
+```
 
-2. **DINO v2**: [Oquab et al., "DINOv2: Learning Robust Visual Features without Supervision", arXiv:2304.07193](rcc-ssrl/docs/papers/DinoV3.pdf)
-
-3. **iBOT**: [Bao et al., "iBOT: Image BERT Pre-Training with Online Tokenizer", ICLR 2022](rcc-ssrl/docs/papers/iBOT.pdf)
-
-4. **i-JEPA**: [Assran et al., "Self-Supervised Learning from Images with Automatic Augmentation", ICML 2023](rcc-ssrl/docs/papers/Jepa.pdf)
-
----
-
-## 8. Contacts & Citation
-
-* **Tuo Nome** - [LinkedIn](https://www.google.com/search?q=link) | [Email](mailto:email)
-* *Candidato per Tesi Magistrale presso ETH/UZH Zurich.*
+This pipeline produces:
+- **Spatial Analysis:** Attention rollout visualizations showing model focus regions
+- **Concept Analysis:** PLIP-based semantic concept scoring in the latent space
 
 ---
 
-Sarebbe utile procedere con la stesura in inglese professionale di una sezione specifica, come quella relativa ai risultati dell'Ablation Study?
+## 📊 Main Results
 
-# Figure e Tabelle per il Paper IEEE
----
+The following results are sourced from `rcc-ssrl/src/evaluation/results/models_results_compare_table/main_results_best.csv`.
 
-### Sezione 1: Data Engineering & Dataset
+**Performance Metrics:**
 
-**Fig. 1: Conceptual Pipeline Overview**
+| Model | Patch Macro-F1 | Patient Macro-F1 | Patient Accuracy |
+|-------|---------------|------------------|------------------|
+| **MoCo v3 (SSL)** | **0.736** | **0.945** | **0.917** |
+| DINO v3 (SSL) | 0.615 | 0.786 | 0.750 |
+| iBOT (SSL) | 0.529 | 0.612 | 0.833 |
+| I-JEPA (SSL) | 0.464 | 0.354 | 0.417 |
+| Supervised (ResNet-50 scratch) | 0.819 | 0.881 | 0.833 |
+| Transfer (ResNet-50 ImageNet) | 0.595 | 0.800 | 0.667 |
 
-* **Descrizione:** Uno schema a blocchi che illustra il flusso end-to-end del progetto: dalla scomposizione dei vetrini (WSI) in patch tramite `webdataset.py`, al training Self-Supervised, fino alla valutazione clinica e interpretabilità.
-* **Perché includerlo:** Fornisce una visione d'insieme della complessità del sistema, mostrando la gestione di pipeline di dati su larga scala.
-USARE DIAGRAMGPT
+**Key Findings:**
 
-**Fig. 2: Dataset Distribution and Patient Stratification**
+- **MoCo v3** achieves the best patient-level performance (0.945 Macro-F1) among SSL methods, demonstrating exceptional ability to learn discriminative low-level features (texture/color) crucial for histological analysis.
 
-* **Descrizione:** Grafico (barre o treemap) che mostra la distribuzione dei sottotipi di carcinoma renale (ccRCC, pRCC, CHROMO, ONCO) e la distinzione tra tessuti tumorali e non tumorali.
-* **Dettaglio tecnico:** Basato sui metadati arricchiti da `rcc_metadata_enrich.py`, indica il numero di pazienti rispetto al numero di patch generate per mostrare la magnitudo del dataset.
+- **Supervised baseline** establishes the upper bound at patch level (0.819 Macro-F1) but requires pixel-level annotations (100% labels), with significant annotation cost.
 
----
+- **DINO v3** produces highly coherent attention maps with strong semantic focus, but global features are less discriminative for linear classification compared to MoCo v3.
 
-### Sezione 2: Performance & Latent Space
+- **iBOT** exhibits training instability on medium-sized datasets and requires complex hyperparameter tuning for the masked image modeling (MIM) + distillation approach.
 
-**Fig. 3: Benchmark Results: SSL Paradigms Comparison**
+- **I-JEPA** shows slow convergence as the predictive approach in latent space struggles to model the high variance of tumor textures.
 
-* **Descrizione:** Confronto delle metriche (Accuracy, F1-score, Precision) tra i modelli implementati: **DINO v3, i-JEPA, iBOT e MoCo v3**.
-* **Riferimento codice:** Generato tramite `build_main_results_table.py` utilizzando i risultati delle valutazioni su patch e paziente.
-
-**Fig. 4: Latent Space Visualization (UMAP/t-SNE)**
-
-* **Descrizione:** Proiezione 2D degli embeddings estratti dal backbone SSL, dove ogni punto rappresenta una patch colorata per sottotipo istologico.
-* **Perché includerlo:** Dimostra visivamente la capacità del modello di raggruppare i tessuti in modo biologicamente coerente senza l'uso di etichette durante il training (clustering naturale).
+- **Transfer Learning** from ImageNet provides moderate performance, indicating limited domain transfer from natural images to histological tissue.
 
 ---
 
-### Sezione 3: Systematic Ablation Study (Novità)
+## 🤝 Citation
 
-**Fig. 5: Automated Ablation Framework Architecture**
+If you use this code or results in your research work, please cite the paper:
 
-* **Descrizione:** Schema del sistema di gestione degli esperimenti che utilizza `generate_ssl_ablation_configs.py` per creare configurazioni dinamiche partendo da template YAML e definizioni JSON.
-* **Perché includerlo:** Dimostra la scalabilità della ricerca e l'efficienza ingegneristica nella gestione di decine di varianti del modello.
 
-**Fig. 6: Hyperparameter Sensitivity Analysis**
+S. Bisignano, M. Di Maggio, "Self-Supervised Learning for Renal Cell Carcinoma Subtyping on Whole-Slide Images," in Polytechnic of Turin project, 2026.
 
-* **Descrizione:** Grafici che mostrano l'impatto della variazione di parametri chiave (es. peso della *iBOT loss*, numero di prototipi nella head, profondità del predittore i-JEPA) sulle performance finali.
-* **Dettaglio tecnico:** Basato sulle suite di esperimenti definite in `dino_v3_ablations.json` e `i_jepa_ablations.json`.
+
 
 ---
 
-### Sezione 4: Reliability & Clinical Trust
+## ⚖️ Medical Disclaimer
 
-**Fig. 7: Reliability Plot (Calibration Curve)**
-
-* **Descrizione:** Grafico che mette in relazione la confidenza dichiarata dal modello con l'accuratezza reale delle predizioni.
-* **Riferimento codice:** Corrisponde al file `reliability_patch.png` prodotto dallo script `calibration_and_coverage.py`.
-* **Nota per il paper:** Dimostra che il modello è "calibrato" (ECE ridotto), evitando un'eccessiva sicurezza in caso di incertezza clinica.
-
-**Fig. 8: Risk-Coverage Curves**
-
-* **Descrizione:** Analisi della capacità del modello di astenersi dal classificare patch con bassa confidenza per aumentare la precisione complessiva.
-* **Riferimento codice:** File `risk_coverage_patch.png` generato in fase di valutazione. Fondamentale per contesti medici dove l'errore ha un costo elevato.
-
----
-
-### Sezione 5: Explainability (XAI)
-
-**Fig. 9: Spatial Attention Maps (Attention Rollout)**
-
-* **Descrizione:** Galleria comparativa che affianca l'immagine originale (H&E) alla mappa di attenzione generata dal Transformer tramite l'algoritmo di rollout.
-* **Riferimento codice:** Output di `attention_rollout.py`, selezionando esempi dove il modello identifica correttamente strutture patologiche rilevanti.
-
-**Fig. 10: Concept-Based Alignment (PLIP Scoring)**
-
-* **Descrizione:** Heatmap o istogramma che mostra il punteggio di similarità tra le feature latenti e concetti medici testuali (es. "clear cytoplasm", "necrosis").
-* **Riferimento codice:** Basato sull'integrazione del modello Vision-Language PLIP in `scoring.py`. Rappresenta la frontiera dell'interpretabilità semantica.
-
----
-
-### Tabelle per il Paper IEEE
-
-**Table I: Main Performance Comparison (Patch vs Patient)**
-
-* **Descrizione:** Sintesi delle prestazioni dei vari modelli SSL aggregando i risultati a livello di singolo paziente.
-* **Colonne:** Model, Patch Accuracy, Patient Accuracy, F1-Score, ECE (Expected Calibration Error).
-* **Riferimento codice:** Basato sui risultati di `batch_patient_aggregation.py`.
-
-**Table II: Ablation Experiment Summary**
-
-* **Descrizione:** Tabella che riassume le diverse varianti testate durante lo studio di ablazione, evidenziando la configurazione ottimale.
-* **Riferimento codice:** Estratta dai log di MLflow organizzati tramite `launch_ssl_ablations.sh`.
-
----
-
-### Visual Abstract (Portfolio & Recruiter)
-
-Per sponsorizzare il progetto a **Zurigo**, crea un'immagine singola ad alto impatto che contenga:
-
-1. Uno zoom su una slide con **Attention Map** (Fig. 9).
-2. Il grafico **UMAP** (Fig. 4) per mostrare l'organizzazione biologica.
-3. Una breve frase: *"Scalable Self-Supervised Learning for Interpretable Renal Pathology"*.
+**For research purposes only.** This software is not a medical device. It is not approved for clinical diagnosis or therapeutic decisions. Models are provided "as is" to promote research in computational pathology.
