@@ -210,7 +210,6 @@ outputs/
 src/explainability/output/
 src/explainability/docs/
 docs/references
-docs/ablation_showcase
 docs/old
 src/explainability/spatial/trace_spatial.md
 src/post_processing
@@ -221,3 +220,17 @@ __pycache__/
 *.lock
 trace*
 trace_*
+experiment_snapshot.yaml
+final_metrics.json
+*__ssl_linear_summary.json
+*__ssl_timeseries.csv
+*__ssl_linear_timeseries.csv
+per_patient/metrics_patient.json
+*__ssl_summary.json
+*__ssl_features_umap.png
+*__ssl_linear_acc.png
+*__ssl_linear_loss.png
+*__ssl_losses.png
+*__ssl_lr.png
+*_ssl_linear_best.json
+report_per_class.json
