@@ -145,11 +145,11 @@ def make_stats(df: pd.DataFrame) -> dict:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--metadata", type=str, required=False,
-                    default="/home/mla_group_01/rcc-ssrl/configs/rcc_metadata.csv")
+                    default="/home/mla_group_01/configs/rcc_metadata.csv")
     ap.add_argument("--inventory", type=str, required=False,
-                    default="/home/mla_group_01/rcc-ssrl/reports/0_phase/wsi_inventory.csv")
+                    default="/home/mla_group_01/reports/0_phase/wsi_inventory.csv")
     ap.add_argument("--output-dir", type=str, required=False,
-                    default="/home/mla_group_01/rcc-ssrl/reports/02_parquet")
+                    default="/home/mla_group_01/reports/02_parquet")
     ap.add_argument("--csv-also", action="store_true", help="Also write slides.csv")
     args = ap.parse_args()
 

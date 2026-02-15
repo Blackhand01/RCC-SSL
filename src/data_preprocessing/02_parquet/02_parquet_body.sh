@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Usage: bash 02_parquet_body.sh [METADATA_CSV] [OUTPUT_DIR] [INVENTORY_CSV]
 set -euo pipefail
-METADATA_CSV="${1:-/home/mla_group_01/rcc-ssrl/configs/rcc_metadata.csv}"
-OUTPUT_DIR="${2:-/home/mla_group_01/rcc-ssrl/reports/02_parquet}"
-INVENTORY_CSV="${3:-/home/mla_group_01/rcc-ssrl/reports/0_phase/wsi_inventory.csv}"
+METADATA_CSV="${1:-/home/mla_group_01/configs/rcc_metadata.csv}"
+OUTPUT_DIR="${2:-/home/mla_group_01/reports/02_parquet}"
+INVENTORY_CSV="${3:-/home/mla_group_01/reports/0_phase/wsi_inventory.csv}"
 
 echo "[INFO] JobID : ${SLURM_JOB_ID:-N/A}"
 echo "[INFO] Host  : $(hostname)"
@@ -15,7 +15,7 @@ echo "[INFO] OUTPUT    = ${OUTPUT_DIR}"
 module purge >/dev/null 2>&1 || true
 module load python/3.10 >/dev/null 2>&1 || true
 
-VENV_DIR="/home/mla_group_01/rcc-ssrl/.venvs/rcc"
+VENV_DIR="/home/mla_group_01/.venvs/rcc"
 ACT="${VENV_DIR}/bin/activate"
 if [[ -f "$ACT" ]]; then
   # shellcheck disable=SC1090

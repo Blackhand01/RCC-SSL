@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=no_roi_test
-#SBATCH -o /home/mla_group_01/rcc-ssrl/src/logs/xai/no_roi.%j.out
-#SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/xai/no_roi.%j.err
+#SBATCH -o /home/mla_group_01/src/logs/xai/no_roi.%j.out
+#SBATCH -e /home/mla_group_01/src/logs/xai/no_roi.%j.err
 #SBATCH -p gpu_a40
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
@@ -12,7 +12,7 @@
 set -euo pipefail
 
 export PROJECT_ROOT="/home/mla_group_01/rcc-ssrl"
-export VENV_DIR="/home/mla_group_01/rcc-ssrl/.venvs/xai"
+export VENV_DIR="/home/mla_group_01/.venvs/xai"
 
 mkdir -p "$PROJECT_ROOT/src/logs/xai" \
          "$PROJECT_ROOT/src/explainability/output/no_roi/logs"

@@ -1,5 +1,5 @@
 # Self-Supervised Learning for Renal Cell Carcinoma Subtyping
-![dataset_patches](rcc-ssrl/docs/img/patches.png)
+![dataset_patches](docs/img/patches.png)
 
 This repository hosts a comprehensive computational pathology pipeline for Renal Cell Carcinoma (RCC) subtyping. The project addresses the challenge of medical annotation scarcity (label scarcity) by leveraging **Self-Supervised Learning (SSL)** techniques to learn robust morphological representations from unlabeled data, benchmarked against **Supervised Baselines** trained on labeled patches.
 
@@ -12,7 +12,7 @@ Draft manuscript: `paper.tex` (root).
 
 The project is structured as a sequential pipeline. During data preparation, we support **multiple ROI sources** for tumor region identification. In the experiments reported in the paper, ccRCC/pRCC rely on **expert XML annotations**, while CHROMO/ONCO use **ROI slides / provided ROI masks**. The pipeline also supports ingesting **pre-computed binary masks** (e.g., from an external segmentation model) when available.
 
-![pipeline](rcc-ssrl/docs/img/ssl_architecture.png)
+![pipeline](docs/img/ssl_architecture.png)
 
 ### 1. Data Engineering (ETL)
 
@@ -30,14 +30,14 @@ Tissue is subdivided into 224×224 patches (20× equivalent, 0.50 mpp target res
 
 **Preprocessing Pipeline Diagram:**
 
-![preproces_graph](rcc-ssrl/docs/img/preprocess_graph.png)
+![preproces_graph](docs/img/preprocess_graph.png)
 
 **Patch Settings:**
 - Patch size: 224 px
 - Target resolution: 0.50 µm/px (≈20×)
 - Minimum tissue ratio: 0.10
 
-Settings are sourced from `rcc-ssrl/src/data_processing/config.yaml`.
+Settings are sourced from `src/data_processing/config.yaml`.
 
 ### 3. Training Strategies
 
@@ -49,14 +49,14 @@ We train a **ViT-S/16** (`vit_small_patch16_224`) backbone without using diagnos
 
 * **Methods:** MoCo v3, DINO v3, iBOT, I-JEPA.
 * **Objective:** Create a robust and generalizable feature extractor.
-* **Implementation:** Backbones defined in `rcc-ssrl/src/training/trainer/backbones.py`.
+* **Implementation:** Backbones defined in `src/training/trainer/backbones.py`.
 
 #### B. Supervised Learning (Baseline)
 
 We train **ResNet-50** architectures in classical supervised manner, utilizing diagnostic labels (ccRCC, pRCC, CHROMO, ONCO) with Cross-Entropy Loss.
 
-* **Supervised (Scratch):** Training from random initialization (`rcc-ssrl/src/training/models/supervised.py`).
-* **Transfer Learning:** Fine-tuning from ImageNet pre-trained weights (`rcc-ssrl/src/training/models/transfer.py`).
+* **Supervised (Scratch):** Training from random initialization (`src/training/models/supervised.py`).
+* **Transfer Learning:** Fine-tuning from ImageNet pre-trained weights (`src/training/models/transfer.py`).
 * **Purpose:**  Provide a **strong supervised reference baseline** for comparison against SSL under the same preprocessing and splits.
 
 ### 4. Downstream & Explainability
@@ -80,7 +80,7 @@ The dataset comprises histological whole-slide images from RCC patients, with th
 * **Patches:** ~168k H&E patches used in the benchmark 
 * **Patch Labels:** Includes `NOT_TUMOR` class for patch-level evaluation
 
-Counts are sourced from `rcc-ssrl/src/data_preprocessing/reports/02_parquet/slides.csv`
+Counts are sourced from `src/data_preprocessing/reports/02_parquet/slides.csv`
 
 ⚠️ **Dataset Note:** The original dataset is proprietary (owned by Politecnico di Torino). However, the pipeline is data-agnostic and can be adapted to other histological datasets.
 
@@ -91,7 +91,7 @@ Counts are sourced from `rcc-ssrl/src/data_preprocessing/reports/02_parquet/slid
 The code is organized modularly in `src/`:
 
 ```text
-rcc-ssrl/src/
+src/
 ├── data_preprocessing/          # PHASE 1: Data and Metadata Ingestion
 │   ├── 00_wsi-drive-analysis/   # Scripts for filesystem scanning and WSI inventory
 │   ├── 01_rcc_metadata/         # Clinical/pathological metadata enrichment
@@ -165,10 +165,10 @@ conda create -n rcc-ssl python=3.9
 conda activate rcc-ssl
 
 # Install dependencies for all pipeline stages
-pip install -r rcc-ssrl/src/training/requirements.txt
-pip install -r rcc-ssrl/src/data_preprocessing/01_rcc_metadata/requirements.txt
-pip install -r rcc-ssrl/src/data_preprocessing/02_parquet/requirements.txt
-pip install -r rcc-ssrl/src/evaluation/requirements_eval.txt
+pip install -r src/training/requirements.txt
+pip install -r src/data_preprocessing/01_rcc_metadata/requirements.txt
+pip install -r src/data_preprocessing/02_parquet/requirements.txt
+pip install -r src/evaluation/requirements_eval.txt
 ```
 
 ---
@@ -189,19 +189,19 @@ Create a `metadata.csv` for your WSIs with the following required columns:
 - `num_rois`: Number of ROI masks
 - `source_dir`: Directory containing the WSI
 
-See `rcc-ssrl/src/data_preprocessing/01_rcc_metadata/README.md` for detailed specifications.
+See `src/data_preprocessing/01_rcc_metadata/README.md` for detailed specifications.
 
 #### 2.2 Enrich Metadata and Build Index
 
 ```bash
 # Enrich metadata with file system information
-python rcc-ssrl/src/data_preprocessing/01_rcc_metadata/rcc_metadata_enrich.py \
+python src/data_preprocessing/01_rcc_metadata/rcc_metadata_enrich.py \
   --raw-dir <RAW_WSI_ROOT> \
   --report-dir <REPORT_DIR> \
   --metadata-csv <METADATA_CSV>
 
 # Build slides.parquet index
-python rcc-ssrl/src/data_preprocessing/02_parquet/parquet_build.py \
+python src/data_preprocessing/02_parquet/parquet_build.py \
   --metadata <REPORT_DIR>/rcc_metadata.csv \
   --inventory <REPORT_DIR>/wsi_inventory.csv \
   --output-dir <REPORT_DIR>/02_parquet \
@@ -210,7 +210,7 @@ python rcc-ssrl/src/data_preprocessing/02_parquet/parquet_build.py \
 
 #### 2.3 Configure Processing Pipeline
 
-Edit `rcc-ssrl/src/data_processing/config.yaml` with your paths and data splits:
+Edit `src/data_processing/config.yaml` with your paths and data splits:
 
 ```yaml
 paths:
@@ -229,21 +229,21 @@ Execute the preprocessing pipeline sequentially:
 
 ```bash
 # Step 1: Generate ROI masks from XML annotations or load pre-computed masks
-python rcc-ssrl/src/data_processing/roi_index_and_masks_v3.py \
-  --config rcc-ssrl/src/data_processing/config.yaml
+python src/data_processing/roi_index_and_masks_v3.py \
+  --config src/data_processing/config.yaml
 
 # Step 2: Generate candidate patch coordinates
-python rcc-ssrl/src/data_processing/generate_candidates.py \
-  --config rcc-ssrl/src/data_processing/config.yaml \
+python src/data_processing/generate_candidates.py \
+  --config src/data_processing/config.yaml \
   --source both
 
 # Step 3: Balance class distribution
-python rcc-ssrl/src/data_processing/balance_and_select.py \
-  --config rcc-ssrl/src/data_processing/config.yaml
+python src/data_processing/balance_and_select.py \
+  --config src/data_processing/config.yaml
 
 # Step 4: Create WebDataset shards (.tar files)
-python rcc-ssrl/src/data_processing/build_webdataset_balanced.py \
-  --config rcc-ssrl/src/data_processing/config.yaml
+python src/data_processing/build_webdataset_balanced.py \
+  --config src/data_processing/config.yaml
 ```
 
 ---
@@ -262,20 +262,20 @@ Train SSL models with different paradigms:
 
 ```bash
 # MoCo v3
-python rcc-ssrl/src/training/launch_training.py \
-  --config rcc-ssrl/src/training/configs/ablations/moco_v3/exp_moco_v3_abl03.yaml
+python src/training/launch_training.py \
+  --config src/training/configs/ablations/moco_v3/exp_moco_v3_abl03.yaml
 
 # DINO v3
-python rcc-ssrl/src/training/launch_training.py \
-  --config rcc-ssrl/src/training/configs/ablations/dino_v3/exp_dino_v3_abl03.yaml
+python src/training/launch_training.py \
+  --config src/training/configs/ablations/dino_v3/exp_dino_v3_abl03.yaml
 
 # iBOT
-python rcc-ssrl/src/training/launch_training.py \
-  --config rcc-ssrl/src/training/configs/ablations/ibot/exp_ibot_abl04.yaml
+python src/training/launch_training.py \
+  --config src/training/configs/ablations/ibot/exp_ibot_abl04.yaml
 
 # I-JEPA
-python rcc-ssrl/src/training/launch_training.py \
-  --config rcc-ssrl/src/training/configs/ablations/i_jepa/exp_i_jepa_abl03.yaml
+python src/training/launch_training.py \
+  --config src/training/configs/ablations/i_jepa/exp_i_jepa_abl03.yaml
 ```
 
 #### 3.2 Supervised Baselines
@@ -284,12 +284,12 @@ Train supervised models from scratch and with ImageNet initialization:
 
 ```bash
 # Supervised (ResNet-50 from scratch)
-python rcc-ssrl/src/training/launch_training.py \
-  --config rcc-ssrl/src/training/configs/ablations/supervised/exp_supervised.yaml
+python src/training/launch_training.py \
+  --config src/training/configs/ablations/supervised/exp_supervised.yaml
 
 # Transfer Learning (ResNet-50 ImageNet pre-trained)
-python rcc-ssrl/src/training/launch_training.py \
-  --config rcc-ssrl/src/training/configs/ablations/transfer/exp_transfer.yaml
+python src/training/launch_training.py \
+  --config src/training/configs/ablations/transfer/exp_transfer.yaml
 ```
 
 *The `orchestrator.py` module automatically detects the training mode (SSL or Supervised) from the configuration file and adapts the training loop accordingly (loss function, metrics, logging).*
@@ -303,14 +303,14 @@ python rcc-ssrl/src/training/launch_training.py \
 For SSL models, assess feature quality via linear probing on frozen representations:
 
 ```bash
-python rcc-ssrl/src/evaluation/eval.py \
+python src/evaluation/eval.py \
   --config <EVAL_CONFIG_YAML>
 ```
 
-**Note:** Evaluation configuration YAMLs in `rcc-ssrl/src/evaluation/configs/` contain absolute paths and must be adapted to your environment. Alternatively, generate new configurations automatically:
+**Note:** Evaluation configuration YAMLs in `src/evaluation/configs/` contain absolute paths and must be adapted to your environment. Alternatively, generate new configurations automatically:
 
 ```bash
-python rcc-ssrl/src/evaluation/tools/auto_eval.py
+python src/evaluation/tools/auto_eval.py
 ```
 
 #### 4.2 Patient-Level Aggregation
@@ -318,7 +318,7 @@ python rcc-ssrl/src/evaluation/tools/auto_eval.py
 Aggregate patch-level predictions to patient-level diagnosis using probability summation:
 
 ```bash
-python rcc-ssrl/src/evaluation/tools/batch_patient_aggregation.py \
+python src/evaluation/tools/batch_patient_aggregation.py \
   --mlruns-root <MLRUNS_ROOT> \
   --method prob_sum
 ```
@@ -332,7 +332,7 @@ python rcc-ssrl/src/evaluation/tools/batch_patient_aggregation.py \
 Generate interpretability analyses including attention rollout maps and PLIP concept scoring:
 
 ```bash
-bash rcc-ssrl/src/explainability/run_xai_pipeline.sh
+bash src/explainability/run_xai_pipeline.sh
 ```
 
 This pipeline produces:
@@ -343,7 +343,7 @@ This pipeline produces:
 
 ## 📊 Main Results
 
-The following results are sourced from `rcc-ssrl/src/evaluation/results/models_results_compare_table/main_results_best.csv`.
+The following results are sourced from `src/evaluation/results/models_results_compare_table/main_results_best.csv`.
 
 ⚠️ **Patient-level note:** tumor-only patient-level evaluation on the held-out test split is computed on **Npat(T)=12** tumor patients and should be interpreted with caution
 

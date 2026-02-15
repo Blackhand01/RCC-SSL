@@ -5,8 +5,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH -t 24:00:00
-#SBATCH -o /home/mla_group_01/rcc-ssrl/src/logs/train/%x.%j.out
-#SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/train/%x.%j.err
+#SBATCH -o /home/mla_group_01/src/logs/train/%x.%j.out
+#SBATCH -e /home/mla_group_01/src/logs/train/%x.%j.err
 
 #SBATCH --exclude=compute-5-14,compute-5-11,compute-3-12,compute-3-15,compute-4-13
 # The job name and log paths are overridden by --job-name/--output/--error from sbatch
@@ -44,7 +44,7 @@ fi
 
 # -------- Environment (venv/modules) ------------------------------------------
 # Use a specific, fixed venv path
-VENV_PATH="/home/mla_group_01/rcc-ssrl/.venvs/train"
+VENV_PATH="/home/mla_group_01/.venvs/train"
 if [[ -f "${VENV_PATH}/bin/activate" ]]; then
   source "${VENV_PATH}/bin/activate"
 else

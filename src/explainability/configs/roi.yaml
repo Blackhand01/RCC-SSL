@@ -2,8 +2,8 @@
 # Unified defaults: NO-ROI profile is included under profiles.no_roi.
 
 inputs:
-  calibration_metadata_dir: /home/mla_group_01/rcc-ssrl/src/explainability/output/calibration/metadata
-  shortlist_yaml: /home/mla_group_01/rcc-ssrl/src/explainability/output/calibration/analysis/concepts_shortlist.yaml
+  calibration_metadata_dir: /home/mla_group_01/src/explainability/output/calibration/metadata
+  shortlist_yaml: /home/mla_group_01/src/explainability/output/calibration/analysis/concepts_shortlist.yaml
 
 plip:
   model_id: vinid/plip
@@ -49,8 +49,8 @@ data:
 profiles:
   no_roi:
     inputs:
-      calibration_metadata_dir: /home/mla_group_01/rcc-ssrl/src/explainability/output/calibration/metadata
-      shortlist_yaml: /home/mla_group_01/rcc-ssrl/src/explainability/output/calibration/analysis/concepts_shortlist.yaml
+      calibration_metadata_dir: /home/mla_group_01/src/explainability/output/calibration/metadata
+      shortlist_yaml: /home/mla_group_01/src/explainability/output/calibration/analysis/concepts_shortlist.yaml
       use_shortlist_only: true
     plip:
       model_id: vinid/plip

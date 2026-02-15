@@ -234,7 +234,7 @@ class Orchestrator:
                 from src.training.tools.dump_augmentations import dump_from_config
                 out_root = viz_cfg.get(
                     "out_root",
-                    "/home/mla_group_01/rcc-ssrl/src/training/configs/ablations/augms"
+                    "/home/mla_group_01/src/training/configs/ablations/augms"
                 )
                 per_class = int(viz_cfg.get("per_class", 2))
                 dump_from_config(self.cfg, out_root=out_root, per_class=per_class, seed=self.cfg["experiment"].get("seed"))

@@ -6,24 +6,24 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=24:00:00
-#SBATCH -o /home/mla_group_01/rcc-ssrl/src/logs/eval/eval.%j.out
-#SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/eval/eval.%j.err
+#SBATCH -o /home/mla_group_01/src/logs/eval/eval.%j.out
+#SBATCH -e /home/mla_group_01/src/logs/eval/eval.%j.err
 #SBATCH --exclude=compute-5-14,compute-5-11,compute-3-12
 
 set -euo pipefail
 
-WORKDIR="/home/mla_group_01/rcc-ssrl/src/evaluation"
-VENV="/home/mla_group_01/rcc-ssrl/.venvs/eval"
+WORKDIR="/home/mla_group_01/src/evaluation"
+VENV="/home/mla_group_01/.venvs/eval"
 PYTHON="$VENV/bin/python"
 
-mkdir -p /home/mla_group_01/rcc-ssrl/src/logs/eval
+mkdir -p /home/mla_group_01/src/logs/eval
 cd "$WORKDIR"
 
 # venv bootstrap (idempotente)
 [[ -f "$VENV/bin/activate" ]] || python3 -m venv "$VENV"
 source "$VENV/bin/activate"
 pip -q install --upgrade pip
-pip -q install -r /home/mla_group_01/rcc-ssrl/src/evaluation/requirements_eval.txt
+pip -q install -r /home/mla_group_01/src/evaluation/requirements_eval.txt
 
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1

@@ -5,8 +5,8 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=4G
 #SBATCH --time=00:20:00
-#SBATCH -o /home/mla_group_01/rcc-ssrl/src/logs/eval/%x.%j.out
-#SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/eval/%x.%j.err
+#SBATCH -o /home/mla_group_01/src/logs/eval/%x.%j.out
+#SBATCH -e /home/mla_group_01/src/logs/eval/%x.%j.err
 
 set -euo pipefail
 

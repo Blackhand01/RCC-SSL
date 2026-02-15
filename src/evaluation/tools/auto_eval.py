@@ -1,4 +1,4 @@
-# file: /home/mla_group_01/rcc-ssrl/src/evaluation/tools/auto_eval.py
+# file: /home/mla_group_01/src/evaluation/tools/auto_eval.py
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -8,7 +8,7 @@ Auto-discover SSL runs from mlruns, build eval YAMLs, and (optionally) submit SL
 - Fixed defaults for WebDataset test set (override via env RCC_WDS_TEST_DIR or CLI).
 - Prefers class_order and backbone from experiment_snapshot.yaml.
 - Outputs eval results inside the *same run folder*: <run_dir>/eval.
-- Writes generated eval configs to /home/mla_group_01/rcc-ssrl/src/evaluation/auto_configs.
+- Writes generated eval configs to /home/mla_group_01/src/evaluation/auto_configs.
 """
 
 import os
@@ -279,7 +279,7 @@ def main():
         if not sb.is_file():
             raise SystemExit(
                 f"[ERROR] SBATCH file not found: {sb}\n"
-                f"Pass --sbatch-path /home/mla_group_01/rcc-ssrl/src/evaluation/eval_models.sbatch if needed."
+                f"Pass --sbatch-path /home/mla_group_01/src/evaluation/eval_models.sbatch if needed."
             )
         for cfg in out_cfgs:
             env = os.environ.copy()

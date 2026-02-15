@@ -3,7 +3,7 @@
 experiment:
   name: "xai_ssl_rcc_vit_spatial"
   seed: 1337
-  outputs_root: "/home/mla_group_01/rcc-ssrl/src/explainability/output/spatial"
+  outputs_root: "/home/mla_group_01/src/explainability/output/spatial"
   run_id: "default"
 
 evaluation_inputs:

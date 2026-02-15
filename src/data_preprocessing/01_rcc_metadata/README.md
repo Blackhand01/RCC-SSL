@@ -14,7 +14,7 @@
 ## Rapid execution
 ```bash
 export RAW_DATA_DIR=/beegfs-scratch/.../data/raw
-export REPORT_DIR=/home/mla_group_01/rcc-ssrl/reports/0_phase
+export REPORT_DIR=/home/mla_group_01/reports/0_phase
 # opzionale: export METADATA_CSV=$REPORT_DIR/metadata.csv
 $HOME_ROOT/scripts/rcc_metadata/run.sh
 ```

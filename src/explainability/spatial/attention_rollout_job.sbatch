@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=attn_rollout
-#SBATCH -o /home/mla_group_01/rcc-ssrl/src/logs/xai/attn_rollout.%j.out
-#SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/xai/attn_rollout.%j.err
+#SBATCH -o /home/mla_group_01/src/logs/xai/attn_rollout.%j.out
+#SBATCH -e /home/mla_group_01/src/logs/xai/attn_rollout.%j.err
 #SBATCH -p gpu_a40
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
@@ -70,7 +70,7 @@ BATCH_SIZE="${BATCH_SIZE:-1}"
 SEED="${SEED:-1337}"
 
 # venv (opzionale)
-VENV_PATH="${VENV_PATH:-/home/mla_group_01/rcc-ssrl/.venvs/xai}"
+VENV_PATH="${VENV_PATH:-/home/mla_group_01/.venvs/xai}"
 if [[ -n "${VENV_PATH}" && -d "${VENV_PATH}" && -f "${VENV_PATH}/bin/activate" ]]; then
   # shellcheck disable=SC1090
   source "${VENV_PATH}/bin/activate"

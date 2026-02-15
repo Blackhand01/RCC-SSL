@@ -21,7 +21,7 @@ split:
 
 # paths
 paths:
-  parquet: "/home/mla_group_01/rcc-ssrl/reports/02_parquet/slides.parquet"
+  parquet: "/home/mla_group_01/reports/02_parquet/slides.parquet"
   out_masks: "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_masks_v3"
   out_candidates: "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_candidates_v2"
   out_balanced: "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/data/processed/rcc_balanced_v2"

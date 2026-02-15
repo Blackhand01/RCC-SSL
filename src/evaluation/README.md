@@ -56,7 +56,7 @@ Execution: automatic evaluation
 
 Example: run automatic evaluation on all runs within an MLflow experiment (exp_20251118_105221_dino_v3):
 
-python /home/mla_group_01/rcc-ssrl/src/evaluation/tools/auto_eval.py \
+python /home/mla_group_01/src/evaluation/tools/auto_eval.py \
   --mlruns-root "/beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/exp_20251213_121650_i_jepa" \
   --submit
 
@@ -69,16 +69,16 @@ Once eval.py has produced predictions.csv and (optionally) logits_test.npy for e
 
 Example:
 
-python /home/mla_group_01/rcc-ssrl/src/evaluation/tools/batch_patient_aggregation.py \
-  --mlruns-root /home/mla_group_01/rcc-ssrl/outputs/mlruns/experiments/exp_20260122-131927/exp_transfer \
+python /home/mla_group_01/src/evaluation/tools/batch_patient_aggregation.py \
+  --mlruns-root /home/mla_group_01/outputs/mlruns/experiments/exp_20260122-131927/exp_transfer \
   --method prob_sum
 
 
 Generate Reliability Diagram + ECE and Risk–Coverage (patch and/or patient)
 
-source /home/mla_group_01/rcc-ssrl/.venvs/eval/bin/activate  # recommended if it exists
-python /home/mla_group_01/rcc-ssrl/src/evaluation/tools/calibration_and_coverage.py \
+source /home/mla_group_01/.venvs/eval/bin/activate  # recommended if it exists
+python /home/mla_group_01/src/evaluation/tools/calibration_and_coverage.py \
   --run-dir /beegfs-scratch/mla_group_01/workspace/mla_group_01/wsi-ssrl-rcc_project/outputs/mlruns/experiments/ablation_final/exp_20251209_234736_dino_v3/exp_dino_v3_abl03/eval/dino_v3_ssl_linear_best/20251211_104905 \
-  --out-dir /home/mla_group_01/rcc-ssrl/src/evaluation/results/dino_v3_best_calibration \
+  --out-dir /home/mla_group_01/src/evaluation/results/dino_v3_best_calibration \
   --n-bins 15 \
   --title "Dino v3 (patch-level)"

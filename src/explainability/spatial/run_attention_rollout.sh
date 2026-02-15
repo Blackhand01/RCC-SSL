@@ -5,7 +5,7 @@ set -euo pipefail
 # User-tunable (override via env)
 # -----------------------------
 PROJECT_ROOT="${PROJECT_ROOT:-/home/mla_group_01/rcc-ssrl}"
-VENV_PATH="${VENV_PATH:-/home/mla_group_01/rcc-ssrl/.venvs/xai}"
+VENV_PATH="${VENV_PATH:-/home/mla_group_01/.venvs/xai}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 
 ATTN_SCRIPT="${ATTN_SCRIPT:-$PROJECT_ROOT/src/explainability/spatial/attention_rollout.py}"

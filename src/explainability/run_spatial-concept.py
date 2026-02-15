@@ -1093,7 +1093,7 @@ def parse_args() -> argparse.Namespace:
         "--attn-rollout-outputs-root",
         type=Path,
         default=None,
-        help="Root directory containing attention_rollout.py outputs (e.g. /home/mla_group_01/rcc-ssrl/src/explainability/output/spatial).",
+        help="Root directory containing attention_rollout.py outputs (e.g. /home/mla_group_01/src/explainability/output/spatial).",
     )
     ap.add_argument(
         "--attn-rollout-run-id",

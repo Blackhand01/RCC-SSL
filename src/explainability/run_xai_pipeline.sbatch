@@ -5,8 +5,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=4:00:00
-#SBATCH -o /home/mla_group_01/rcc-ssrl/src/logs/xai/xai_pipeline.%j.out
-#SBATCH -e /home/mla_group_01/rcc-ssrl/src/logs/xai/xai_pipeline.%j.err
+#SBATCH -o /home/mla_group_01/src/logs/xai/xai_pipeline.%j.out
+#SBATCH -e /home/mla_group_01/src/logs/xai/xai_pipeline.%j.err
 ## evita --nodelist a meno che non sia obbligatorio
 
 set -euo pipefail

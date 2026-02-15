@@ -1,7 +1,7 @@
 experiment:
   name: "eval_supervised_scratch"
   seed: 1337
-  outputs_root: "/home/mla_group_01/rcc-ssrl/outputs/mlruns/experiments/exp_20260112-114138/exp_supervised/resnet50_scratch"
+  outputs_root: "/home/mla_group_01/outputs/mlruns/experiments/exp_20260112-114138/exp_supervised/resnet50_scratch"
 
 runtime:
   device: "cuda"
@@ -24,7 +24,7 @@ labels:
 model:
   name: "resnet50_scratch"
   arch_hint: "cnn"
-  checkpoint: "/home/mla_group_01/rcc-ssrl/outputs/mlruns/experiments/exp_20260112-114138/exp_supervised/resnet50_scratch/checkpoints/resnet50_scratch__sl_best_classifier.pt"
+  checkpoint: "/home/mla_group_01/outputs/mlruns/experiments/exp_20260112-114138/exp_supervised/resnet50_scratch/checkpoints/resnet50_scratch__sl_best_classifier.pt"
   strict_load: false
 
 evaluation:
