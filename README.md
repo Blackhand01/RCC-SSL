@@ -379,7 +379,7 @@ The following results are sourced from `rcc-ssrl/src/evaluation/results/models_r
 If you use this code or results in your research work, please cite the paper:
 
 
-S. Bisignano, M. Di Maggio, "Self-Supervised Learning for Renal Cell Carcinoma Subtyping on Whole-Slide Images," in Polytechnic of Turin project, 2026.
+S. R. Bisignano, M. Di Maggio, "Self-Supervised Learning for Renal Cell Carcinoma Subtyping on Whole-Slide Images," in Polytechnic of Turin project, 2026.
 
 
 
