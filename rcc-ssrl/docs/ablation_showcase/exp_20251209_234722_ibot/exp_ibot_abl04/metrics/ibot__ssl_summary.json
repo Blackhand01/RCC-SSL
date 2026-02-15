@@ -1,5 +1,0 @@
-{
-  "best_epoch": 60,
-  "ssl_backbone_path": "checkpoints/ibot__ssl_best.pt",
-  "ssl_loss": 0.9989656645059586
-}

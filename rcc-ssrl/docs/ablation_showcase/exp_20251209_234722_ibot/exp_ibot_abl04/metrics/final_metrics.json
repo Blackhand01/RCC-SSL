@@ -1,9 +1,0 @@
-{
-  "probe_linear_val_acc": 0.7679009819967266,
-  "ssl_backbone_path": "checkpoints/ibot__ssl_best.pt",
-  "ssl_best_epoch": 60,
-  "ssl_linear_ckpt_path": "checkpoints/ibot__ssl_linear_best.pt",
-  "ssl_linear_features": "{'train_X': 'checkpoints/features/ibot_train_X.npy', 'train_y': 'checkpoints/features/ibot_train_y.npy', 'val_X': 'checkpoints/features/ibot_val_X.npy', 'val_y': 'checkpoints/features/ibot_val_y.npy'}",
-  "ssl_linear_timeseries": "metrics/ibot__ssl_linear_timeseries.csv",
-  "ssl_loss": 0.9989656645059586
-}

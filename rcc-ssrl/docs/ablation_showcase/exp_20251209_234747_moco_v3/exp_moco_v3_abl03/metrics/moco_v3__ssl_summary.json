@@ -1,5 +1,0 @@
-{
-  "best_epoch": 43,
-  "ssl_backbone_path": "checkpoints/moco_v3__ssl_best.pt",
-  "ssl_loss": 4.244841675403412
-}
