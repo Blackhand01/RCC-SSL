@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+NOTE: Updated to support:
+ - 5-panel paper figure with concept text panel (topk/wrap/fontsize) + fit-to-box rendering
+ - masked heatmap overlay (alpha proportional to attention) to avoid global darkening
+ - contour drawn on input by default (so panel 4 stays bright)
+ - concept panel prints SHORT_NAME (appendix lookup), with optional class-prefix stripping
 postdiag_xai_fast.py
 
 XAI post-diagnostics (attention-rollout + concept scores) for models/ablations.
@@ -44,8 +49,10 @@ import csv
 import json
 import math
 import random
+import re
 import statistics
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -149,6 +156,21 @@ _CONCEPT_PREFIXES_TO_STRIP = (
     "notumor_",
 )
 
+def concept_short_name_for_paper(raw_short_name: str) -> str:
+    """
+    Paper-facing concept key intended to match Appendix Concept Bank.
+    - Keeps underscores (searchable).
+    - Strips known class prefixes if present (chrcc_/onco_/ccrcc_/prcc_/notumor_).
+    """
+    s = str(raw_short_name).strip()
+    for p in _CONCEPT_PREFIXES_TO_STRIP:
+        if s.startswith(p):
+            s = s[len(p):]
+            break
+    # keep underscores; just normalize whitespace (shouldn't exist anyway)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
 def concept_display_name(short_name: str) -> str:
     """
     User-facing display: strip class prefixes (chrcc_/onco_/ccrcc_/prcc_/notumor_)
@@ -161,6 +183,54 @@ def concept_display_name(short_name: str) -> str:
             break
     s = s.replace("_", " ").strip()
     return s
+
+
+def shorten_concept_name(name: str, max_chars: int = 46) -> str:
+    """
+    Paper-safe shortening: remove verbose preambles, compact whitespace,
+    and truncate only if still too long.
+    """
+    s = str(name)
+    s = re.sub(r"(?i)\b(a )?renal (tumor )?h\&e (patch|image) (of )?\b", "", s).strip()
+    s = re.sub(r"(?i)\bh\&e (patch|image)\b", "H&E", s).strip()
+    s = re.sub(r"\s+", " ", s).strip()
+    if len(s) > max_chars:
+        s = s[: max_chars - 3].rstrip() + "..."
+    return s
+
+
+@lru_cache(maxsize=1)
+def _load_concept_name_map() -> Dict[str, str]:
+    """
+    Map concept short_name -> display name from configs/concepts_list.yaml.
+    Falls back to empty mapping if PyYAML isn't available or file missing.
+    """
+    cfg = Path(__file__).resolve().parent / "configs" / "concepts_list.yaml"
+    if not cfg.exists():
+        return {}
+    try:
+        import yaml  # type: ignore
+    except Exception:
+        return {}
+    try:
+        data = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    concepts = data.get("concepts")
+    if not isinstance(concepts, list):
+        return {}
+    out: Dict[str, str] = {}
+    for c in concepts:
+        if not isinstance(c, dict):
+            continue
+        short_name = c.get("short_name")
+        if not short_name:
+            continue
+        display = c.get("paper_name") or c.get("name") or c.get("short_name")
+        out[str(short_name)] = str(display)
+    return out
 
 
 # -------------------------
@@ -446,8 +516,46 @@ def attn_to_heatmap_rgb(attn: np.ndarray) -> Image.Image:
         b = int(255 * (t ** 3.0) * 0.3)
         lut[i] = (r, g, b)
     rgb = lut[a]
-    return Image.fromarray(rgb, mode=None).convert("RGB")
+    return Image.fromarray(rgb.astype(np.uint8)).convert("RGB")
 
+def _resize_float01(map01: np.ndarray, size: Tuple[int, int]) -> np.ndarray:
+    """
+    Resize a float map in [0,1] to (w,h) using PIL bilinear, return float32 [0,1].
+    """
+    w, h = size
+    m = np.clip(np.asarray(map01, dtype=np.float32), 0.0, 1.0)
+    m_img = Image.fromarray((m * 255.0).astype(np.uint8)).resize((w, h), resample=Image.BILINEAR)
+    return (np.asarray(m_img).astype(np.float32) / 255.0)
+
+def overlay_heatmap_masked(
+    im_rgb: Image.Image,
+    heat_rgb: Image.Image,
+    alpha_map01: np.ndarray,
+    alpha_max: float = 0.55,
+    gamma: float = 0.80,
+) -> Image.Image:
+    """
+    Overlay heatmap with alpha proportional to attention (masked overlay).
+    This avoids the "global darkening" you get with Image.blend on a dark colormap.
+
+    alpha = alpha_max * (alpha_map01 ** gamma)
+    """
+    base = im_rgb.convert("RGBA")
+    heat = heat_rgb.resize(im_rgb.size, resample=Image.BILINEAR).convert("RGBA")
+
+    a = np.clip(np.asarray(alpha_map01, dtype=np.float32), 0.0, 1.0)
+    if gamma != 1.0:
+        a = np.power(a, float(gamma))
+    a = np.clip(a * float(alpha_max), 0.0, 1.0)
+    a_u8 = (a * 255.0).astype(np.uint8)
+
+    heat_arr = np.array(heat, dtype=np.uint8)
+    heat_arr[..., 3] = a_u8
+    overlay = Image.fromarray(heat_arr)
+
+    return Image.alpha_composite(base, overlay).convert("RGB")
+
+# Kept for backward-compat (not used in paper figure anymore)
 def blend_heatmap(im_rgb: Image.Image, heat_rgb: Image.Image, alpha: float = 0.45) -> Image.Image:
     heat = heat_rgb.resize(im_rgb.size, resample=Image.BILINEAR)
     return Image.blend(im_rgb, heat, alpha=alpha)
@@ -562,6 +670,194 @@ def _text_size(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) 
         return max(1, bb[2] - bb[0]), max(1, bb[3] - bb[1])
     return draw.textsize(text, font=font)
 
+def _avg_char_width(draw: ImageDraw.ImageDraw, font: ImageFont.ImageFont) -> float:
+    """
+    Rough estimate of average character width in pixels for the given font.
+    Used to convert wrap_chars (approx chars/line) into a max pixel width.
+    """
+    sample = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    w, _h = _text_size(draw, sample, font=font)
+    return max(1.0, w / max(1, len(sample)))
+
+
+def _wrap_text_to_width(
+    draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, max_width: int
+) -> List[str]:
+    if max_width <= 0:
+        return [text]
+    s = text.replace("/", " / ")
+    s = re.sub(r"\s+", " ", s).strip()
+    words = s.split(" ") if s else [""]
+    lines: List[str] = []
+    cur = ""
+    for w in words:
+        test = w if not cur else f"{cur} {w}"
+        if _text_size(draw, test, font)[0] <= max_width:
+            cur = test
+            continue
+        if cur:
+            lines.append(cur)
+            cur = w
+            continue
+        # single word longer than max_width: hard split
+        part = w
+        while part:
+            for i in range(1, len(part) + 1):
+                if _text_size(draw, part[:i], font)[0] > max_width:
+                    lines.append(part[: max(1, i - 1)])
+                    part = part[max(1, i - 1) :]
+                    break
+            else:
+                lines.append(part)
+                part = ""
+        cur = ""
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def _format_topk_text(
+    draw: ImageDraw.ImageDraw,
+    top_concepts: List[Tuple[str, float]],
+    font: ImageFont.ImageFont,
+    max_width: int,
+    max_lines: int,
+    topk: int = 3,
+    max_chars: int = 46,
+    wrap_chars: int = 0,
+) -> List[str]:
+    if not top_concepts:
+        return ["No concepts"]
+    lines: List[str] = []
+
+    # Optional: convert wrap_chars (approx chars/line) into a pixel width limit.
+    eff_max_width = max_width
+    if wrap_chars and wrap_chars > 0:
+        acw = _avg_char_width(draw, font=font)
+        eff_max_width = min(max_width, int(acw * float(wrap_chars)))
+        eff_max_width = max(24, eff_max_width)  # avoid too-small width
+    for i, (raw_name, score) in enumerate(top_concepts[:topk], start=1):
+        # Use short_name for Appendix lookup (keep underscores).
+        sn = concept_short_name_for_paper(raw_name)
+        sn = shorten_concept_name(sn, max_chars=max_chars)  # safe truncation only
+        line = f"{i}) {sn} ({score:.2f})"
+        wrapped = _wrap_text_to_width(draw, line, font, max_width=eff_max_width)
+        # No blank lines between concepts: maximizes chance of fit in panel 5.
+        lines.extend(wrapped)
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        if lines[-1] != "...":
+            lines[-1] = "..."
+    return lines
+
+def _render_concepts_panel_fit(
+    top_concepts: List[Tuple[str, float]],
+    size: Tuple[int, int],
+    topk: int,
+    base_fontsize: int,
+    min_fontsize: int,
+    pad: int,
+    wrap_chars: int,
+    max_chars: int,
+) -> Tuple[Image.Image, dict]:
+    """
+    Create the 5th panel (text-only) ensuring text fits inside the box.
+    Strategy:
+      - try fontsize from base_fontsize down to min_fontsize
+      - if still too many lines, reduce max_chars gradually
+      - final safety: truncate with '...'
+    Returns (panel_image, debug_meta)
+    """
+    w, h = size
+    panel = Image.new("RGB", (w, h), (255, 255, 255))
+    d = ImageDraw.Draw(panel)
+    dbg = {"used_fontsize": None, "used_max_chars": None, "max_lines": None, "wrap_chars": wrap_chars}
+
+    # Reserve vertical space based on font metrics (line height depends on font)
+    # We'll recompute for each font size attempt.
+    cur_max_chars = max(12, int(max_chars))
+    for fs in range(int(base_fontsize), int(min_fontsize) - 1, -1):
+        font = _get_font(fs)
+        line_h = _text_size(d, "Ag", font=font)[1] + 2
+        max_lines = max(1, (h - 2 * pad) // max(1, line_h))
+
+        lines = _format_topk_text(
+            d,
+            top_concepts,
+            font=font,
+            max_width=max(1, w - 2 * pad),
+            max_lines=max_lines,
+            topk=topk,
+            max_chars=cur_max_chars,
+            wrap_chars=wrap_chars,
+        )
+
+        # "Fit" criterion: we accept if lines <= max_lines and last line isn't forced to '...'
+        # (If it's '...', it means overflow happened and got truncated.)
+        if len(lines) <= max_lines and (not lines or lines[-1] != "..."):
+            dbg.update({"used_fontsize": fs, "used_max_chars": cur_max_chars, "max_lines": max_lines})
+            # Draw box + text
+            d.rectangle([pad, pad, w - pad, h - pad], outline=(0, 0, 0), width=1)
+            y = pad + 2
+            for line in lines:
+                if line == "":
+                    y += line_h // 2
+                    continue
+                d.text((pad + 4, y), line, fill=(0, 0, 0), font=font)
+                y += line_h
+            return panel, dbg
+
+    # If we reach here, even min_fontsize didn't fit nicely.
+    # Try reducing max_chars a bit more at min_fontsize.
+    fs = int(min_fontsize)
+    font = _get_font(fs)
+    line_h = _text_size(d, "Ag", font=font)[1] + 2
+    max_lines = max(1, (h - 2 * pad) // max(1, line_h))
+    for shrink in (cur_max_chars, 40, 34, 28, 22, 18):
+        lines = _format_topk_text(
+            d,
+            top_concepts,
+            font=font,
+            max_width=max(1, w - 2 * pad),
+            max_lines=max_lines,
+            topk=topk,
+            max_chars=int(shrink),
+            wrap_chars=wrap_chars,
+        )
+        if len(lines) <= max_lines:
+            dbg.update({"used_fontsize": fs, "used_max_chars": int(shrink), "max_lines": max_lines})
+            d.rectangle([pad, pad, w - pad, h - pad], outline=(0, 0, 0), width=1)
+            y = pad + 2
+            for line in lines:
+                if line == "":
+                    y += line_h // 2
+                    continue
+                d.text((pad + 4, y), line, fill=(0, 0, 0), font=font)
+                y += line_h
+            return panel, dbg
+
+    # Hard fallback: just truncate whatever we have.
+    dbg.update({"used_fontsize": fs, "used_max_chars": 18, "max_lines": max_lines})
+    lines = _format_topk_text(
+        d,
+        top_concepts,
+        font=font,
+        max_width=max(1, w - 2 * pad),
+        max_lines=max_lines,
+        topk=topk,
+        max_chars=18,
+        wrap_chars=wrap_chars,
+    )
+    d.rectangle([pad, pad, w - pad, h - pad], outline=(0, 0, 0), width=1)
+    y = pad + 2
+    for line in lines:
+        if line == "":
+            y += line_h // 2
+            continue
+        d.text((pad + 4, y), line, fill=(0, 0, 0), font=font)
+        y += line_h
+    return panel, dbg
+
 
 def render_paper_figure(
     exp_name: str,
@@ -570,10 +866,17 @@ def render_paper_figure(
     metrics: ItemMetrics,
     out_png: Path,
     max_pixels: int,
-    topk: int = 5,
+    topk: int = 3,
+    concept_fontsize: int = 12,
+    concept_min_fontsize: int = 7,
+    concept_wrap: int = 0,
+    concept_max_chars: int = 46,
+    rollout_alpha_max: float = 0.55,
+    rollout_gamma: float = 0.80,
+    contour_base: str = "input",  # "input" or "rollout"
 ) -> None:
     """
-    Paper-friendly figure: 4 panels only.
+    Paper-friendly figure: 5 panels (last is Top-k concepts).
     Concepts + ROI/crop-related info are written to a sidecar JSON:
       out_png.with_suffix(".json")
     """
@@ -590,17 +893,45 @@ def render_paper_figure(
     mask = _build_rollout_mask_binary(attn, q)
     mask_im = _resize_mask(mask, im_ds.size)
 
-    # Panels (4 only)
+    # Panels (5 only)
     p1 = im_ds
     p2 = _overlay_mask(im_ds, mask_im, color=(255, 0, 0), alpha=80)
-    p3 = blend_heatmap(im_ds, heat, alpha=0.45)
+    # Masked heat overlay: avoids global darkening
+    attn01_ds = _resize_float01(attn01, im_ds.size)
+    p3 = overlay_heatmap_masked(
+        im_ds,
+        heat,
+        attn01_ds,
+        alpha_max=float(rollout_alpha_max),
+        gamma=float(rollout_gamma),
+    )
 
     edges = _mask_edges(mask_im)
     edges = _dilate_mask(edges, steps=1)
-    p4 = _overlay_edges(p3, edges, color=(120, 0, 140), alpha=255)
+    base_for_contour = im_ds if str(contour_base).lower() == "input" else p3
+    p4 = _overlay_edges(base_for_contour, edges, color=(255, 255, 0), alpha=255)
 
-    panels = [p1, p2, p3, p4]
-    titles = ["Input", "Input + ROI mask", "Input + Attn rollout", "Attn + ROI contour"]
+    # Top-k concepts panel (text only) with fit-to-box
+    pad = 8
+    p5, p5_dbg = _render_concepts_panel_fit(
+        top_concepts=metrics.top_concepts,
+        size=im_ds.size,
+        topk=int(topk),
+        base_fontsize=int(concept_fontsize),
+        min_fontsize=int(concept_min_fontsize),
+        pad=int(pad),
+        wrap_chars=int(concept_wrap),
+        max_chars=int(concept_max_chars),
+    )
+
+    panels = [p1, p2, p3, p4, p5]
+    titles = [
+        "Input",
+        "Input + ROI mask",
+        "Input + Attn rollout",
+        "Attn + ROI contour",
+        f"Top-{topk} concepts",
+    ]
 
     # Layout
     n = len(panels)
@@ -657,7 +988,8 @@ def render_paper_figure(
     for k, v in (metrics.top_concepts[:topk] if metrics.top_concepts else []):
         concepts_payload.append({
             "short_name": str(k),
-            "display_name": concept_display_name(str(k)),
+            "paper_key": concept_short_name_for_paper(str(k)),
+            "display_name": concept_display_name(str(k)),  # keep for debugging/aux use
             "score": float(v),
             "score_2dp": f"{float(v):.2f}",
         })
@@ -681,6 +1013,12 @@ def render_paper_figure(
         "rollout_quantile": float(q),
         "concepts_meta": concept_meta,
         "topk": int(topk),
+        "concept_panel": {
+            "concept_fontsize": int(concept_fontsize),
+            "concept_min_fontsize": int(concept_min_fontsize),
+            "concept_wrap": int(concept_wrap),
+            "concept_max_chars": int(concept_max_chars),
+        },
         "concepts": concepts_payload,
     }
     write_json(out_png.with_suffix(".json"), sidecar)
@@ -827,6 +1165,14 @@ def run_postdiag(
     class_source: str,
     min_concept_score: float,
     min_concept_margin: float,
+    concept_topk: int,
+    concept_wrap: int,
+    concept_fontsize: int,
+    concept_min_fontsize: int,
+    concept_max_chars: int,
+    rollout_alpha_max: float,
+    rollout_gamma: float,
+    contour_base: str,
 ) -> int:
     exps = discover_experiments(models_root)
     if not exps:
@@ -919,7 +1265,14 @@ def run_postdiag(
                     metrics=mm,
                     out_png=paper_png,
                     max_pixels=max_pixels,
-                    topk=5,
+                    topk=int(concept_topk),
+                    concept_wrap=int(concept_wrap),
+                    concept_fontsize=int(concept_fontsize),
+                    concept_min_fontsize=int(concept_min_fontsize),
+                    concept_max_chars=int(concept_max_chars),
+                    rollout_alpha_max=float(rollout_alpha_max),
+                    rollout_gamma=float(rollout_gamma),
+                    contour_base=str(contour_base),
                 )
 
                 # montage thumbnail from paper figure
@@ -1005,6 +1358,59 @@ def main() -> int:
         default=0.0,
         help="Minimum filter on margin (top1 - top2) concept (selection-mode=concept_top).",
     )
+
+    # --- Concept panel controls (Panel 5)
+    ap.add_argument(
+        "--concept-topk",
+        type=int,
+        default=5,
+        help="How many top concepts to print in the 5th panel (paper figure).",
+    )
+    ap.add_argument(
+        "--concept-wrap",
+        type=int,
+        default=0,
+        help="Approx chars per line for concept text wrapping (0 = use full available width).",
+    )
+    ap.add_argument(
+        "--concept-fontsize",
+        type=int,
+        default=14,
+        help="Starting font size (pt-ish) for concept panel; auto-shrinks if needed.",
+    )
+    ap.add_argument(
+        "--concept-min-fontsize",
+        type=int,
+        default=10,
+        help="Minimum font size for concept panel before truncation kicks in.",
+    )
+    ap.add_argument(
+        "--concept-max-chars",
+        type=int,
+        default=52,
+        help="Max chars for a single concept name before adding '...'.",
+    )
+
+    # --- Rollout rendering controls (Panel 3) + contour base (Panel 4)
+    ap.add_argument(
+        "--rollout-alpha-max",
+        type=float,
+        default=0.55,
+        help="Max alpha for masked heatmap overlay (panel 3). Lower = less intrusive.",
+    )
+    ap.add_argument(
+        "--rollout-gamma",
+        type=float,
+        default=0.80,
+        help="Gamma for attention->alpha mapping (panel 3). <1 emphasizes high-attn regions.",
+    )
+    ap.add_argument(
+        "--contour-base",
+        type=str,
+        default="input",
+        choices=["input", "rollout"],
+        help="Base image for ROI contour (panel 4): draw on input (bright) or on rollout overlay.",
+    )
     args = ap.parse_args()
 
     models_root = Path(args.models_root).expanduser().resolve()
@@ -1023,6 +1429,14 @@ def main() -> int:
         class_source=args.class_source,
         min_concept_score=max(0.0, args.min_concept_score),
         min_concept_margin=max(0.0, args.min_concept_margin),
+        concept_topk=max(1, args.concept_topk),
+        concept_wrap=max(0, args.concept_wrap),
+        concept_fontsize=max(6, args.concept_fontsize),
+        concept_min_fontsize=max(5, args.concept_min_fontsize),
+        concept_max_chars=max(12, args.concept_max_chars),
+        rollout_alpha_max=float(args.rollout_alpha_max),
+        rollout_gamma=float(args.rollout_gamma),
+        contour_base=str(args.contour_base),
     )
 
 

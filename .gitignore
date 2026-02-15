@@ -190,10 +190,7 @@ rcc-ssrl/src/training/configs/ablations/ibot/
 rcc-ssrl/src/training/configs/ablations/dino_v3/
 rcc-ssrl/src/training/configs/ablations/moco_v3/
 rcc-ssrl/src/training/configs/ablations/i_jepa/
-rcc-ssrl/src/logs/train/
 rcc-ssrl/src/training/reporting/
-rcc-ssrl/TODO.md
-rcc-ssrl/todo.md
 *.err
 *.out
 =0.9.8
@@ -212,5 +209,9 @@ rcc-ssrl/src/xai-backup/
 rcc-ssrl/outputs/
 rcc-ssrl/src/explainability/output/
 rcc-ssrl/src/explainability/docs/
-rcc-ssrl/docs/output
+rcc-ssrl/docs/references
 rcc-ssrl/docs/ablation_showcase
+rcc-ssrl/docs/old
+rcc-ssrl/src/explainability/spatial/trace_spatial.md
+rcc-ssrl/src/post_processing
+rcc-ssrl/src/explainability/spatial/trace_spatial.md

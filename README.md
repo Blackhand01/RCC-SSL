@@ -1,5 +1,5 @@
 # Self-Supervised Learning for Renal Cell Carcinoma Subtyping
-![dataset_patches](patches.png)
+![dataset_patches](rcc-ssrl/docs/img/patches.png)
 
 This repository hosts a comprehensive computational pathology pipeline for Renal Cell Carcinoma (RCC) subtyping. The project addresses the challenge of medical annotation scarcity (label scarcity) by leveraging **Self-Supervised Learning (SSL)** techniques to learn robust morphological representations from unlabeled data, benchmarked against **Supervised Baselines** trained on labeled patches.
 
@@ -10,9 +10,9 @@ Draft manuscript: `paper.tex` (root).
 
 ## 🔬 Project Workflow
 
-The project is structured as a sequential pipeline. During the data preparation phase, we support **two distinct approaches** for tumor region identification, ensuring flexibility based on the type of available annotations (XML coordinates or Binary Masks).
+The project is structured as a sequential pipeline. During data preparation, we support **multiple ROI sources** for tumor region identification. In the experiments reported in the paper, ccRCC/pRCC rely on **expert XML annotations**, while CHROMO/ONCO use **ROI slides / provided ROI masks**. The pipeline also supports ingesting **pre-computed binary masks** (e.g., from an external segmentation model) when available.
 
-![pipeline](ssl_architecture.png)
+![pipeline](rcc-ssrl/docs/img/ssl_architecture.png)
 
 ### 1. Data Engineering (ETL)
 
@@ -20,20 +20,21 @@ Management of Whole-Slide Images (WSI). Slides are scanned, inventoried, and ass
 
 ### 2. ROI Extraction & WebDataset
 
-This phase converts slides into training-ready datasets. The system is designed to handle two input scenarios:
+This phase converts slides into training-ready datasets. ROI handling supports multiple input sources:
 
-* **Scenario A (Vector Coordinates):** If annotations originate from software such as ASAP or QuPath (`.xml` files), the pipeline converts tumor polygon coordinates into segmentation masks.
-* **Scenario B (Pre-computed Masks):** If binary masks are already available (e.g., output from a previous segmentation neural network), the pipeline ingests them directly.
+* **Scenario A (Vector Coordinates / XML):** XML annotations (e.g., ASAP/QuPath) are parsed and converted into ROI masks for patch sampling .
+* **Scenario B (ROI Slides / Provided ROI Masks):** ROI slides or provided binary ROI masks are ingested directly .
+* **Optional (External Pre-computed Masks):** If masks from an external segmentation model are available, they can be used as an alternative ROI source.
 
-Tissue is then subdivided into 224×224 patches (20× magnification, 0.50 mpp target resolution) and saved in **WebDataset format (sharded .tar)** with class-balancing strategies to optimize GPU I/O operations.
+Tissue is subdivided into 224×224 patches (20× equivalent, 0.50 mpp target resolution) and saved in **WebDataset format (sharded .tar)**. Patch-level evaluation includes an auxiliary **NOT_TUMOR** class, while patient-level metrics are computed with **tumor-only aggregation** (NOT_TUMOR excluded).
 
 **Preprocessing Pipeline Diagram:**
 
-![preproces_graph](preprocess_graph.png)
+![preproces_graph](rcc-ssrl/docs/img/preprocess_graph.png)
 
 **Patch Settings:**
 - Patch size: 224 px
-- Target resolution: 0.50 mpp
+- Target resolution: 0.50 µm/px (≈20×)
 - Minimum tissue ratio: 0.10
 
 Settings are sourced from `rcc-ssrl/src/data_processing/config.yaml`.
@@ -52,17 +53,17 @@ We train a **ViT-S/16** (`vit_small_patch16_224`) backbone without using diagnos
 
 #### B. Supervised Learning (Baseline)
 
-We train **ResNet-50** architectures in classical supervised manner, utilizing diagnostic labels (ccRCC, pRCC, chRCC, onco) with Cross-Entropy Loss.
+We train **ResNet-50** architectures in classical supervised manner, utilizing diagnostic labels (ccRCC, pRCC, CHROMO, ONCO) with Cross-Entropy Loss.
 
 * **Supervised (Scratch):** Training from random initialization (`rcc-ssrl/src/training/models/supervised.py`).
 * **Transfer Learning:** Fine-tuning from ImageNet pre-trained weights (`rcc-ssrl/src/training/models/transfer.py`).
-* **Purpose:** Establish the **Upper Bound** of achievable performance with full supervision.
+* **Purpose:**  Provide a **strong supervised reference baseline** for comparison against SSL under the same preprocessing and splits.
 
 ### 4. Downstream & Explainability
 
-* **Evaluation:** Comparison between Linear Probe (on SSL features) and Supervised models at both patch-level and patient-level.
-* **Orchestrator:** A custom engine manages the lifecycle of training, validation, checkpointing, and logging for all paradigms.
-* **XAI Pipeline:** Latent space analysis via semantic projections (PLIP concept scoring) and spatial interpretability (attention rollout maps).
+* **Evaluation:** Comparison between Linear Probe (on frozen SSL features) and supervised models at both patch-level and patient-level.
+* **Orchestrator:** A custom engine manages the lifecycle of training, validation, checkpointing, and logging across paradigms.
+* **XAI Pipeline:** Latent semantic analysis via PLIP concept scoring and spatial interpretability via attention rollout maps.
 
 ---
 
@@ -76,6 +77,7 @@ The dataset comprises histological whole-slide images from RCC patients, with th
   - pRCC: 48 slides
   - ONCO: 13 slides
   - CHROMO: 11 slides
+* **Patches:** ~168k H&E patches used in the benchmark 
 * **Patch Labels:** Includes `NOT_TUMOR` class for patch-level evaluation
 
 Counts are sourced from `rcc-ssrl/src/data_preprocessing/reports/02_parquet/slides.csv`
@@ -343,6 +345,8 @@ This pipeline produces:
 
 The following results are sourced from `rcc-ssrl/src/evaluation/results/models_results_compare_table/main_results_best.csv`.
 
+⚠️ **Patient-level note:** tumor-only patient-level evaluation on the held-out test split is computed on **Npat(T)=12** tumor patients and should be interpreted with caution
+
 **Performance Metrics:**
 
 | Model | Patch Macro-F1 | Patient Macro-F1 | Patient Accuracy |
@@ -352,7 +356,7 @@ The following results are sourced from `rcc-ssrl/src/evaluation/results/models_r
 | iBOT (SSL) | 0.529 | 0.612 | 0.833 |
 | I-JEPA (SSL) | 0.464 | 0.354 | 0.417 |
 | Supervised (ResNet-50 scratch) | 0.819 | 0.881 | 0.833 |
-| Transfer (ResNet-50 ImageNet) | 0.595 | 0.800 | 0.667 |
+| Transfer (ResNet-50 ImageNet) | 0.857 | 0.880 | 0.833 |
 
 **Key Findings:**
 
