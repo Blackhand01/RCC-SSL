@@ -3,14 +3,14 @@
 
 This repository hosts a comprehensive computational pathology pipeline for Renal Cell Carcinoma (RCC) subtyping. The project addresses the challenge of medical annotation scarcity (label scarcity) by leveraging **Self-Supervised Learning (SSL)** techniques to learn robust morphological representations from unlabeled data, benchmarked against **Supervised Baselines** trained on labeled patches.
 
-**Paper (Draft)**  
-Draft manuscript: `paper.tex` (root).
+**Paper**  
+/docs/paper
 
 ---
 
 ## 🔬 Project Workflow
 
-The project is structured as a sequential pipeline. During data preparation, we support **multiple ROI sources** for tumor region identification. In the experiments reported in the paper, ccRCC/pRCC rely on **expert XML annotations**, while CHROMO/ONCO use **ROI slides / provided ROI masks**. The pipeline also supports ingesting **pre-computed binary masks** (e.g., from an external segmentation model) when available.
+The project is structured as a sequential pipeline. During data preparation, we support **multiple ROI sources** for tumor region identification. In the experiments reported in the paper, ccRCC/pRCC rely on **expert XML annotations**, while CHROMO/ONCO use **ROI slides / provided ROI masks**. 
 
 ![pipeline](docs/img/ssl_architecture.png)
 
@@ -23,8 +23,8 @@ Management of Whole-Slide Images (WSI). Slides are scanned, inventoried, and ass
 This phase converts slides into training-ready datasets. ROI handling supports multiple input sources:
 
 * **Scenario A (Vector Coordinates / XML):** XML annotations (e.g., ASAP/QuPath) are parsed and converted into ROI masks for patch sampling .
-* **Scenario B (ROI Slides / Provided ROI Masks):** ROI slides or provided binary ROI masks are ingested directly .
-* **Optional (External Pre-computed Masks):** If masks from an external segmentation model are available, they can be used as an alternative ROI source.
+* **Scenario B (ROI Slides / Provided ROI Masks):** ROI slides or provided binary ROI masks are ingested directly.
+
 
 Tissue is subdivided into 224×224 patches (20× equivalent, 0.50 mpp target resolution) and saved in **WebDataset format (sharded .tar)**. Patch-level evaluation includes an auxiliary **NOT_TUMOR** class, while patient-level metrics are computed with **tumor-only aggregation** (NOT_TUMOR excluded).
 
@@ -53,7 +53,7 @@ We train a **ViT-S/16** (`vit_small_patch16_224`) backbone without using diagnos
 
 #### B. Supervised Learning (Baseline)
 
-We train **ResNet-50** architectures in classical supervised manner, utilizing diagnostic labels (ccRCC, pRCC, CHROMO, ONCO) with Cross-Entropy Loss.
+We train **ResNet-50** architectures in classical supervised manner, utilizing diagnostic labels (ccRCC, pRCC, CHROMO, ONCO, NOT_TUMOR) with Cross-Entropy Loss.
 
 * **Supervised (Scratch):** Training from random initialization (`src/training/models/supervised.py`).
 * **Transfer Learning:** Fine-tuning from ImageNet pre-trained weights (`src/training/models/transfer.py`).
@@ -152,8 +152,6 @@ Experiments were conducted on the Politecnico di Torino HPC infrastructure, mana
 
 * **Time limit**: Jobs are configured with a wall-clock time limit of 24 hours (`-t 24:00:00`), sufficient for SSL model convergence (MoCo v3, DINO v3) on histological datasets of the considered size.
 
-* **Distributed training framework**: Training utilizes `torchrun` in DDP (Distributed Data Parallel) mode, automatically managing inter-GPU communication even in single-node configurations (`--standalone`).
-
 ---
 
 ### 1. Installation
@@ -228,7 +226,7 @@ split:
 Execute the preprocessing pipeline sequentially:
 
 ```bash
-# Step 1: Generate ROI masks from XML annotations or load pre-computed masks
+# Step 1: Generate ROI masks from XML annotations
 python src/data_processing/roi_index_and_masks_v3.py \
   --config src/data_processing/config.yaml
 
@@ -323,7 +321,7 @@ python src/evaluation/tools/batch_patient_aggregation.py \
   --method prob_sum
 ```
 
-**Important:** Patch-level metrics include the `NOT_TUMOR` class. Patient-level metrics are tumor-only and exclude `NOT_TUMOR` as defined in the aggregation script.
+**Important:** Patch-level metrics include the `NOT_TUMOR` class. Patient-level metrics are tumor-only and exclude `NOT_TUMOR`.
 
 ---
 
@@ -387,4 +385,4 @@ S. R. Bisignano, M. Di Maggio, "Self-Supervised Learning for Renal Cell Carcinom
 
 ## ⚖️ Medical Disclaimer
 
-**For research purposes only.** This software is not a medical device. It is not approved for clinical diagnosis or therapeutic decisions. Models are provided "as is" to promote research in computational pathology.
+**For research purposes only.** This software is not a medical device. It is not approved for clinical diagnosis or therapeutic decisions.
