@@ -234,3 +234,5 @@ per_patient/metrics_patient.json
 *__ssl_lr.png
 *_ssl_linear_best.json
 report_per_class.json
+docs/insight
+docs/slides
